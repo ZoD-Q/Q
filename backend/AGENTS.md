@@ -1,12 +1,16 @@
-# 小Q backend development contract
+# 小Q 后端补充规范
 
-- Repository top-level directories are `web/`, `mobile/` and `backend/`. All backend business logic belongs here and uses Rust. Keep the current PostgreSQL-backed modular monolith; do not substitute SQLite or in-memory data.
-- Read `contracts/api.md` before changing endpoints. `contracts/openapi.json` is the machine-readable wire contract. Shared TypeScript types live in `../mobile/shared/src`; regenerate them with `npm run api:generate` from `../mobile/`, never by hand. The integration owner coordinates contracts, shared types, dependency locks and SQL migration ordering.
-- identity owns credentials and sessions; profiles owns editable personal fields; ledger exclusively owns accounts, immutable entries and transfers; payments is a future/mock provider boundary and must not write balances directly.
-- Only simulated QDC units exist. Mark money-related UI as demo. Never connect real payment or financial services as an incidental change.
-- Amounts use integer minor units. Transfer debit and credit commit in the same DB transaction; enforce authorization, nonnegative user balances, request idempotency and deterministic locking. Existing ledger entries and transaction history must not be edited or deleted for frontend redesigns or directory cleanup.
-- Secrets stay server-side. Use Argon2 for passwords, hash opaque session tokens at rest, and retain expiring/revocable sessions. Native client sessions use SecureStore. Demo credentials must not imply production readiness.
-- Local tooling and its npm dependencies belong in this directory. `npm run db:start` / `db:stop` / `db:status` manage only this project's loopback PostgreSQL; `npm run dev` starts the Rust API. Data lives in `.local/postgres`. Never delete that directory as a routine repair.
-- Frontend source belongs in sibling `../mobile/` and `../web/`. The default mobile UI launcher is frontend-only and must not start or require this backend.
-- Agent ownership must not overlap. Ask the integration owner before touching another agent's directory or shared files. Avoid empty speculative implementations for future modules.
-- Verify meaningful backend changes with Rust checks and integration tests against real PostgreSQL. Read-only snapshot verification is appropriate for directory relocation. Record runtime limits honestly.
+先读 [根协作规范](../AGENTS.md)，本文件补充 `backend/` 的约束。
+
+- Q 的业务服务使用 Rust、Axum、Tokio、SQLx 与 PostgreSQL，保持模块化单体。Node/npm 只用于本地开发与验证工具；不用 SQLite 或内存假实现替换真实数据库验收。
+- 接口改动先读 [API 合同](contracts/api.md) 和 [OpenAPI](contracts/openapi.json)。合同与实现一起更新，再从根目录运行 `npm --prefix mobile run api:generate`；生成类型不得手改。
+- `identity` 拥有凭据与会话，`profiles` 拥有可编辑资料，`ledger` 独占余额与分录写入。`payments` 只是规划边界，不能写成已实现支付模块；其他未来领域按需求增加。
+- 注册时身份、资料、钱包与模拟欢迎金在同一数据库事务中完成。授权来自服务端会话，不相信客户端用户 ID；资料更新不能越权修改身份或金额。
+- 当前金额全部为模拟 QDC。整数最小单位、用户不可透支、稳定 UUID 锁顺序、借贷平衡和发起人级幂等必须同时成立；分录、缓存余额和幂等写入保持原子。重复请求返回原结果，不同载荷复用键返回冲突。
+- 已入账交易与分录不可修改或删除，纠错通过新冲正交易。不要因前端重做、目录整理或测试方便删除数据库、历史交易或迁移。数据库触发器不等于对有管理员权限者的安全隔离。
+- 已运行的 SQLx 迁移不改动；新增迁移由集成负责人协调顺序。SQL 参数化，错误响应不泄露查询或内部堆栈。
+- 密码用 Argon2，会话使用随机不透明令牌、仅保存摘要，保留过期和撤销。当前限流为进程内实现；生产部署需另行处理分布式限流、可信代理、秘密管理与运行恢复，不把本地演示写成生产就绪。
+- 本地 `npm run db:start` / `db:stop` / `db:status` 管理回环 PostgreSQL，`npm run dev` 启动 Rust API；数据在 `.local/postgres`。默认移动端启动不得依赖本服务。公开演示账户只用于演示环境。
+- 插件宿主业务实现前必读 [插件接入规范](docs/plugin-integration.md)。MCP 适配不能绕过现有身份与领域命令；公共发现抓取和已授权业务调用采用不同的数据、网络和凭据边界。
+- Rust 代码变更运行 fmt、clippy、单元测试；数据库、身份和账本变更还需真实 PostgreSQL 集成验收。`TEST_DATABASE_URL` 指向指定测试库；`npm run test:api` 会创建账户和交易，不得当作只读检查。
+- `npm run db:snapshot` / `db:verify` 用于持久化读校验，快照保存在 `.local/`；不能替代功能测试，不提交快照、数据库、日志或环境秘密。细节见 [后端运行说明](README.md)。

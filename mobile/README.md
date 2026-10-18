@@ -2,6 +2,8 @@
 
 当前阶段是可交互的前端设计原型。首页以大模型对话与输入框为中心，侧栏承载视频创作、插件、分期、保险、理财、钱包、API Key、资料和消息。默认白色青蓝主题，同时保留暖色与夜色、中英文切换。
 
+协作开发先读 [根 AGENTS.md](../AGENTS.md) 和 [移动端补充规范](AGENTS.md)。实际插件接入以 [Q 插件规范](../backend/docs/plugin-integration.md) 为准，当前插件页面仅为目录原型。
+
 ## 打开预览
 
 从项目目录运行：
@@ -34,7 +36,7 @@ npm run dev
 
 ## 目录
 
-根目录可见仅 `web`、`mobile`、`backend`。
+根目录保留 `web`、`mobile`、`backend` 三个业务目录，以及 `AGENTS.md` 等必要仓库级文件。
 
 - `native/src/prototype`：本轮纯前端界面及设计组件。
 - `native/src/app`：Expo路由入口。

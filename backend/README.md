@@ -2,6 +2,8 @@
 
 Rust modular monolith: Axum, Tokio, SQLx and PostgreSQL. This backend only handles simulated QDC. It has no real payment provider, bank account, lending, insurance or investment connection.
 
+Start with the [repository development rules](../AGENTS.md) and [backend rules](AGENTS.md). The [Q plugin integration specification](docs/plugin-integration.md) defines the future host contract; MCP, discovery, authorization and Apps support are not implemented in this release.
+
 ## Run locally
 
 This directory owns the local PostgreSQL scripts and their separate npm dependencies. The mobile UI starts independently. Alternatively, provide an existing PostgreSQL database using `DATABASE_URL`.
