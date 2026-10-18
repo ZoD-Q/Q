@@ -1,0 +1,47 @@
+{
+  "origin": "Original procedural artwork drawn locally with Pillow/NumPy. No third-party footage, audio, logos or generative-model output.",
+  "clips": [
+    {
+      "file": "coastal-light.mp4",
+      "poster": "coastal-light.png",
+      "width": 360,
+      "height": 640,
+      "fps": 24,
+      "duration_seconds": 5,
+      "codec": "H.264 Constrained Baseline",
+      "pixel_format": "yuv420p",
+      "audio": false,
+      "faststart": true,
+      "bytes": 77521,
+      "sha256": "e0d82a4fa065c1e3b0af6f0d79f4d5021503d4015dba152f50fa830cecb12864"
+    },
+    {
+      "file": "blue-flow.mp4",
+      "poster": "blue-flow.png",
+      "width": 360,
+      "height": 640,
+      "fps": 24,
+      "duration_seconds": 5,
+      "codec": "H.264 Constrained Baseline",
+      "pixel_format": "yuv420p",
+      "audio": false,
+      "faststart": true,
+      "bytes": 113223,
+      "sha256": "63dae538c6ac24440b42a65be23e6b980301a6cc97994a4ed3d23c2ab3e6d3d0"
+    },
+    {
+      "file": "paper-hills.mp4",
+      "poster": "paper-hills.png",
+      "width": 360,
+      "height": 640,
+      "fps": 24,
+      "duration_seconds": 5,
+      "codec": "H.264 Constrained Baseline",
+      "pixel_format": "yuv420p",
+      "audio": false,
+      "faststart": true,
+      "bytes": 34002,
+      "sha256": "f1e2f30fa24df48ec48ce98947c56f06cfed295e9233b48f4b14a26ef0c7ebdc"
+    }
+  ]
+}

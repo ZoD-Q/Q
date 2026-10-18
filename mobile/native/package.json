@@ -1,0 +1,51 @@
+{
+  "name": "@xiaoq/native",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@xiaoq/shared": "*",
+    "expo": "~58.0.14",
+    "expo-asset": "~58.0.16",
+    "expo-constants": "~58.0.12",
+    "expo-crypto": "~58.0.7",
+    "expo-document-picker": "~58.0.4",
+    "expo-font": "~58.0.8",
+    "expo-haptics": "~58.0.7",
+    "expo-linking": "~58.0.13",
+    "expo-router": "~58.0.23",
+    "expo-secure-store": "~58.0.2",
+    "expo-splash-screen": "~58.0.10",
+    "expo-status-bar": "~58.0.3",
+    "expo-system-ui": "~58.0.6",
+    "expo-video": "~58.0.11",
+    "lucide-react-native": "^1.59.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-gesture-handler": "~3.3.0",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-svg": "15.16.0",
+    "react-native-web": "~0.21.4",
+    "react-native-worklets": "0.13.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3",
+    "eslint": "^9.39.0",
+    "eslint-config-expo": "~58.0.4"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "export:web": "expo export --platform web",
+    "test:utils": "node --test src/utils/*.test.mjs",
+    "test:video": "node --test src/prototype/video/pricing.test.mjs"
+  },
+  "private": true
+}

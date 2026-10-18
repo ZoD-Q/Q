@@ -1,0 +1,21 @@
+{
+  "name": "xiaoq-backend-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local PostgreSQL and API verification tools for the Rust backend",
+  "scripts": {
+    "dev": "bash scripts/backend.sh",
+    "start": "bash scripts/backend.sh",
+    "db:start": "node scripts/database.mjs start",
+    "db:stop": "node scripts/database.mjs stop",
+    "db:status": "node scripts/database.mjs status",
+    "db:snapshot": "node scripts/check-persistence.mjs snapshot",
+    "db:verify": "node scripts/check-persistence.mjs verify",
+    "test:api": "node scripts/test-api.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "embedded-postgres": "17.10.0-beta.17",
+    "pg": "8.23.1"
+  }
+}
