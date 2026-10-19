@@ -181,7 +181,7 @@ Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标�
 | 初期用途 | 小Q后端内部联调环境；生产就绪状态须单独验收 |
 | 首批部署范围 | Rust API、PostgreSQL、HTTPS 反向代理、数据库与密钥备份、基础健康监控 |
 | API 域名 | 内部部署验收后由用户交接运维分配；未配置可信 HTTPS 前，仅通过 SSH 隧道访问，不公开明文业务接口 |
-| 当前部署状态 | 2026-10-19 内部联调部署已验收：Rust API、独立 PostgreSQL 18.6、Nginx 网关均 healthy；源码 `2e4e370`，公网域名/TLS 尚待运维配置 |
+| 当前部署状态 | 2026-10-19 社交后端升级已验收：源码 `4af1ed7`，Rust API、独立 PostgreSQL 18.6、Nginx 均 healthy；社交迁移与备份恢复通过，保留 AI/MCP 配置；公网域名/TLS 尚待运维配置。见 [社交部署记录](backend/deploy/SOCIAL-2026-10-19.md) |
 | 内部入口 | 服务器 `http://127.0.0.1:18787`，健康检查 `/health`；数据库与 API 无宿主映射端口 |
 | 部署与数据 | `/opt/q/current` 指向发布目录；配置 `/etc/q/deploy.env`（root 0600）；数据 `/var/lib/q/postgres`；备份 `/var/backups/q` |
 | 定时任务 | `q-backup.timer` 每日备份，`q-health.timer` 每五分钟检查；外部告警、定时异地复制待运维配置 |
