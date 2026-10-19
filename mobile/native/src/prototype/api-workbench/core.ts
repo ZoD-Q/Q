@@ -100,6 +100,24 @@ export function isSafeSubmissionRejection(error: unknown): boolean {
   );
 }
 
+/** Local recovery can block new submissions without hiding server-owned history. */
+export async function loadWorkbenchSnapshot(loaders: {
+  pending: () => Promise<PendingVideo | null>;
+  connections: () => Promise<VideoConnection[]>;
+  jobs: () => Promise<VideoJob[]>;
+}) {
+  const [pending, connections, jobs] = await Promise.allSettled([
+    Promise.resolve().then(loaders.pending),
+    Promise.resolve().then(loaders.connections),
+    Promise.resolve().then(loaders.jobs),
+  ]);
+  const failures = [pending, connections, jobs].filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  // An expired session must still be cleared when storage fails first.
+  const failure = failures.find(({ reason }) => reason instanceof WorkbenchError && reason.status === 401)
+    ?? failures[0] ?? null;
+  return { pending, connections, jobs, failure };
+}
+
 
 /** No automatic retries: every caller must preserve the original intent for uncertain writes. */
 export async function workbenchRequest<T>(options: {

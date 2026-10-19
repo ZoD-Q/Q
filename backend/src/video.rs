@@ -421,13 +421,15 @@ pub async fn create_job(
         )
         .await;
     match result {
-        Ok(task) => apply_task(&state.pool, auth.user_id, id, &task, true).await?,
+        Ok(task) => apply_task(&state.pool, auth.user_id, id, &task, true, None).await?,
         Err(error) => {
             let (status, code) = match error {
                 ProviderError::Rejected => ("failed", "VIDEO_PROVIDER_REJECTED"),
                 ProviderError::Unknown => ("unknown", "VIDEO_SUBMISSION_UNKNOWN"),
             };
-            sqlx::query("UPDATE video_jobs SET status=$3,error_code=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND status='submitting'")
+            // An early lookup can be inconclusive while this POST is still in flight.
+            // Its later definitive response still resolves that unknown reservation.
+            sqlx::query("UPDATE video_jobs SET status=$3,error_code=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND status IN ('submitting','unknown') AND provider_task_id IS NULL")
                 .bind(id).bind(auth.user_id).bind(status).bind(code).execute(&state.pool).await?;
         }
     }
@@ -444,7 +446,7 @@ pub async fn job(
 ) -> ApiResult<Json<VideoJob>> {
     let id = path_id(&id)?;
     let saved = read_job(&state.pool, auth.user_id, id).await?;
-    if saved.status == "failed" || (saved.status == "succeeded" && saved.video_url.is_some()) {
+    if saved.status == "failed" {
         return Ok(Json(saved));
     }
     let connection: Option<(String, Option<Vec<u8>>, bool)> = sqlx::query_as("SELECT region,encrypted_credentials,revoked FROM video_connections WHERE id=$1 AND user_id=$2")
@@ -453,18 +455,23 @@ pub async fn job(
     if revoked {
         return Ok(Json(saved));
     }
-    let runtime = runtime(&state)?;
+    // Saved results remain readable if network functionality is disabled at startup.
+    let runtime = match state.video.clone() {
+        Some(runtime) => runtime,
+        None if saved.status == "succeeded" => return Ok(Json(saved)),
+        None => return Err(unavailable()),
+    };
     let credentials = runtime.decrypt(
         auth.user_id,
         saved.connection_id,
         &encrypted.ok_or_else(unavailable)?,
     )?;
     // This database claim also throttles polling across browser tabs and API processes.
-    let claimed = sqlx::query("UPDATE video_jobs SET last_poll_at=now() WHERE id=$1 AND user_id=$2 AND status <> 'failed' AND (status <> 'succeeded' OR video_url IS NULL) AND (last_poll_at IS NULL OR last_poll_at < now() - interval '3 seconds')")
-        .bind(id).bind(auth.user_id).execute(&state.pool).await?.rows_affected() > 0;
-    if !claimed {
+    let claim: Option<DateTime<Utc>> = sqlx::query_scalar("UPDATE video_jobs SET last_poll_at=now() WHERE id=$1 AND user_id=$2 AND status <> 'failed' AND (last_poll_at IS NULL OR last_poll_at < now() - interval '3 seconds') RETURNING last_poll_at")
+        .bind(id).bind(auth.user_id).fetch_optional(&state.pool).await?;
+    let Some(poll_started_at) = claim else {
         return Ok(Json(saved));
-    }
+    };
     state.limit_auth(format!("video-poll:{}", auth.user_id), 60)?;
     let task_id = saved
         .provider_task_id
@@ -484,12 +491,20 @@ pub async fn job(
                 .as_ref()
                 .is_none_or(|known| known == &task.task_id) =>
         {
-            apply_task(&state.pool, auth.user_id, id, &task, false).await?
+            apply_task(
+                &state.pool,
+                auth.user_id,
+                id,
+                &task,
+                false,
+                Some(poll_started_at),
+            )
+            .await?
         }
         _ => {
             // A missing/unavailable lookup never authorizes another paid submission.
-            sqlx::query("UPDATE video_jobs SET status=CASE WHEN status='submitting' THEN 'unknown' ELSE status END,error_code='VIDEO_POLL_UNAVAILABLE',updated_at=now() WHERE id=$1 AND user_id=$2 AND status NOT IN ('succeeded','failed')")
-                .bind(id).bind(auth.user_id).execute(&state.pool).await?;
+            sqlx::query("UPDATE video_jobs SET status=CASE WHEN status='submitting' THEN 'unknown' ELSE status END,error_code='VIDEO_POLL_UNAVAILABLE',updated_at=now() WHERE id=$1 AND user_id=$2 AND status <> 'failed' AND last_poll_at=$3")
+                .bind(id).bind(auth.user_id).bind(poll_started_at).execute(&state.pool).await?;
         }
     }
     Ok(Json(read_job(&state.pool, auth.user_id, id).await?))
@@ -518,6 +533,7 @@ async fn apply_task(
     id: Uuid,
     task: &ProviderTask,
     submission: bool,
+    poll_started_at: Option<DateTime<Utc>>,
 ) -> ApiResult<()> {
     let status = match task.task_status.as_str() {
         "succeed" => "succeeded",
@@ -539,9 +555,9 @@ async fn apply_task(
         "succeeded" if url.is_none() => Some("VIDEO_RESULT_UNAVAILABLE"),
         _ => None,
     };
-    // Late submission/poll responses cannot overwrite an already-completed result.
-    sqlx::query("UPDATE video_jobs SET status=$3,provider_task_id=$4,video_url=$5,error_code=$6,updated_at=now() WHERE id=$1 AND user_id=$2 AND (status NOT IN ('succeeded','failed') OR (status='succeeded' AND video_url IS NULL AND $3='succeeded')) AND (NOT $7 OR status IN ('submitting','unknown')) AND (status <> 'processing' OR $3 <> 'submitted')")
-        .bind(id).bind(owner).bind(status).bind(&task.task_id).bind(url).bind(error).bind(submission).execute(pool).await?;
+    // Only the latest poll may renew signed URLs; completed states and safe URLs are preserved.
+    sqlx::query("UPDATE video_jobs SET status=$3,provider_task_id=$4,video_url=COALESCE($5,video_url),error_code=$6,updated_at=now() WHERE id=$1 AND user_id=$2 AND (status NOT IN ('succeeded','failed') OR (status='succeeded' AND $3='succeeded')) AND (NOT $7 OR status IN ('submitting','unknown')) AND (status <> 'processing' OR $3 <> 'submitted') AND ($8::timestamptz IS NULL OR last_poll_at=$8)")
+        .bind(id).bind(owner).bind(status).bind(&task.task_id).bind(url).bind(error).bind(submission).bind(poll_started_at).execute(pool).await?;
     Ok(())
 }
 

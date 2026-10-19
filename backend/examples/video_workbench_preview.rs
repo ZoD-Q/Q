@@ -10,6 +10,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use axum::{
         Json, Router,
         extract::{Path, State},
+        http::StatusCode,
+        response::{IntoResponse, Response},
         routing::{get, post},
     };
     use serde_json::{Value, json};
@@ -19,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
     use xiaoq_backend::{AppState, app, connect_and_migrate, identity, video::VideoRuntime};
     type Tasks = Arc<Mutex<HashMap<String, (String, usize)>>>;
-    async fn submit(State(tasks): State<Tasks>, Json(body): Json<Value>) -> Json<Value> {
+    async fn submit(State(tasks): State<Tasks>, Json(body): Json<Value>) -> Response {
         let id = body["external_task_id"]
             .as_str()
             .unwrap_or("invalid")
@@ -28,7 +30,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             id.clone(),
             (body["prompt"].as_str().unwrap_or_default().to_owned(), 0),
         );
-        Json(json!({"code":0,"data":{"task_id":id,"task_status":"submitted"}}))
+        let prompt = body["prompt"].as_str().unwrap_or_default();
+        if prompt.contains("[fixture:slow]") {
+            tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        }
+        if prompt.contains("[fixture:unknown]") {
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+        Json(json!({"code":0,"data":{"task_id":id,"task_status":"submitted"}})).into_response()
     }
     async fn poll(State(tasks): State<Tasks>, Path(id): Path<String>) -> Json<Value> {
         let mut tasks = tasks.lock().unwrap();
