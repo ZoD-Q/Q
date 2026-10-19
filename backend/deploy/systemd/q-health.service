@@ -1,0 +1,10 @@
+[Unit]
+Description=Q internal health and disk check
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/opt/q/current/deploy/health-check.sh
+TimeoutStartSec=45s

@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily Q local backup
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+[Install]
+WantedBy=timers.target
