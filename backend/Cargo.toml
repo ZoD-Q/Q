@@ -8,6 +8,7 @@ publish = false
 # Opt-in, loopback-only provider fixture injection for integration tests.
 video-test-fixtures = []
 ai-test-fixtures = []
+plugin-test-fixtures = []
 
 [dependencies]
 argon2 = "0.5"
@@ -18,12 +19,15 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 futures-util = "0.3"
+imagesize = "0.15"
+jsonschema = { version = "0.59", default-features = false }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+scraper = "0.27"
 sha2 = "0.10"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "migrate", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower-http = { version = "0.6", features = ["cors"] }
 tracing = "0.1"

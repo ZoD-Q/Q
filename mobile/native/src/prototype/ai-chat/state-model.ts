@@ -1,6 +1,6 @@
 import type { AiHistoryMessage, AiModel, AiFinishReason, AiUsage } from '@xiaoq/shared';
 
-export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'incomplete' | 'cancelled' | 'error';
+export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'incomplete' | 'cancelled' | 'error' | 'tool';
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -12,8 +12,11 @@ export interface ChatMessage {
   finishReason?: AiFinishReason;
   usage?: AiUsage;
   contextLimited?: boolean;
+  toolProposalId?: string;
+  toolInvocationIds?: string[];
 }
-export interface Conversation { id: string; title: string; messages: ChatMessage[] }
+export interface ChatPlugin { id: string; title: string; endpoint_url: string }
+export interface Conversation { id: string; title: string; messages: ChatMessage[]; plugin?: ChatPlugin }
 export const MODEL_NAMES: Record<AiModel, string> = {
   'deepseek-flash': 'DeepSeek Flash',
   'deepseek-v4-pro': 'DeepSeek Pro',
@@ -31,9 +34,13 @@ export function buildContext(messages: ChatMessage[]): { messages: AiHistoryMess
   let limited = false;
   // A user/assistant pair is eligible only when the answer was fully completed.
   for (let i = messages.length - 2; i > 0; i--) {
-    const assistant = messages[i], user = messages[i - 1];
-    if (assistant.role !== 'assistant' || user.role !== 'user') continue;
-    if (assistant.status !== 'complete' || !assistant.content.trim()) { i--; continue; }
+    const assistant = messages[i];
+    if (assistant.role !== 'assistant') continue;
+    let userIndex = i - 1;
+    while (userIndex >= 0 && messages[userIndex].role !== 'user') userIndex--;
+    if (userIndex < 0) break;
+    const user = messages[userIndex];
+    if (assistant.status !== 'complete' || !assistant.content.trim()) { i = userIndex; continue; }
     const userSize = characters(user.content), answerSize = characters(assistant.content);
     if (userSize > 12000 || answerSize > 12000 || selected.length + 2 > 40 || total + userSize + answerSize > 24000) {
       limited = true;
@@ -41,15 +48,19 @@ export function buildContext(messages: ChatMessage[]): { messages: AiHistoryMess
     }
     selected.unshift({ role: 'user', content: user.content }, { role: 'assistant', content: assistant.content });
     total += userSize + answerSize;
-    i--;
+    i = userIndex;
   }
   return { messages: selected, limited };
 }
 
 export function prepareRetry(conversation: Conversation): ChatMessage[] | null {
   const last = conversation.messages.at(-1);
-  const prompt = conversation.messages.at(-2);
-  if (!last || last.role !== 'assistant' || !['error', 'cancelled', 'incomplete'].includes(last.status) || prompt?.role !== 'user') return null;
+  if (!last || last.role !== 'assistant' || !['error', 'cancelled', 'incomplete'].includes(last.status)) return null;
+  const prompt = conversation.messages.findLastIndex(message => message.role === 'user');
+  if (prompt < 0) return null;
+  // A failed continuation can follow a saved tool card. Retain that card and IDs;
+  // retrying the model must never repeat a business-tool confirmation.
+  if (conversation.messages.at(-2)?.role !== 'user' && !last.toolInvocationIds?.length) return null;
   return conversation.messages.slice(0, -1);
 }
 

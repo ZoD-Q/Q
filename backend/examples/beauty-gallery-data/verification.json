@@ -1,0 +1,30 @@
+{
+  "verified_at": "2026-10-19T06:14:44+00:00",
+  "photo_count": 300,
+  "subject_count": 55,
+  "maximum_photos_per_subject": 6,
+  "total_image_bytes": 18332136,
+  "maximum_dimension": 719,
+  "minimum_documented_age_at_capture": 20,
+  "image_formats": {
+    "image/jpeg": 274,
+    "image/png": 26
+  },
+  "licenses": {
+    "CC BY-SA 4.0": 64,
+    "CC BY-SA 2.0": 69,
+    "CC BY 3.0": 78,
+    "CC BY 4.0": 12,
+    "CC BY 2.0": 29,
+    "CC BY-SA 3.0": 44,
+    "CC0 1.0": 4
+  },
+  "all_images_fully_decoded": true,
+  "unique_sha256_count": 300,
+  "unique_original_source_count": 300,
+  "all_authors_and_custom_credit_lines_verified_against_source_pages": true,
+  "source_permission_warning_count": 0,
+  "all_retained_images_visually_reviewed": true,
+  "recorded_visual_exclusions": 42,
+  "manifest_sha256": "d7ed56ed55ca41695d27810a91cf5249157b56b4033bf05e7a2796488457cce5"
+}

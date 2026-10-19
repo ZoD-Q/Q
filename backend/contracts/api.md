@@ -3,6 +3,37 @@
 Local API: http://127.0.0.1:8787. JSON UTF-8, snake_case fields. ISO 8601 UTC timestamps, UUID IDs. Error responses: `{ "error": { "code": "...", "message": "..." } }`.
 Authenticated endpoints require `Authorization: Bearer <opaque token>`; sessions expire and can be revoked. No token in URLs or logs. Only identity owns sessions; profiles owns preferences; ledger owns wallet writes. Financial amounts are integer minor units: 100 = 1.00 Q, currency QDC, always demo.
 
+## MCP plugins (0.4)
+
+All plugin routes except status, CIMD and the browser OAuth callback require Q Bearer identity. IDs are owner scoped. Remote tokens never appear in client responses.
+
+| Route | Behavior |
+| --- | --- |
+| `GET /v1/plugins/status` | Availability, OAuth configuration and protocol version only |
+| `POST /v1/plugins/discover` | `{entry,kind}` with card/catalog/page/domain; candidates expire after 10 minutes |
+| `GET/POST /v1/plugins/connections` | List personal connections / add `{discovery_id,candidate_id}` |
+| `GET/DELETE /v1/plugins/connections/{id}` | Inspect / disconnect and erase the connection's tokens |
+| `POST …/{id}/refresh`, `POST …/{id}/accept-update` | Detect changes; inspect pending details before accepting `{revision}` |
+| `GET …/{id}/tools`, `resources`, `prompts` | Runtime methods under current identity and capabilities |
+| `POST …/{id}/resources/read`, `prompts/get` | Standard MCP results; resource URI is a parameter, never an arbitrary host fetch |
+| `POST …/{id}/oauth/start` | Returns attempt ID, authorization URL and expiry; PKCE/state/CIMD |
+| `GET /v1/plugins/oauth/attempts/{id}` | Owner's authorization status, without codes or tokens |
+| `POST /v1/plugins/invocations` | Persist `{connection_id,tool_name,arguments,idempotency_key}` without executing |
+| `GET /v1/plugins/invocations?connection_id=…` | Latest 50 owned records, optionally filtered; recover across restarts |
+| `GET …/invocations/{id}` | Inspect saved outcome without replaying the tool |
+| `POST …/invocations/{id}/confirm` | `{confirmed:true}`; atomically claims once before sending |
+| `POST …/invocations/{id}/cancel` | Cancels a proposal that has not started; never promises rollback |
+
+Invocation states: `awaiting_confirmation / running / succeeded / tool_error / unknown / cancelled / expired / input_required / failed`. Tool `isError:true` remains a tool error. Input-request interaction is unsupported. Reusing an owner/idempotency key with identical payload returns the original proposal; a different payload conflicts. `running / unknown` cannot trigger another upstream execution, including after disconnection or restart. Lists contain summaries with `result:null`; get one record to read its full result. Immutable connection snapshots supply the title, Card, endpoint and revision shown during confirmation.
+
+Explicit OAuth reauthorization increments the connection revision and cancels older awaiting proposals. Model continuation refuses previous-revision results. Owner storage limits: 100 saved connections, 5,000 invocation records and 64 MiB JSON budget including reservations for unfinished/unknown results. New proposals return `409 PLUGIN_STORAGE_LIMIT` at the limit, while existing-key recovery, reads and confirmation remain available. Unknown records and idempotency tombstones are not deleted. Discoveries are capped at 20 unexpired records/owner with 512 KiB candidate data each, and expired discoveries are cleaned on the next discovery; OAuth caps each connection at 20 unexpired attempts and clears expired attempts on a new start. There is no user-facing history-archiving flow yet.
+
+Public network calls require HTTPS and revalidate every redirect and DNS resolution, pin permitted addresses, ignore environment proxies and disable automatic retries. Credential-bearing POST requests never follow redirects. OAuth binds issuer, resource, state, redirect, PKCE and scopes, encrypts credentials and rechecks connection changes. Remote 401/403 becomes `409 PLUGIN_AUTH_REQUIRED`; only Q session failure is `401 UNAUTHORIZED`.
+
+`POST /v1/ai/chat` accepts optional `plugin_connection_id` and `tool_invocation_ids` (up to eight distinct UUIDs). Plugin mode requires `thinking:false`. The server loads actual tools, then emits SSE `tool_proposal` containing `{invocation_id,connection_id,tool_name,arguments}`, followed by `done.finish_reason=tool_calls`; no text is required. This persists a proposal only. After separate confirmation, continuation accepts only saved IDs, validates owner/connection/completion and reads the stored results. Clients cannot supply tool-result bodies. Images, blobs and Apps HTML are excluded from the text model context.
+
+The native viewer displays bounded, signature/dimension-verified JPEG, PNG and WebP results. It never executes HTML, scripts or `ui://` resources. Full Apps sandboxing, input-request interaction, background tasks and a public index are not implemented. See [protocol support](../docs/reference/mcp-2026-wire-source.md).
+
 ## Endpoints
 
 - `GET /health` → `{status:"ok", mode:"demo"}`; verify DB connectivity.

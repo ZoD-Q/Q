@@ -17,6 +17,10 @@ export function chatErrorMessage(code: string, text: Translate) {
     case 'LOGOUT_UNCONFIRMED': return text('已退出本机，服务端注销尚未确认。', 'Signed out locally; server-side revocation is not confirmed.');
     case 'INSECURE_API_URL': return text('服务地址配置不安全，请使用 HTTPS 或本地开发地址。', 'Use an HTTPS API URL or an approved local development address.');
     case 'CANCELLED': return text('已停止接收回答。', 'Stopped receiving the answer.');
+    case 'PLUGIN_AUTH_REQUIRED': return text('插件需要授权，请到“我的连接”完成授权后继续。Q 登录仍然有效。', 'Authorize the plugin under My connections. Your Q session is still valid.');
+    case 'PLUGIN_RECONFIRM_REQUIRED': return text('插件内容已变化，请到“我的连接”检查更新。', 'The plugin changed. Review its update under My connections.');
+    case 'PLUGIN_TURN_LIMIT': return text('这一轮已使用 8 次工具结果，请开始新的一轮。', 'This turn reached eight tool results. Start a new turn.');
+    case 'PLUGIN_RESULT_UNAVAILABLE': return text('这次工具结果尚不可用于续答，请先查询调用状态。', 'This tool result is not ready for continuation. Check the invocation status.');
     default: return text('暂时无法连接 Q 服务，请检查网络或稍后重试。', 'Unable to reach Q. Check the connection or try again later.');
   }
 }

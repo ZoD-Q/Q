@@ -40,6 +40,7 @@ import type { ChatController } from "./ai-chat/use-chat";
 import { ChatAuthSheet } from "./ai-chat/auth-sheet";
 import { chatErrorMessage } from "./ai-chat/messages";
 import type { AiModel } from "@xiaoq/shared";
+import { ChatProposal } from './plugin-host/chat-proposal';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
 export function QGlyph({ size = 48 }: { size?: number }) {
@@ -93,6 +94,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
     <View
       style={{ width: "100%", maxWidth: 690, alignSelf: "center", gap: 10 }}
     >
+      {controller.plugin && <View style={{ gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><Action kind="ghost" label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View><Type size={11} muted>{text('插件对话关闭深度思考；执行工具前会请你确认。', 'Plugin chat uses standard mode and asks before executing tools.')}</Type></View>}
       <View
         style={{
           backgroundColor: colors.bg,
@@ -340,6 +342,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
                   </View>
                 ) : null}
                 {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
+                {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => controller.resumeTool(message.id, message.toolProposalId!) : undefined} />}
                 {message.role === "assistant" && ["pending", "streaming"].includes(message.status) ? <View accessibilityLiveRegion="polite"><Type size={13} muted>
                   {controller.phase === "thinking" ? text("正在思考…", "Thinking…") : controller.phase === "waiting" ? text("正在连接 DeepSeek…", "Connecting to DeepSeek…") : text("正在回答…", "Answering…")}
                 </Type></View> : null}
@@ -425,8 +428,8 @@ export function ChatPage({ controller, onOpenPlugins }: {
           <Choice
             label={text("深度思考", "Deep thinking")}
             selected={think}
-            disabled={controller.busy}
-            onPress={() => { if (!controller.busy) setThink(!think); }}
+            disabled={controller.busy || !!controller.plugin}
+            onPress={() => { if (!controller.busy && !controller.plugin) setThink(!think); }}
           />
 
         </View>
