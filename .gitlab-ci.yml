@@ -1,4 +1,5 @@
-# Automatic tests and optional reviewed-release packaging. No deployment or merge jobs.
+# Automatic checks, exact-main artifacts, and explicitly manual staging deployments.
+# Human MR merge remains required; no automatic deployment or merge.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -11,6 +12,7 @@ workflow:
 stages:
   - verify
   - package
+  - deploy
 
 default:
   tags:
@@ -166,7 +168,15 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
 
-# Produces a Linux release from reviewed main history; never connects to the server.
+deploy-check:
+  stage: verify
+  image: python:3.13-bookworm
+  script:
+    - bash -n backend/deploy/package-release.sh backend/deploy/backup.sh backend/deploy/health-check.sh web/deploy/remote.sh
+    - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy -p 'test_*.py'
+    - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
+
+# Automatic only for protected main; other permitted branches retain optional packaging.
 package-release:
   stage: package
   image:
@@ -177,8 +187,12 @@ package-release:
     - docker
     - linux
     - amd64
-  when: manual
-  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: on_success
+      allow_failure: false
+    - when: manual
+      allow_failure: true
   interruptible: false
   variables:
     CARGO_HOME: "$CI_PROJECT_DIR/.cargo-ci"
@@ -190,6 +204,8 @@ package-release:
     paths:
       - .cargo-ci/registry/
       - .cargo-ci/git/
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends python3
   script:
     - test "$(uname -m)" = x86_64
     - bash backend/deploy/package-release.sh
@@ -199,3 +215,58 @@ package-release:
     expire_in: 7 days
     paths:
       - backend/.local/release/q-release-*.tar.gz
+
+.staging-deploy:
+  stage: deploy
+  image: python:3.13-bookworm
+  interruptible: false
+  retry: 0
+  timeout: 30 minutes
+  resource_group: q-staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
+      when: manual
+      allow_failure: false
+    - when: never
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends openssh-client git
+  artifacts:
+    when: always
+    # This GitLab version supports none/developer/all; receipts contain no secrets.
+    access: developer
+    expire_in: 30 days
+    paths:
+      - backend/.local/ci-deploy/*-receipt.json
+
+deploy-staging-api:
+  extends: .staging-deploy
+  needs:
+    - {job: source-check, artifacts: false}
+    - {job: web-check, artifacts: false}
+    - {job: mobile-check, artifacts: false}
+    - {job: backend-check, artifacts: false}
+    - {job: deploy-check, artifacts: false}
+    - {job: package-release, artifacts: true}
+  environment:
+    name: staging/api
+    deployment_tier: staging
+  script:
+    - python3 backend/deploy/ci_client.py --component api --check
+    - python3 backend/deploy/ci_client.py --component api
+
+deploy-staging-admin:
+  extends: .staging-deploy
+  needs:
+    - {job: source-check, artifacts: false}
+    - {job: web-check, artifacts: true}
+    - {job: mobile-check, artifacts: false}
+    - {job: backend-check, artifacts: false}
+    - {job: deploy-check, artifacts: false}
+    - {job: package-release, artifacts: false}
+  environment:
+    name: staging/admin
+    url: https://8.163.108.216/q-admin/
+    deployment_tier: staging
+  script:
+    - python3 backend/deploy/ci_client.py --component admin --check
+    - python3 backend/deploy/ci_client.py --component admin

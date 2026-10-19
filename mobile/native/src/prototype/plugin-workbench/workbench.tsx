@@ -145,7 +145,7 @@ function ConnectionChecks() {
       </View> : null}
     </Disclosure>
     {passed ? <View style={{ gap: 14 }}>
-      <SectionHeading title={text("接下来，才能真正使用", "What makes it usable")} detail={text("以下是宿主接通后的流程。当前工作台仅提供材料准备与本地检查。", "These are the host integration steps. This workbench currently prepares materials and runs local checks only.")} />
+      <SectionHeading title={text("前往我的连接继续", "Continue in My connections")} detail={text("到「我的连接」完成以下步骤。本页仅准备材料和检查格式。", "Complete these steps in My connections. This page only prepares materials and checks their format.")} />
       {[
         [text("确认添加", "Confirm addition"), text("读取 Card，确认来源和服务，保存用户连接。", "Read the Card, confirm the source and service, and save the user connection.")],
         [text("按需授权", "Authorize if needed"), text("需要账户身份时，跳转服务方授权。添加不等于授权。", "Authorize with the service when account access is needed. Adding is not authorizing.")],
@@ -297,7 +297,7 @@ export function PluginWorkbenchPage({ onBack }: { onBack: () => void }) {
       action={<Action kind="ghost" icon={ArrowLeft} label={text("返回插件", "Back to plugins")} onPress={onBack} />}>
       <View style={{ flexDirection: "row", gap: 10, paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, backgroundColor: colors.accentBg, alignItems: "flex-start" }}>
         <Info size={17} color={colors.accent} style={{ marginTop: 2 }} />
-        <Type size={13} color={colors.accent} style={{ flex: 1 }}>{text("当前可准备材料、检查格式。Q 的远程发现、授权与调用尚未开放，检查通过不会自动接入。", "Prepare files and check their format here. Q’s remote discovery, authorization, and calls are not available yet; passing these checks does not connect a plugin.")}</Type>
+        <Type size={13} color={colors.accent} style={{ flex: 1 }}>{text("本页仅准备材料和检查格式。请到「我的连接」进行真实连接、授权与调用；检查通过不会自动添加插件。", "This page only prepares materials and checks their format. Use My connections to connect, authorize, and call plugins. Passing these checks does not add a plugin.")}</Type>
       </View>
       <Tabs items={[{ id: "connect", label: text("已有接入链接", "I have a link") }, { id: "prepare", label: text("生成接入文件", "Prepare files") }]} value={state.tab} onChange={state.setTab} />
       <View style={{ flexDirection: wide ? "row" : "column", gap: wide ? 42 : 32, alignItems: "flex-start" }}>
