@@ -94,6 +94,7 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
   const [selected, setSelected] = useState<PluginConnection | null>(null);
   const [tools, setTools] = useState<PluginTool[]>([]);
   const [tool, setTool] = useState<PluginTool | null>(null);
+  const [activeInvocation, setActiveInvocation] = useState<PluginInvocation | null>(null);
   const [invocations, setInvocations] = useState<PluginInvocation[]>([]);
   const [resources, setResources] = useState<ResourceLink[]>([]);
   const [prompts, setPrompts] = useState<unknown[]>([]);
@@ -137,12 +138,19 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
   }, []);
   const path = (suffix = '') => `/v1/plugins/connections/${selected?.id}${suffix}`;
   const open = async (connection: PluginConnection) => {
-    setSelected(connection); setTools([]); setInvocations([]); setResources([]); setPrompts([]); setPromptResult(null); setOauth(null);
+    setSelected(connection); setTools([]); setTool(null); setActiveInvocation(null); setInvocations([]); setResources([]); setPrompts([]); setPromptResult(null); setOauth(null);
     const history = await call(`/v1/plugins/invocations?connection_id=${connection.id}`, decodeList(decodeInvocation)); setInvocations(history);
     if (connection.status === 'ready') setTools(await call(`/v1/plugins/connections/${connection.id}/tools`, decodeList(decodeTool)));
   };
   const updateConnection = (connection: PluginConnection) => { setSelected(connection); setConnections(items => items.map(item => item.id === connection.id ? connection : item)); };
-  const updateInvocation = (item: PluginInvocation) => setInvocations(items => items.some(value => value.id === item.id) ? items.map(value => value.id === item.id ? item : value) : [item, ...items]);
+  const updateInvocation = (item: PluginInvocation) => {
+    setInvocations(items => items.some(value => value.id === item.id) ? items.map(value => value.id === item.id ? item : value) : [item, ...items]);
+    setActiveInvocation(current => current?.id === item.id ? item : current);
+  };
+  const closeToolSheet = () => {
+    if (busy) return;
+    setTool(null); setActiveInvocation(null); setError(null);
+  };
   const authorize = async () => {
     const value = await call(path('/oauth/start'), value => {
       if (!record(value) || typeof value.attempt_id !== 'string' || !publicHttps(value.authorization_url)) throw new WorkbenchError('INVALID_RESPONSE');
@@ -150,7 +158,7 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
     }, 'POST'); setOauth(value);
   };
   return <Page title={selected ? selected.title || selected.name : text('我的插件', 'My plugins')} description={selected?.description}
-    action={selected ? <Action kind="ghost" icon={ArrowLeft} label={text('返回', 'Back')} disabled={busy} onPress={() => { setSelected(null); setTool(null); setError(null); }} /> : <Action icon={Plus} label={text('添加插件', 'Add plugin')} disabled={busy} onPress={() => { setAdding(true); setDiscovery(null); }} />}>
+    action={selected ? <Action kind="ghost" icon={ArrowLeft} label={text('返回', 'Back')} disabled={busy} onPress={() => { setSelected(null); closeToolSheet(); }} /> : <Action icon={Plus} label={text('添加插件', 'Add plugin')} disabled={busy} onPress={() => { setAdding(true); setDiscovery(null); }} />}>
     {busy && <ActivityIndicator accessibilityLabel={text('正在加载', 'Loading')} color={colors.accent} />}
     {!!error && <Type selectable color={colors.danger}>{pluginError(error, text)}</Type>}
     {!selected ? <>
@@ -170,7 +178,7 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
       {oauth && <View style={{ gap: 10 }}><Type selectable size={12}>{new URL(oauth.url).origin}</Type><Action label={text('在浏览器中授权', 'Authorize in browser')} onPress={() => { void Linking.openURL(oauth.url).catch(failure => setError(failure)); }} /><Action kind="ghost" label={text('我已授权，检查结果', 'Check authorization result')} disabled={busy} onPress={() => { void run(async () => { const result = await call(`/v1/plugins/oauth/attempts/${oauth.id}`, value => { if (!record(value) || typeof value.status !== 'string') throw new WorkbenchError('INVALID_RESPONSE'); return value; }); if (result.status !== 'succeeded') throw new WorkbenchError(typeof result.error_code === 'string' ? result.error_code : 'PLUGIN_AUTH_PENDING'); const connection = await call(path(), decodePluginConnection); updateConnection(connection); await open(connection); }); }} /></View>}
       {selected.pending_update && <View style={{ gap: 10 }}><Type weight="500">{text('请检查新的连接和工具定义', 'Review the updated connection and tools')}</Type><Type selectable size={12}>{JSON.stringify(selected.pending_update_details, null, 2)}</Type><Action label={text('确认此更新', 'Accept this update')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/accept-update'), decodePluginConnection, 'POST', { revision: selected.revision }); updateConnection(value); await open(value); }); }} /></View>}
       <Type size={17} weight="500">{text('可用工具', 'Available tools')}</Type>
-      {tools.map(item => <Row key={item.name} title={item.title || item.name} subtitle={item.description} onPress={busy ? undefined : () => setTool(item)} />)}
+      {tools.map(item => <Row key={item.name} title={item.title || item.name} subtitle={item.description} onPress={busy ? undefined : () => { setActiveInvocation(null); setError(null); setTool(item); }} />)}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Action kind="ghost" label={text('重新读取工具', 'Reload tools')} disabled={busy} onPress={() => { void run(async () => { setTools(await call(path('/tools'), decodeList(decodeTool))); }); }} />
         <Action kind="ghost" label={text('浏览图片资源', 'Browse image resources')} disabled={busy} onPress={() => { void run(async () => { setResources((await call(path('/resources'), decodeResources)).filter(item => item.mimeType?.startsWith('image/'))); }); }} />
@@ -191,8 +199,10 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
       {discovery?.candidates.map(candidate => <View key={candidate.candidate_id} style={{ gap: 10 }}><Type weight="500">{candidate.title || candidate.name}</Type><Type>{candidate.description}</Type><Type selectable size={12} muted>{candidate.card_url}{'\n'}{candidate.endpoint_url}</Type><Action label={text('添加这个服务', 'Add this service')} disabled={busy} onPress={() => { void run(async () => { const value = await call('/v1/plugins/connections', decodePluginConnection, 'POST', { discovery_id: discovery.discovery_id, candidate_id: candidate.candidate_id }); setAdding(false); await load(); await open(value); }); }} /></View>)}
       {!!error && <Type color={colors.danger}>{pluginError(error, text)}</Type>}
     </Sheet>
-    <Sheet visible={!!tool} title={tool?.title || tool?.name || ''} onClose={() => { if (!busy) setTool(null); }}>
-      {tool && selected && <ToolForm key={tool.name} tool={tool} busy={busy} onPrepare={(argumentsValue, key) => { void run(async () => { const invocation = await call('/v1/plugins/invocations', decodeInvocation, 'POST', { connection_id: selected.id, tool_name: tool.name, arguments: argumentsValue, idempotency_key: key }); updateInvocation(invocation); setTool(null); }); }} />}
+    <Sheet visible={!!tool || !!activeInvocation} title={activeInvocation ? activeInvocation.status === 'awaiting_confirmation' ? text('确认调用', 'Confirm invocation') : text('调用详情', 'Invocation details') : tool?.title || tool?.name || ''} onClose={closeToolSheet}>
+      {activeInvocation ? <InvocationView key={activeInvocation.id} invocation={activeInvocation} token={token} onChanged={updateInvocation} autoShowResult />
+        : tool && selected && <ToolForm key={tool.name} tool={tool} busy={busy} onPrepare={(argumentsValue, key) => { void run(async () => { const invocation = await call('/v1/plugins/invocations', decodeInvocation, 'POST', { connection_id: selected.id, tool_name: tool.name, arguments: argumentsValue, idempotency_key: key }); updateInvocation(invocation); setActiveInvocation(invocation); setTool(null); }); }} />}
+      {busy && <ActivityIndicator accessibilityLabel={text('正在准备调用', 'Preparing invocation')} color={colors.accent} />}
       {!!error && <Type color={colors.danger}>{pluginError(error, text)}</Type>}
     </Sheet>
   </Page>;
