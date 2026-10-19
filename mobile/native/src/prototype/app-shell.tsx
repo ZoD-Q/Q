@@ -8,6 +8,7 @@ import {
   Clapperboard,
   ChevronRight,
   CreditCard,
+  Code2,
   History,
   KeyRound,
   Layers3,
@@ -26,6 +27,7 @@ import { ProfilePage, MessagesPage } from "./account-pages";
 import { ServicePage } from "./services";
 import { VideoCreate } from "./video/video-create";
 import { CreatorFeed } from "./video/creator-feed";
+import { PluginWorkbenchPage } from "./plugin-workbench/workbench";
 
 const serviceNavigation: {
   id: PageId;
@@ -35,6 +37,7 @@ const serviceNavigation: {
 }[] = [
   { id: "video", zh: "视频创作", en: "Video studio", icon: Clapperboard },
   { id: "plugins", zh: "插件", en: "Plugins", icon: Layers3 },
+  { id: "plugin-workbench", zh: "插件工作台", en: "Plugin workbench", icon: Code2 },
   { id: "installments", zh: "分期", en: "Installments", icon: CreditCard },
   { id: "insurance", zh: "保险", en: "Insurance", icon: ShieldCheck },
   { id: "finance", zh: "理财", en: "Financial services", icon: TrendingUp },
@@ -454,7 +457,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         return true;
       }
       if (page !== "chat") {
-        setPage(page === "creators" ? "video" : "chat");
+        setPage(page === "creators" ? "video" : page === "plugin-workbench" ? "plugins" : "chat");
         return true;
       }
       return false;
@@ -599,8 +602,10 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
             <ProfilePage />
           ) : page === "messages" ? (
             <MessagesPage />
+          ) : page === "plugin-workbench" ? (
+            <PluginWorkbenchPage onBack={() => navigate("plugins")} />
           ) : (
-            <ServicePage page={page} />
+            <ServicePage page={page} onOpenWorkbench={() => navigate("plugin-workbench")} />
           )}
         </Reveal>
       </View>
