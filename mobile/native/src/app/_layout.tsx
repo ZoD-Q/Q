@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { VideoStudioProvider } from "@/prototype/video/video-state";
 import { DesignProvider, useDesign } from "@/prototype/design";
+import { PluginWorkbenchProvider } from "@/prototype/plugin-workbench/state";
 
 function RootStack() {
   const { colors, theme } = useDesign();
@@ -28,7 +29,9 @@ export default function Layout() {
     <SafeAreaProvider>
       <DesignProvider>
         <VideoStudioProvider>
-          <RootStack />
+          <PluginWorkbenchProvider>
+            <RootStack />
+          </PluginWorkbenchProvider>
         </VideoStudioProvider>
       </DesignProvider>
     </SafeAreaProvider>

@@ -13,7 +13,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | 视频 | 原创本地演示短片、模拟计价、会话内发布；不联网生成或上传 |
 | 已保留后端 | Rust + PostgreSQL，支持身份、资料与模拟 QDC 账本；旧客户端联调代码保留，但当前入口未加载 |
 | 独立 Web | `web/` 仅有说明，尚未实现；Expo web 是开发预览 |
-| 插件协议 | 本仓库已选定接入要求；MCP Client/Server、Catalog/Card 发现、OAuth/CIMD 和 Apps 沙箱均尚未实现 |
+| 插件协议 | 工作台可生成接入材料、检查本地 URL 与 Card 关键字段；MCP Client/Server、远程 Catalog/Card 发现、OAuth/CIMD 和 Apps 沙箱均尚未实现 |
 
 **不得把原型、规范、未来领域或测试替身写成已上线能力。** 接入真实服务是单独的开发任务；本规范本身不授权部署、交易或对外发送信息。
 
@@ -35,7 +35,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 
 移动端使用 npm workspaces（`native`、`shared`）；后端开发工具单独使用 npm。Node 清单要求 `>=22`，本地推荐 Node 24；若使用 22，需支持现有测试直接导入 TypeScript 的能力。Rust 使用支持 edition 2024 的 stable 工具链，尚未单独锁定工具链版本。本地 PostgreSQL 工具使用 17.10；生产环境尚无部署方案。
 
-已有主要客户端依赖：Reanimated / Worklets（动画）、Safe Area、Expo Video、Document Picker、SecureStore、Lucide / SVG。优先复用已有能力；不要无理由新增状态库、UI 框架、数据库或编排框架。当前没有 LangChain、LangGraph 或 LangSmith。
+已有主要客户端依赖：Reanimated / Worklets（动画）、Safe Area、Expo Video、Document Picker、SecureStore、Clipboard（复制工作台材料）、Lucide / SVG。优先复用已有能力；不要无理由新增状态库、UI 框架、数据库或编排框架。当前没有 LangChain、LangGraph 或 LangSmith。
 
 权威来源按问题选择：依赖看清单与锁文件，行为看代码和验证，接口看 [API 合同](backend/contracts/api.md) 与 [OpenAPI](backend/contracts/openapi.json)，设计看最新用户要求和 [设计记录](mobile/docs/ui-research-2026-10-18.md)。发现冲突应修正文档或明确记录差异，不能静默猜测。
 
@@ -142,6 +142,8 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 | 数据库 / 身份 / 账本 | 上述检查，加独立 PostgreSQL 测试库中的 `TEST_DATABASE_URL=… cargo test --manifest-path backend/Cargo.toml --test postgres -- --ignored`；按行为补充账户隔离、并发和幂等验证 |
 | API 合同 | 再生共享类型，检查生成差异并通过客户端类型检查；需要端到端验证时对指定演示环境运行 `npm --prefix backend run test:api` |
 | 插件集成 | 按插件规范验收发现、授权、真实调用、Apps 降级、隔离、更新与断开，并分别报告通过状态 |
+
+插件工作台本地逻辑运行 `npm --prefix mobile run test:plugins`；检查 URL 身份保留、关键字段、条件材料和生成地址冲突。该测试不能替代真实插件集成验收，详见 [工作台说明](mobile/docs/plugin-workbench.md)。
 
 `cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。当前没有 GitLab CI 配置，不得声称流水线已通过。
 

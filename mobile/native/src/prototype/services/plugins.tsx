@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Bookmark,
   Check,
+  Code2,
   Puzzle,
   Search,
   SlidersHorizontal,
@@ -23,7 +24,7 @@ import {
 import { pluginCatalog } from "../data/plugin-catalog";
 
 type Plugin = (typeof pluginCatalog)[number];
-export function PluginsPage() {
+export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }) {
   const { colors, text, phone, notify } = useDesign();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("*");
@@ -64,6 +65,7 @@ export function PluginsPage() {
         "目录预览，插件服务尚未接入。",
         "Catalog preview. Plugin services are not connected yet.",
       )}
+      action={<Action kind="secondary" icon={Code2} label={text("接入我的插件", "Connect my plugin")} onPress={onOpenWorkbench} />}
     >
       <View style={{ gap: 14 }}>
         <Input
