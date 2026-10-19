@@ -127,6 +127,8 @@ export function ChatPage({ controller, onOpenPlugins }: {
             color: colors.ink,
             textAlignVertical: "top",
             padding: 0,
+            // The composer already provides the visible focus boundary on web.
+            ...(process.env.EXPO_OS === "web" ? { outlineWidth: 0 } : {}),
           }}
           onKeyPress={(event) => {
             const native = event.nativeEvent as unknown as {
@@ -213,12 +215,14 @@ export function ChatPage({ controller, onOpenPlugins }: {
         </View>
       </View>
       {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
-        <Type size={11} muted>{controller.authBusy ? text("正在恢复登录…", "Restoring session…") : controller.status?.configured
-          ? text("DeepSeek 已配置 · 对话仅保留本次会话", "DeepSeek configured · session-only conversations")
-          : text("Q 对话服务暂不可用", "Q chat is currently unavailable")}</Type>
-        {!controller.status?.configured ? <Action kind="ghost" label={text("重新连接", "Reconnect")} onPress={() => { void controller.restore(); }} disabled={controller.authBusy} /> : null}
-      </View>
+      {controller.authBusy || !controller.status?.configured ? (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+          <Type size={11} muted>{controller.authBusy
+            ? text("正在恢复登录…", "Restoring session…")
+            : text("Q 对话服务暂不可用", "Q chat is currently unavailable")}</Type>
+          {!controller.status?.configured ? <Action kind="ghost" label={text("重新连接", "Reconnect")} onPress={() => { void controller.restore(); }} disabled={controller.authBusy} /> : null}
+        </View>
+      ) : null}
       <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10 }}>
         {controller.session ? <><Type size={12} muted>@{controller.session.user.handle}</Type><Action kind="ghost" label={text("退出登录", "Sign out")} onPress={() => { void controller.logout(); }} disabled={controller.authBusy} /></>
           : <Action kind="ghost" label={text("登录后开始对话", "Sign in to start chatting")} onPress={controller.openAuth} disabled={controller.authBusy} />}
