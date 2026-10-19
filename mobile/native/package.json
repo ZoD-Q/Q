@@ -6,6 +6,7 @@
     "@xiaoq/shared": "*",
     "expo": "~58.0.14",
     "expo-asset": "~58.0.16",
+    "expo-clipboard": "~58.0.3",
     "expo-constants": "~58.0.12",
     "expo-crypto": "~58.0.7",
     "expo-document-picker": "~58.0.4",
@@ -46,6 +47,7 @@
     "export:web": "expo export --platform web",
     "test:utils": "node --test src/utils/*.test.mjs",
     "test:video": "node --test src/prototype/video/pricing.test.mjs",
+    "test:plugins": "node --test src/prototype/plugin-workbench/materials.test.mjs",
     "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs"
   },
   "private": true

@@ -20,12 +20,15 @@ npm run dev
 
 视频创作直接预览：http://localhost:8081/?view=video 。创作者广场：http://localhost:8081/?view=creators 。
 
+插件工作台：http://localhost:8081/?view=plugin-workbench 。也可从侧栏「插件工作台」或插件页「接入我的插件」进入。
+
 ## 页面与交互
 
 - 视频创作：提示词、模型/API Key演示配置、1000品牌选择、每个5%最高50%的模拟优惠、生成/取消/结果、本地发布。
 - 创作者广场：内置原创演示短片、上下浏览、暂停/静音/喜欢、本地视频选择与会话内发布，不联网生成或上传。
 - 聊天：多行输入、模型选择、思考/搜索状态、工具入口、本地对话与历史。
 - 插件：指定Excel中的139条有内容记录，原名/简介/讨论组筛选，搜索、详情与本地收藏。
+- 插件工作台：四类入口说明与本地链接检查，分步生成 Server Card / Catalog / 介绍页 / 接入清单，可检查粘贴 Card 的关键字段。清楚区分必需、按需交付与添加、授权、首次调用；不联网探测，不提交或接通插件。
 - 分期：服务商品、期数选择、每期和总额、完整计划预览。
 - 保险：场景、保障比较、所选方案和确认预览。
 - 钱包：演示余额、流水筛选、收款与转账流程、渠道选择。
@@ -51,7 +54,10 @@ npm run dev
 ```sh
 npm run typecheck
 npm run lint
+npm run test:plugins
 npm run export:web
 ```
 
 阅读 [设计说明](docs/design-direction.md)、[插件来源](docs/plugin-catalog-source.md)、[验收记录](docs/testing.md)。后续接回API前先读 `../backend/contracts/api.md`。
+
+工作台的功能范围与测试见 [插件工作台说明](docs/plugin-workbench.md)。

@@ -6,7 +6,9 @@ import { InstallmentsPage } from "./installments";
 import { InsurancePage } from "./insurance";
 export function ServicePage({
   page,
+  onOpenWorkbench,
 }: {
+  onOpenWorkbench: () => void;
   page:
     | "plugins"
     | "wallet"
@@ -17,7 +19,7 @@ export function ServicePage({
 }) {
   switch (page) {
     case "plugins":
-      return <PluginsPage />;
+      return <PluginsPage onOpenWorkbench={onOpenWorkbench} />;
     case "wallet":
       return <WalletPage />;
     case "keys":
