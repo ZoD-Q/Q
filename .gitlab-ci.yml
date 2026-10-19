@@ -1,4 +1,4 @@
-# Tests only. No deployment or automatic merge jobs.
+# Automatic tests and optional reviewed-release packaging. No deployment or merge jobs.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -10,6 +10,7 @@ workflow:
 
 stages:
   - verify
+  - package
 
 default:
   tags:
@@ -106,3 +107,37 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features ai-test-fixtures -- -D warnings
     - cargo test --locked --manifest-path backend/Cargo.toml --features ai-test-fixtures --test ai_chat -- --ignored
+
+# Produces a Linux release from reviewed main history; never connects to the server.
+package-release:
+  stage: package
+  image:
+    name: rust:1-bookworm
+    docker:
+      platform: linux/amd64
+  tags:
+    - docker
+    - linux
+    - amd64
+  when: manual
+  allow_failure: true
+  interruptible: false
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-ci"
+  cache:
+    key:
+      files:
+        - backend/Cargo.lock
+      prefix: cargo-registry
+    paths:
+      - .cargo-ci/registry/
+      - .cargo-ci/git/
+  script:
+    - test "$(uname -m)" = x86_64
+    - bash backend/deploy/package-release.sh
+  artifacts:
+    name: q-reviewed-linux-release
+    access: developer
+    expire_in: 7 days
+    paths:
+      - backend/.local/release/q-release-*.tar.gz
