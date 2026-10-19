@@ -17,7 +17,7 @@ npm --prefix web run build
 cd web && npx playwright install chromium && npm run test:e2e
 ```
 
-Playwright验证生产构建，默认自动启动4173端口的预览服务。设置 `Q_ADMIN_TEST_URL=https://8.163.108.216/q-admin/` 可针对公开演示版本运行相同交互测试；测试只操作虚构数据，不调用业务服务。发布脚本另有13项Python标准库测试：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'`。
+Playwright验证生产构建，默认自动启动4173端口的预览服务。设置 `Q_ADMIN_TEST_URL=https://8.163.108.216/q-admin/` 可针对公开演示版本运行相同交互测试；测试只操作虚构数据，不调用业务服务。发布脚本另有20项Python标准库测试：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'`。
 
 本地可用 `Q_ADMIN_BROWSER_PATH` 指向已有的 Chromium 可执行文件；需在验收记录中写明实际版本。CI忽略该覆盖，始终使用锁定Playwright对应的浏览器。
 

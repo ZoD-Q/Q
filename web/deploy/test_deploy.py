@@ -212,5 +212,117 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), data)
 
 
+class SmokeReadinessTests(unittest.TestCase):
+    sha = 'a' * 40
+    document = b'<script src="/q-admin/assets/index-abc123.js"></script>'
+
+    def setUp(self):
+        self.now = 0.0
+        self.sleeps = []
+        clock = patch.object(deploy.time, 'monotonic', side_effect=lambda: self.now)
+        sleep = patch.object(deploy.time, 'sleep', side_effect=self.sleep)
+        clock.start()
+        sleep.start()
+        self.addCleanup(clock.stop)
+        self.addCleanup(sleep.stop)
+
+    def sleep(self, duration):
+        self.sleeps.append(duration)
+        self.now += duration
+
+    @staticmethod
+    def response(body=b'', status='200'):
+        return subprocess.CompletedProcess(['curl'], 0, body + b'\n' + status.encode(), b'')
+
+    def version(self, sha=None):
+        return self.response(json.dumps({'sha': sha or self.sha}).encode())
+
+    def later_checks(self):
+        return [self.response(self.document), self.response(self.document),
+                self.response(status='404'), self.response(self.document),
+                self.response(status='308'), self.response(status='308')]
+
+    def test_reload_reset_404_old_sha_then_exact_sha_becomes_ready(self):
+        responses = [subprocess.CalledProcessError(56, ['curl']), self.response(status='404'),
+                     self.version('b' * 40), self.version(), *self.later_checks()]
+        with patch.object(deploy.subprocess, 'run', side_effect=responses) as run:
+            deploy.smoke(self.sha)
+        self.assertEqual(self.sleeps, [0.5, 0.5, 0.5])
+        self.assertEqual(run.call_count, 10)
+        for call in run.call_args_list[:4]:
+            args = call.args[0]
+            self.assertEqual(args[-1], 'https://8.163.108.216/q-admin/version.json')
+            self.assertNotIn('--insecure', args)
+            self.assertNotIn('--retry', args)
+            self.assertLessEqual(float(args[args.index('--max-time') + 1]), 3)
+
+    def test_connection_refusal_and_empty_reply_are_bounded_readiness_retries(self):
+        responses = [subprocess.CalledProcessError(code, ['curl']) for code in (7, 52, 28)]
+        with patch.object(deploy.subprocess, 'run', side_effect=[*responses, self.version(), *self.later_checks()]) as run:
+            deploy.smoke(self.sha)
+        self.assertEqual(len(self.sleeps), 3)
+        self.assertEqual(run.call_count, 10)
+
+    def test_wrong_sha_times_out_without_running_later_checks(self):
+        with patch.object(deploy.subprocess, 'run', return_value=self.version('b' * 40)) as run:
+            with self.assertRaisesRegex(ValueError, 'not ready within 20 seconds'):
+                deploy.smoke(self.sha)
+        self.assertEqual(self.now, 20)
+        self.assertEqual(run.call_count, 40)
+        self.assertTrue(all(call.args[0][-1].endswith('/q-admin/version.json') for call in run.call_args_list))
+
+    def test_request_time_consumes_the_same_readiness_budget(self):
+        timeouts = []
+
+        def slow_request(args, **_kwargs):
+            timeout = float(args[args.index('--max-time') + 1])
+            timeouts.append(timeout)
+            self.now += timeout
+            raise subprocess.CalledProcessError(28, args)
+
+        with patch.object(deploy.subprocess, 'run', side_effect=slow_request):
+            with self.assertRaisesRegex(ValueError, 'not ready within 20 seconds'):
+                deploy.smoke(self.sha)
+        self.assertEqual(self.now, 20)
+        self.assertLessEqual(max(timeouts), 3)
+        self.assertEqual(timeouts[-1], 2.5)
+
+    def test_tls_errors_fail_immediately_without_retry_or_verification_bypass(self):
+        for code in (35, 51, 58, 60, 77, 90, 91):
+            with self.subTest(curl_exit=code):
+                with patch.object(deploy.subprocess, 'run', side_effect=subprocess.CalledProcessError(code, ['curl'])) as run:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        deploy.smoke(self.sha)
+                self.assertEqual(run.call_count, 1)
+                self.assertNotIn('--insecure', run.call_args.args[0])
+                self.assertNotIn('-k', run.call_args.args[0])
+                self.assertEqual(self.sleeps, [])
+
+    def test_missing_asset_still_must_return_404_after_readiness(self):
+        responses = [self.version(), self.response(self.document),
+                     self.response(self.document), self.response(self.document)]
+        with patch.object(deploy.subprocess, 'run', side_effect=responses) as run:
+            with self.assertRaisesRegex(ValueError, 'Missing asset did not return 404'):
+                deploy.smoke(self.sha)
+        self.assertEqual(run.call_count, 4)
+        self.assertEqual(self.sleeps, [])
+
+    def test_later_entry_deep_link_and_redirect_assertions_remain_strict(self):
+        for index, response, message in [
+            (0, self.response(status='404'), 'Demo entry failed'),
+            (1, self.response(b'wrong document'), 'SPA deep link fallback failed'),
+            (3, self.response(status='404'), 'HTTPS entry failed'),
+            (4, self.response(status='302'), 'HTTP demo redirect failed'),
+            (5, self.response(status='302'), 'HTTP demo redirect failed'),
+        ]:
+            with self.subTest(check=index):
+                responses = self.later_checks()
+                responses[index] = response
+                with patch.object(deploy.subprocess, 'run', side_effect=[self.version(), *responses]):
+                    with self.assertRaisesRegex(ValueError, message):
+                        deploy.smoke(self.sha)
+                self.assertEqual(self.sleeps, [])
+
+
 if __name__ == '__main__':
     unittest.main()

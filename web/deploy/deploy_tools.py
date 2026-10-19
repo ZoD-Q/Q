@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 
 
 BASE = Path('/var/www/q-admin-demo')
@@ -414,17 +415,46 @@ def complete(transaction):
 
 
 def smoke(sha):
-    def request(path, protocol='https'):
+    def request(path, protocol='https', max_time=15):
         port = '443' if protocol == 'https' else '80'
         result = subprocess.run([
-            'curl', '--silent', '--show-error', '--max-time', '15', '--noproxy', '*',
+            'curl', '--silent', '--show-error', '--connect-timeout', str(min(2, max_time)),
+            '--max-time', str(max_time), '--noproxy', '*',
             '--resolve', f'8.163.108.216:{port}:127.0.0.1',
             '--write-out', '\n%{http_code}', f'{protocol}://8.163.108.216{path}',
         ], check=True, capture_output=True)
         body, status_code = result.stdout.rsplit(b'\n', 1)
         return body, status_code.decode()
-    version, code = request('/q-admin/version.json')
-    require(code == '200' and json.loads(version).get('sha') == sha, 'Served release SHA mismatch')
+
+    # Nginx reload is graceful: old workers or a transient reset can precede readiness.
+    # Retry only this static GET, within one wall-clock budget. TLS/configuration errors
+    # fail immediately; never use curl's broad retry flags or bypass verification.
+    deadline = time.monotonic() + 20
+    last_result = 'no response'
+    while True:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, f'Release not ready within 20 seconds: {last_result}; expected SHA {sha}')
+        try:
+            version, code = request('/q-admin/version.json', max_time=min(3, remaining))
+            if code == '200':
+                served = json.loads(version)
+                require(isinstance(served, dict) and isinstance(served.get('sha'), str)
+                        and SHA.fullmatch(served['sha']), 'Invalid served release metadata')
+                if served['sha'] == sha:
+                    break
+                last_result = 'another release SHA is still being served'
+            else:
+                require(code == '404', f'Release readiness returned unexpected HTTP {code}')
+                last_result = 'HTTP 404'
+        except subprocess.CalledProcessError as error:
+            # Connection refused, timeout, empty reply, or reset during the worker switch.
+            if error.returncode not in (7, 28, 52, 56):
+                raise
+            last_result = f'curl transport exit {error.returncode}'
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, f'Release not ready within 20 seconds: {last_result}; expected SHA {sha}')
+        time.sleep(min(0.5, remaining))
+
     root, code = request('/q-admin/')
     require(code == '200' and b'/q-admin/' in root, 'Demo entry failed')
     deep, code = request('/q-admin/__deployment-smoke')

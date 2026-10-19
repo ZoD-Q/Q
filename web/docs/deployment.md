@@ -78,7 +78,7 @@ bash web/deploy/deploy.sh \
 
 `--validate-only` 不建立 SSH 连接、不写服务器。测试只创建本地临时 Git 仓库、归档和配置夹具；不接触业务服务。
 
-发布命令上传归档与工具到随机、仅当前 SSH 用户可读的临时目录，服务器再次校验。新版本内容完整落盘、原配置备份后才修改 include 和原子切换 `current`。新配置必须通过 `nginx -t` 才 reload；不 restart Nginx。工具随后通过回环地址访问同一个 HTTPS IP 虚拟主机，正常验证证书，检查版本、入口、SPA 回退、缺失资源和 HTTP 跳转。
+发布命令上传归档与工具到随机、仅当前 SSH 用户可读的临时目录，服务器再次校验。新版本内容完整落盘、原配置备份后才修改 include 和原子切换 `current`。新配置必须通过 `nginx -t` 才 reload；不 restart Nginx。工具随后通过回环地址访问同一个 HTTPS IP 虚拟主机，正常验证证书。版本探测在最多20秒的统一预算内等待新worker就绪，只对短暂连接异常、404或有效旧SHA重试静态GET；TLS错误立即失败。目标SHA匹配后严格检查入口、SPA回退、缺失资源和HTTP跳转。
 
 工具输出提交、流水线、归档校验值和回退用 transaction ID。`backups/<transaction>/state.json` 保存版本、制品校验、之前的 `current` 和配置校验值，回环检查通过后记录时间。它不是公网验收结论。归档与上传工具在命令退出时清理，已发布版本和回退备份保留；不自动清理旧版本。
 
