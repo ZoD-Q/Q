@@ -6,7 +6,7 @@ import { API_URL } from '../../services/api';
 import { readSessionSnapshot, getSessionRevision, removeToken, writeToken, subscribeSession } from '../../services/session-store';
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
 import { ChatError, decodeAiStatus, streamChat } from './stream';
-import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation } from './state-model';
+import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation, type ChatPlugin } from './state-model';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number };
 const errorCode = (error: unknown) => error instanceof ChatError || error instanceof WorkbenchError ? error.code
@@ -28,6 +28,7 @@ export function useChat(visible: boolean) {
   const [draft, setDraft] = useState('');
   const [model, setModel] = useState<AiModel>('deepseek-flash');
   const [think, setThink] = useState(false);
+  const [plugin, setPlugin] = useState<ChatPlugin | null>(null);
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'thinking' | 'responding'>('idle');
   const generation = useRef(0);
   const mounted = useRef(true);
@@ -63,7 +64,7 @@ export function useChat(visible: boolean) {
     return generation.current;
   };
   const clearPrivateState = () => {
-    updateItems(() => []); select(null); setDraft(''); setMessageError('');
+    updateItems(() => []); select(null); setDraft(''); setMessageError(''); setPlugin(null);
   };
   const applySession = (value: AuthResponse | null) => {
     if (sessionRef.current && sessionRef.current.user.id !== value?.user.id) clearPrivateState();
@@ -178,27 +179,35 @@ export function useChat(visible: boolean) {
     finally { if (isCurrent(version)) setAuthBusy(false); }
   };
 
-  const start = (conversation: Conversation, baseMessages: ChatMessage[]) => {
+  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = []) => {
     const authenticated = sessionRef.current;
     if (inflight.current || authBusy) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
     if (!status?.configured) { setMessageError(statusError || 'AI_NOT_CONFIGURED'); return false; }
     let context: ReturnType<typeof buildContext>;
-    try { context = buildContext(baseMessages); }
+    try {
+      const lastUser = baseMessages.findLastIndex(message => message.role === 'user');
+      context = buildContext(baseMessages.slice(0, lastUser + 1));
+    }
     catch (error) { setMessageError(errorCode(error)); return false; }
     const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: randomUUID(), controller: new AbortController(), generation: generation.current };
-    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: '', status: 'pending', model, thinking: think, contextLimited: context.limited };
+    const selectedPlugin = conversation.plugin;
+    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: '', status: 'pending', model, thinking: selectedPlugin ? false : think, contextLimited: context.limited, toolInvocationIds: invocationIds };
     inflight.current = request;
     const next = { ...conversation, messages: [...baseMessages, answer] };
     updateItems(current => current.some(item => item.id === next.id) ? current.map(item => item.id === next.id ? next : item) : [next, ...current]);
     select(next.id); setPhase('waiting'); setMessageError('');
     const current = () => isCurrent(request.generation) && inflight.current === request && sessionRef.current?.token === authenticated.token;
-    void streamChat({ baseUrl: API_URL, token: authenticated.token, request: { model, thinking: think, messages: context.messages }, signal: request.controller.signal, transport: expoFetch,
+    void streamChat({ baseUrl: API_URL, token: authenticated.token, request: { model, thinking: selectedPlugin ? false : think, messages: context.messages, ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds } : {}) }, signal: request.controller.signal, transport: expoFetch,
       onEvent: event => {
         if (!current()) return;
         if (event.type === 'status') setPhase(event.phase);
         if (event.type === 'delta') { setPhase('responding'); updateAnswer(request, message => ({ ...message, content: message.content + event.text, status: 'streaming' })); }
-        if (event.type === 'done') updateAnswer(request, message => ({ ...message, status: finishStatus(event.finish_reason, message.content), finishReason: event.finish_reason, usage: event.usage }));
+        if (event.type === 'tool_proposal') {
+          if (event.connection_id !== selectedPlugin?.id) { request.controller.abort(); return; }
+          updateAnswer(request, message => ({ ...message, toolProposalId: event.invocation_id }));
+        }
+        if (event.type === 'done') updateAnswer(request, message => ({ ...message, status: event.finish_reason === 'tool_calls' && message.toolProposalId ? 'tool' : finishStatus(event.finish_reason, message.content), finishReason: event.finish_reason, usage: event.usage }));
       },
     }).catch(async error => {
       if (!current()) return;
@@ -218,16 +227,25 @@ export function useChat(visible: boolean) {
     if (inflight.current) return false;
     const trimmed = value.trim();
     if (!trimmed) return false;
-    const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [] };
+    const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
     return start(current, [...current.messages, { id: randomUUID(), role: 'user', content: trimmed, status: 'complete' }]);
   };
   const retry = () => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
     const base = conversation ? prepareRetry(conversation) : null;
-    if (conversation && base) start(conversation, base);
+    if (conversation && base) start(conversation, base, conversation.messages.at(-1)?.toolInvocationIds ?? []);
   };
   const newConversation = () => { stop(); select(null); setDraft(''); setMessageError(''); };
-  const openConversation = (id: string) => { stop(); select(id); setDraft(''); setMessageError(''); };
+  const openConversation = (id: string) => { stop(); select(id); setPlugin(list.current.find(item => item.id === id)?.plugin ?? null); setDraft(''); setMessageError(''); };
+  const selectPlugin = (value: ChatPlugin | null) => { newConversation(); setPlugin(value); if (value) setThink(false); };
+  const resumeTool = (messageId: string, invocationId: string) => {
+    const conversation = list.current.find(item => item.id === activeIdRef.current);
+    const message = conversation?.messages.at(-1);
+    if (!conversation || !conversation.plugin || !message || message.id !== messageId || message.toolProposalId !== invocationId || inflight.current) return;
+    const ids = [...(message.toolInvocationIds ?? []), invocationId];
+    if (ids.length > 8) { setMessageError('PLUGIN_TURN_LIMIT'); return; }
+    start(conversation, conversation.messages, ids);
+  };
 
   return {
     session, status, statusError, authBusy, authOpen, authError, authenticate, logout, closeAuth, restore,
@@ -235,6 +253,7 @@ export function useChat(visible: boolean) {
     items, conversation: items.find(item => item.id === activeId) ?? null, activeId,
     draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError,
     send, stop, retry, newConversation, openConversation,
+    plugin, selectPlugin, resumeTool,
   };
 }
 export type ChatController = ReturnType<typeof useChat>;

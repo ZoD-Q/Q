@@ -70,3 +70,9 @@ The UI fixture also recognizes `[fixture:unknown]` in a prompt (stores the suppl
 ## DeepSeek chat
 
 Set server-only `DEEPSEEK_API_KEY` in the ignored `backend/.env` (owner-only permissions). Chat uses the existing Q identity and a fixed official HTTPS endpoint; no key is returned to clients. `GET /v1/ai/status` reports configuration, and authenticated `POST /v1/ai/chat` returns bounded SSE text. See the [chat guide](../mobile/docs/deepseek-chat.md) and [API contract](contracts/api.md) for models, budgets, errors, cancellation and tests. No chat history or provider reasoning is stored. Model requests are real when configured, while the QDC ledger remains simulated.
+
+## MCP connections and photo example
+
+`src/plugins/` implements personal connections, four discovery entry types, MCP 2026-07-28 and OAuth/CIMD. It reuses Q identity and never writes the demo ledger. Business tools require a persisted proposal and a separate explicit confirmation; ambiguous outcomes remain `unknown` and are never replayed automatically. See the [host guide](../mobile/docs/mcp-host.md) for the Beauty MCP example and [protocol sources](docs/reference/mcp-2026-wire-source.md) for bounded support.
+
+Optional OAuth requires `Q_MCP_ENCRYPTION_KEY` (a separate persistent 32-byte base64 key) and `Q_MCP_PUBLIC_BASE_URL` (a public HTTPS origin). Anonymous connections require neither. Tokens are encrypted and bound to the owner, connection, issuer and resource; never sent to the mobile client. MCP Apps HTML sandboxing and a public index are not implemented. The native raster viewer is not an Apps host.

@@ -22,6 +22,7 @@ pub mod ai;
 pub mod error;
 pub mod identity;
 pub mod ledger;
+pub mod plugins;
 pub mod profiles;
 pub mod validation;
 pub mod video;
@@ -36,6 +37,7 @@ pub struct AppState {
     limiter: Arc<Mutex<AuthLimiter>>,
     pub video: Option<Arc<video::VideoRuntime>>,
     pub ai: Option<Arc<ai::AiRuntime>>,
+    pub plugins: Option<Arc<plugins::PluginRuntime>>,
 }
 
 impl AppState {
@@ -52,6 +54,7 @@ impl AppState {
             limiter: Arc::new(Mutex::new(AuthLimiter::default())),
             video: None,
             ai: None,
+            plugins: None,
         })
     }
     fn limit_auth(&self, key: String, limit: u32) -> ApiResult<()> {
@@ -152,6 +155,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
                 .route("/v1/ai/chat", post(ai::chat))
                 .layer(DefaultBodyLimit::max(128 * 1024)),
         )
+        .merge(plugins::routes())
         .layer(cors)
         .with_state(state)
 }

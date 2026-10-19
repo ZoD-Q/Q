@@ -62,8 +62,8 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
     <Page
       title={text("插件", "Plugins")}
       description={text(
-        "目录预览，插件服务尚未接入。",
-        "Catalog preview. Plugin services are not connected yet.",
+        "原始目录参考。真实连接请到“我的连接”添加服务方链接。",
+        "Reference catalog. Add a publisher URL under My connections to use a live service.",
       )}
       action={<Action kind="secondary" icon={Code2} label={text("接入我的插件", "Connect my plugin")} onPress={onOpenWorkbench} />}
     >

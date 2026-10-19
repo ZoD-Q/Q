@@ -39,4 +39,4 @@ npm --prefix mobile run export:web
 
 本次结果：24 项纯逻辑测试、TypeScript、ESLint 与 Web 静态导出通过。独立代码审查发现的查询参数误拒、目录地址冲突、可选材料入口、附加端点兼容、弹层复制反馈和 JSON 错误定位均已修复并复核。iPhone 18 Pro / iOS 27 的实际预览已检查工作台入口、首屏布局、地址输入及 HTTP 错误反馈；弹层复制全流程和其他主题/语言尚未完成设备验收，Android 未实测。浏览器自动操作在当前环境中被关闭，未宣称完成浏览器点击验收。
 
-后续真实接入工作另需实现安全远程发现、用户连接保存、MCP 授权/CIMD、运行时调用和 Apps 沙箱，遵守 [Q 插件接入规范](../../backend/docs/plugin-integration.md)。
+真实远程发现、个人连接、OAuth/CIMD 和运行时调用现由独立的“我的连接”提供，详见 [MCP 宿主](mcp-host.md)。本材料工作台仍保持无网络纯逻辑；Apps 沙箱尚未实现。完整目标遵守 [Q 插件接入规范](../../backend/docs/plugin-integration.md)。

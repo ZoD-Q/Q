@@ -6,16 +6,17 @@ x-logging: &logging
     max-file: '3'
 services:
   db:
-    image: ${POSTGRES_IMAGE:-postgres:17-bookworm}
+    image: ${POSTGRES_IMAGE:-postgres:18-bookworm}
     restart: unless-stopped
     environment:
       POSTGRES_USER: q_admin
       POSTGRES_PASSWORD: ${Q_DB_ADMIN_PASSWORD:?set Q_DB_ADMIN_PASSWORD}
       POSTGRES_DB: postgres
+      PGDATA: /var/lib/postgresql/18/docker
       Q_DB_PASSWORD: ${Q_DB_PASSWORD:?set Q_DB_PASSWORD}
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     volumes:
-      - /var/lib/q/postgres:/var/lib/postgresql/data
+      - /var/lib/q/postgres:/var/lib/postgresql
       - ./init-db.sh:/docker-entrypoint-initdb.d/10-q.sh:ro
     networks: [database]
     cpus: 1.0
@@ -34,6 +35,7 @@ services:
       dockerfile: Dockerfile
       args:
         RUNTIME_BASE: ${RUNTIME_BASE:-debian:bookworm-slim}
+        PROBE_BASE: ${PROBE_BASE:-nginx:stable-alpine}
     restart: unless-stopped
     user: '10001:10001'
     read_only: true
@@ -58,7 +60,7 @@ services:
     stop_signal: SIGINT
     stop_grace_period: 30s
     healthcheck:
-      test: [CMD, curl, --fail, --silent, --max-time, '5', http://127.0.0.1:8787/health]
+      test: [CMD, /usr/local/bin/busybox, wget, -q, -T, '5', -O, /dev/null, http://127.0.0.1:8787/health]
       interval: 30s
       timeout: 7s
       retries: 3
