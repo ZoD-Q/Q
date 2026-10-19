@@ -645,6 +645,7 @@ export function Sheet({
   onClose,
   wide = false,
   footer,
+  automaticallyAdjustKeyboardInsets = true,
 }: {
   visible: boolean;
   title: string;
@@ -652,6 +653,7 @@ export function Sheet({
   onClose: () => void;
   wide?: boolean;
   footer?: ReactNode;
+  automaticallyAdjustKeyboardInsets?: boolean;
 }) {
   const { colors, phone, text } = useDesign();
   const insets = useSafeAreaInsets();
@@ -728,7 +730,7 @@ export function Sheet({
             />
           </View>
           <ScrollView
-            automaticallyAdjustKeyboardInsets
+            automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ padding: 24, paddingTop: 16, gap: 20 }}
           >

@@ -17,3 +17,9 @@ export const DEMO_ACCOUNTS = [
   { handle: 'kai', password: 'Qdemo12345!', display_name: 'Kai' },
   { handle: 'lin', password: 'Qdemo12345!', display_name: '小林' },
 ] as const;
+export type VideoConnection = components['schemas']['VideoConnection'];
+export type VideoConnectionRequest = components['schemas']['VideoConnectionRequest'];
+export type VideoConnectionList = components['schemas']['VideoConnectionList'];
+export type VideoJob = components['schemas']['VideoJob'];
+export type VideoJobRequest = components['schemas']['VideoJobRequest'];
+export type VideoJobList = components['schemas']['VideoJobList'];

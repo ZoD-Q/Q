@@ -42,7 +42,7 @@ const serviceNavigation: {
   { id: "insurance", zh: "保险", en: "Insurance", icon: ShieldCheck },
   { id: "finance", zh: "理财", en: "Financial services", icon: TrendingUp },
   { id: "wallet", zh: "钱包", en: "Wallet", icon: Wallet },
-  { id: "keys", zh: "API Key", en: "API keys", icon: KeyRound },
+  { id: "keys", zh: "API 工作台", en: "API workbench", icon: KeyRound },
 ];
 export function QSymbol({ size = 25 }: { size?: number }) {
   const { colors } = useDesign();
@@ -593,7 +593,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
               onOpenPlugins={() => navigate("plugins")}
             />
           ) : page === "video" ? (
-            <VideoCreate onOpenFeed={() => navigate("creators")} />
+            <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
           ) : page === "creators" ? (
             <CreatorFeed onBack={() => navigate("video")} />
           ) : page === "history" ? (

@@ -148,6 +148,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/video/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["videoConnections"];
+        put?: never;
+        /** @description Save encrypted personal Kling credentials. Does not verify provider access or incur provider charges. */
+        post: operations["createVideoConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/video/connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Permanently revoke this connection. Prevent further provider requests; preserve job history. */
+        delete: operations["revokeVideoConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/video/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["videoJobs"];
+        put?: never;
+        /** @description Create a durable job before making one provider submission. Same key and payload replays without resubmitting. May incur supplier charges. */
+        post: operations["createVideoJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/video/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** @description Read and refresh an owned job. Unknown submissions only query the stable external task ID, never resubmit. */
+        get: operations["videoJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -254,6 +326,70 @@ export interface components {
         };
         TransactionHistory: {
             items: components["schemas"]["LedgerTransaction"][];
+        };
+        VideoConnection: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            provider: "kling";
+            /** @enum {string} */
+            region: "cn" | "global";
+            /** Format: date-time */
+            created_at: string;
+            revoked: boolean;
+        };
+        VideoConnectionRequest: {
+            name: string;
+            /** @enum {string} */
+            region: "cn" | "global";
+            api_key: string;
+        };
+        VideoJobRequest: {
+            /** Format: uuid */
+            connection_id: string;
+            prompt: string;
+            /** @enum {string} */
+            model_name: "kling-v2-6";
+            /** @enum {string} */
+            mode: "pro";
+            /** @enum {string} */
+            duration: "5" | "10";
+            /** @enum {string} */
+            aspect_ratio: "16:9" | "9:16" | "1:1";
+            /** Format: uuid */
+            idempotency_key: string;
+        };
+        VideoJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            connection_id: string;
+            prompt: string;
+            /** @enum {string} */
+            model_name: "kling-v2-6";
+            /** @enum {string} */
+            mode: "pro";
+            /** @enum {string} */
+            duration: "5" | "10";
+            /** @enum {string} */
+            aspect_ratio: "16:9" | "9:16" | "1:1";
+            /** @enum {string} */
+            status: "submitting" | "unknown" | "submitted" | "processing" | "succeeded" | "failed";
+            provider_task_id: string | null;
+            /** Format: uri */
+            video_url: string | null;
+            error_code: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        VideoConnectionList: {
+            items: components["schemas"]["VideoConnection"][];
+        };
+        VideoJobList: {
+            items: components["schemas"]["VideoJob"][];
         };
     };
     responses: never;
@@ -560,6 +696,199 @@ export interface operations {
                 };
             };
             /** @description Structured error; see contracts/api.md for status-specific codes. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    videoConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoConnectionList"];
+                };
+            };
+            /** @description Structured error. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    createVideoConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoConnection"];
+                };
+            };
+            /** @description Structured error. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    revokeVideoConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Structured error. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    videoJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJobList"];
+                };
+            };
+            /** @description Structured error. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    createVideoJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay, no provider submission */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJob"];
+                };
+            };
+            /** @description Success */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJob"];
+                };
+            };
+            /** @description Structured error. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    videoJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJob"];
+                };
+            };
+            /** @description Structured error. See contracts/api.md. */
             default: {
                 headers: {
                     [name: string]: unknown;

@@ -17,7 +17,8 @@
     "export:web": "npm run export:web --workspace=@xiaoq/native",
     "api:generate": "openapi-typescript ../backend/contracts/openapi.json -o shared/src/generated.ts",
     "test:video": "npm run test:video --workspace=@xiaoq/native",
-    "test:plugins": "npm run test:plugins --workspace=@xiaoq/native"
+    "test:plugins": "npm run test:plugins --workspace=@xiaoq/native",
+    "test:api-workbench": "npm run test:api-workbench --workspace=@xiaoq/native"
   },
   "engines": {
     "node": ">=22"

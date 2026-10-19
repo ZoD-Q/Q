@@ -2,6 +2,11 @@ import { useLocalSearchParams } from "expo-router";
 import { PrototypeApp } from "@/prototype/app-shell";
 export default function Index() {
   const { view } = useLocalSearchParams<{ view?: string }>();
-  const page = view === "video" ? "video" : view === "creators" ? "creators" : view === "plugins" ? "plugins" : view === "plugin-workbench" ? "plugin-workbench" : "chat";
+  const page =
+    view === "video" ? "video" :
+    view === "creators" ? "creators" :
+    view === "keys" ? "keys" :
+    view === "plugins" ? "plugins" :
+    view === "plugin-workbench" ? "plugin-workbench" : "chat";
   return <PrototypeApp key={page} initialPage={page} />;
 }

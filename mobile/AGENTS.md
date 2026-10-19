@@ -4,11 +4,11 @@
 
 - 本目录是 npm workspace：`native/` 为 Expo iOS/Android 应用，`shared/` 为传输类型与纯逻辑。独立浏览器产品位于 `../web/`，不要把 Expo 预览宣称为已完成独立 Web 产品。
 - `npm run dev` 只启动前端，`npm run dev:native` 启动原生开发。不能把 PostgreSQL 或 Rust API 接入默认 UI 启动链。
-- 当前入口是 `native/src/prototype/` 的设计原型；旧 `screens/`、`providers/`、`services/` 的 API 联调代码仍保留。切换入口或重新接回后端必须是明确任务，不顺手删除旧账号、账本或测试。
+- 当前入口是 `native/src/prototype/`，其 API 工作台是主动启用的真实网络功能，其余保持设计原型；旧 `screens/`、`providers/`、`services/` 的 API 联调代码仍保留。切换入口或重新接回后端必须是明确任务，不顺手删除旧账号、账本或测试。
 - Expo Router 路由放 `native/src/app/`，页面主体、状态和领域逻辑放路由之外。复用已有主题、文案和组件，当前默认 light 白底青蓝，保留 dark / warm、中英文。
 - 涉及网络前读 [API 合同](../backend/contracts/api.md)，外部输入做运行时校验。`npm run api:generate` 生成 `shared/src/generated.ts`，不得手改；更改共享合同、依赖锁文件先与集成负责人协调。
 - 当前原型语言 `zh/en`、默认主题 `light` 与 API 的 `zh-CN/en`、默认 `warm` 不同；接回时显式转换并保留用户偏好，不能悄悄改 wire 值。
-- 原生会话使用 SecureStore；不把服务密钥放客户端。视频 API Key 演示输入应短暂保留并及时清理，示例凭据不是生产凭据。
+- 原生会话使用 SecureStore；不把服务密钥放客户端。真实供应商 API Key 只作为工作台临时输入，经可信后端加密保存，提交或关闭后清理；原视频演示输入仍不是生产凭据。
 - 保留的 Web 联调实现将 Bearer 令牌仅存内存；localStorage 只存无令牌的待确认转账意图，重新登录后按发起人恢复。恢复操作不等于持久化会话令牌。
 - 金额用整数最小单位；前端不负责授权或最终余额。未知转账结果保留原幂等键与完整载荷，跨重启恢复；401/429 不能把待确认请求变成新转账。
 - 当前插件列表仅为 Excel 来源内容展示；保留 ID、未命名记录与讨论组语义，不按同名去重。实际连接开发须读 [插件规范](../backend/docs/plugin-integration.md)。

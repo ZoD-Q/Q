@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "小Q Demo API",
-    "version": "0.1.0",
-    "description": "Local demonstration only. QDC uses integer minor units, 100 units = 1.00 Q. No real money."
+    "title": "小Q API",
+    "version": "0.2.0",
+    "description": "QDC ledger is simulated; explicitly configured personal Kling connections can make real supplier requests. Local development, not production certified."
   },
   "servers": [
     {
@@ -388,6 +388,263 @@
             }
           }
         }
+      }
+    },
+    "/v1/video/connections": {
+      "get": {
+        "operationId": "videoConnections",
+        "tags": [
+          "video"
+        ],
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoConnectionList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createVideoConnection",
+        "tags": [
+          "video"
+        ],
+        "description": "Save encrypted personal Kling credentials. Does not verify provider access or incur provider charges.",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoConnection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoConnectionRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/video/connections/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "delete": {
+        "operationId": "revokeVideoConnection",
+        "tags": [
+          "video"
+        ],
+        "description": "Permanently revoke this connection. Prevent further provider requests; preserve job history.",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "default": {
+            "description": "Structured error. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/video/jobs": {
+      "get": {
+        "operationId": "videoJobs",
+        "tags": [
+          "video"
+        ],
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createVideoJob",
+        "tags": [
+          "video"
+        ],
+        "description": "Create a durable job before making one provider submission. Same key and payload replays without resubmitting. May incur supplier charges.",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Idempotent replay, no provider submission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJob"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoJobRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/video/jobs/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "videoJob",
+        "tags": [
+          "video"
+        ],
+        "description": "Read and refresh an owned job. Unknown submissions only query the stable external task ID, never resubmit.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     }
   },
@@ -778,6 +1035,256 @@
         "required": [
           "items"
         ]
+      },
+      "VideoConnection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "region",
+          "created_at",
+          "revoked"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "kling"
+            ]
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "cn",
+              "global"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "VideoConnectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "region",
+          "api_key"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "cn",
+              "global"
+            ]
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "writeOnly": true
+          }
+        }
+      },
+      "VideoJobRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connection_id",
+          "prompt",
+          "model_name",
+          "mode",
+          "duration",
+          "aspect_ratio",
+          "idempotency_key"
+        ],
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2500
+          },
+          "model_name": {
+            "type": "string",
+            "enum": [
+              "kling-v2-6"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "pro"
+            ]
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "5",
+              "10"
+            ]
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "VideoJob": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "connection_id",
+          "prompt",
+          "model_name",
+          "mode",
+          "duration",
+          "aspect_ratio",
+          "status",
+          "provider_task_id",
+          "video_url",
+          "error_code",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2500
+          },
+          "model_name": {
+            "type": "string",
+            "enum": [
+              "kling-v2-6"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "pro"
+            ]
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "5",
+              "10"
+            ]
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitting",
+              "unknown",
+              "submitted",
+              "processing",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "provider_task_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "video_url": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri"
+          },
+          "error_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VideoConnectionList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VideoConnection"
+            }
+          }
+        }
+      },
+      "VideoJobList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VideoJob"
+            }
+          }
+        }
       }
     }
   }
