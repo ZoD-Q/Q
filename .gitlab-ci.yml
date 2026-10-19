@@ -232,7 +232,8 @@ package-release:
     - apt-get update && apt-get install -y --no-install-recommends openssh-client git
   artifacts:
     when: always
-    access: maintainer
+    # This GitLab version supports none/developer/all; receipts contain no secrets.
+    access: developer
     expire_in: 30 days
     paths:
       - backend/.local/ci-deploy/*-receipt.json
