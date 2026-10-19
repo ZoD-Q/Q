@@ -50,7 +50,7 @@ TEST_DATABASE_URL=… cargo test --manifest-path backend/Cargo.toml --all-featur
 TEST_DATABASE_URL=… cargo test --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
 ```
 
-PG 测试创建自己的随机 schema，不删除既有用户或账本；所有供应商测试使用显式回环替身，不读真实模型密钥。客户端测试覆盖提案归属、结果只用 ID 回灌、续答失败重试、图片 MIME 与内容降级。远端 GitLab 流水线、真实第三方 OAuth、iOS/Android 点击与手势须分别记录，不能由纯逻辑测试替代。
+PG 测试创建自己的随机 schema，不删除既有用户或账本；自动化供应商测试使用显式回环替身，不读真实模型密钥。客户端测试覆盖提案归属、结果只用 ID 回灌、续答失败重试、图片 MIME 与内容降级。远端 GitLab 流水线、真实第三方 OAuth、iOS/Android 点击与手势须分别记录，不能由纯逻辑测试替代。
 
 本次本地验证（2026-10-19）：101 项客户端测试、类型检查、Lint、Web 导出通过；Rust 格式、默认/全 feature 严格 clippy、46 项单元测试与 18 项隔离 PostgreSQL 测试通过。独立代码审查修复后复核通过。300 张图库照片已完整解码并逐张经实际 MCP `resources/read` 返回，全部 SHA-256 与许可清单一致。
 

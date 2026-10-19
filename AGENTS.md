@@ -158,7 +158,7 @@ GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` 
 
 `cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。
 
-**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行三类自动验证（后端 17/18 矩阵，共四个自动作业）：`source-check` 检查提交差异，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频及 AI 替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
+**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行三类自动验证（后端 17/18 矩阵，共四个自动作业）：`source-check` 检查提交差异，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频、AI、插件及 AI 插件替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
 
 `package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变三类必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
 
