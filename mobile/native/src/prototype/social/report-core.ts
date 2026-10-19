@@ -30,8 +30,8 @@ export async function inspectReportReceipt(pending: ReportMeta, owner: string, l
     if (receipt.client_report_id !== pending.clientReportId || receipt.status !== 'accepted') throw new SocialError('INVALID_RESPONSE');
     return 'accepted';
   } catch (failure) {
-    if (failure instanceof SocialError && failure.status === 404) return 'unknown';
-    if (failure instanceof SocialError && failure.status === 410) return 'expired';
+    if (failure instanceof SocialError && failure.status === 404 && failure.code === 'SOCIAL_NOT_FOUND') return 'unknown';
+    if (failure instanceof SocialError && failure.status === 410 && failure.code === 'SOCIAL_REPORT_EXPIRED') return 'expired';
     throw failure;
   }
 }

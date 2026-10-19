@@ -57,6 +57,7 @@ const errors: Record<string, [string, string]> = {
   REQUEST_TIMEOUT: ['请求超时。发送结果可能未知，请用原消息重试。', 'The request timed out. Retry the original message to confirm its outcome.'],
   UNAUTHORIZED: ['请先登录Q账号。', 'Sign in to your Q account.'],
   INVALID_RESPONSE: ['服务返回了无法识别的数据，请稍后重试。', 'The service returned an invalid response. Try again later.'],
+  SOCIAL_UNAVAILABLE: ['当前服务尚未提供好友与消息功能，请更新服务后重新连接。', 'Friends and messages are not available from this service yet. Update the service, then reconnect.'],
   INSECURE_API_URL: ['当前服务地址不可安全连接。', 'The configured service address is not secure.'],
   INVALID_HANDLE: ['Q号为3–24位小写字母、数字或下划线。', 'Q handles use 3–24 letters, numbers or underscores.'],
   INVALID_MESSAGE: ['请输入1–2000字的消息。', 'Enter a message of 1–2000 characters.'],

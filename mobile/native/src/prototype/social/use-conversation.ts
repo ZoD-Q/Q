@@ -100,7 +100,7 @@ export function useConversation(conversationId: string) {
         updatePending(null); setError(''); void sync();
       } catch (failure) {
         if (!current(stamp)) return;
-        if (failure instanceof SocialError && failure.status === 404) setError(stored.text === null ? 'EPHEMERAL_NOT_SENT' : 'SEND_NOT_CONFIRMED');
+        if (failure instanceof SocialError && failure.status === 404 && failure.code === 'SOCIAL_NOT_FOUND') setError(stored.text === null ? 'EPHEMERAL_NOT_SENT' : 'SEND_NOT_CONFIRMED');
         else throw failure;
       }
     } catch (failure) { if (current(stamp)) setError(socialErrorCode(failure)); }
@@ -132,7 +132,7 @@ export function useConversation(conversationId: string) {
       updatePending(null); setSeconds(null); void sync(); void service.current.refresh();
     } catch (failure) {
       if (!current(stamp)) return;
-      if (failure instanceof SocialError && failure.code === 'SOCIAL_MESSAGE_EXPIRED' && intent) {
+      if (failure instanceof SocialError && failure.status === 410 && failure.code === 'SOCIAL_MESSAGE_EXPIRED' && intent) {
         await outboxStore.remove(intent.ownerId, intent.conversationId, intent.clientMessageId);
         if (!current(stamp)) return;
         updatePending(null);
@@ -154,7 +154,7 @@ export function useConversation(conversationId: string) {
       if (current(stamp)) { updatePending(null); void sync(); }
     } catch (failure) {
       if (!current(stamp)) return;
-      if (failure instanceof SocialError && failure.status === 404) {
+      if (failure instanceof SocialError && failure.status === 404 && failure.code === 'SOCIAL_NOT_FOUND') {
         await outboxStore.remove(intent.ownerId, conversationId, intent.clientMessageId);
         if (current(stamp)) { updatePending(null); setError(''); }
       } else setError(socialErrorCode(failure));
