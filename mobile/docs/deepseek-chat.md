@@ -52,3 +52,9 @@ TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST/TEST_DATABASE \
 ## 参考
 
 当前模型、thinking 和流协议按 [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 与 [思考模式说明](https://api-docs.deepseek.com/guides/thinking_mode/) 核对。完整本地合同、事件与预算见 [API 合同](../../backend/contracts/api.md)。
+
+## 本轮验收记录
+
+本地验证：42 项聊天/会话测试，以及工具、视频、插件、API 工作台合计 50 项既有前端回归均通过；类型、Lint、OpenAPI 再生一致性和 Web 导出通过。Rust 格式与全功能静态检查通过，21 项单元/供应商替身测试、10 项隔离 PostgreSQL 集成测试通过。合并期间另一任务停止共享开发数据库造成过一次连接失败，重新启动项目原有数据库后重跑通过，没有重建数据目录。
+
+独立审查覆盖流终止/取消、上游秘密、账号切换、晚到恢复、原子会话清理和大回答分帧，问题修复后复核通过。iOS 已启动新预览，但设备窗口定位工具无法完成专用设备的交互验收；浏览器自动操作当前关闭，Android 未实测。真实两轮模型验收是完整 HTTP/SSE 客户端链路验证，不冒充所有平台点击验收。
