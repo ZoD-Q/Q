@@ -1,6 +1,7 @@
 """Deployment client validation; no network or real credentials are used."""
 import base64
 import hashlib
+import gzip
 import importlib.util
 import io
 import json
@@ -82,16 +83,23 @@ class ClientTests(unittest.TestCase):
 
     def test_api_rejects_links_duplicates_and_oversized_members(self):
         for mode in ('link', 'duplicate', 'oversize'):
-            with tarfile.open(self.release, 'w:gz') as stream:
-                item = tarfile.TarInfo('q-release/xiaoq-backend')
-                if mode == 'link':
-                    item.type = tarfile.SYMTYPE
-                    item.linkname = '/etc/passwd'
-                elif mode == 'oversize':
-                    item.size = client.MAX_ARCHIVE + 1
-                stream.addfile(item)
-                if mode == 'duplicate':
+            item = tarfile.TarInfo('q-release/xiaoq-backend')
+            if mode == 'oversize':
+                # An adversarial header advertises a huge member without supplying
+                # its body. Python 3.13+ correctly refuses to create this through
+                # TarFile.addfile, so construct the malformed input explicitly.
+                item.size = client.MAX_ARCHIVE + 1
+                with gzip.open(self.release, 'wb') as stream:
+                    stream.write(item.tobuf(format=tarfile.USTAR_FORMAT))
+                    stream.write(b'\0' * 1024)
+            else:
+                with tarfile.open(self.release, 'w:gz') as stream:
+                    if mode == 'link':
+                        item.type = tarfile.SYMTYPE
+                        item.linkname = '/etc/passwd'
                     stream.addfile(item)
+                    if mode == 'duplicate':
+                        stream.addfile(item)
             with self.subTest(mode=mode), self.assertRaises(client.ClientError):
                 client.validate_api(self.release, SHA)
 
