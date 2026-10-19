@@ -6,6 +6,7 @@ exec 9>/run/lock/q-backup.lock
 flock -n 9 || exit 0
 config=/etc/q/deploy.env
 compose=/opt/q/current/deploy/compose.yaml
+source /opt/q/current/deploy/backup-policy.sh
 backup=/var/backups/q
 install -d -m 0700 "$backup" "$backup/secrets"
 [[ -f "$config" && ! -L "$config" ]] || { echo 'Missing regular deployment configuration' >&2; exit 1; }
@@ -13,7 +14,10 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 work=$(mktemp -d "$backup/.q-backup-XXXXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 command=(docker compose --env-file "$config" -f "$compose" -p q)
-"${command[@]}" exec -T db pg_dump --username q_admin --dbname q --format=custom > "$work/database.dump"
+# Ephemeral chat and explicitly submitted report evidence must never be resurrected by a backup.
+# Their schemas/envelopes remain; the API treats a missing payload as permanently unavailable.
+"${command[@]}" exec -T db pg_dump --username q_admin --dbname q --format=custom \
+  "${Q_DUMP_EXCLUDES[@]}" > "$work/database.dump"
 [[ -s "$work/database.dump" ]]
 "${command[@]}" exec -T db pg_restore --list < "$work/database.dump" > /dev/null
 install -m 0600 "$config" "$work/deploy.env"

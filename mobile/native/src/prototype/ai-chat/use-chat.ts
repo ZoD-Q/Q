@@ -3,7 +3,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 import { randomUUID } from 'expo-crypto';
 import type { AiModel, AiStatus, AuthResponse } from '@xiaoq/shared';
 import { API_URL } from '../../services/api';
-import { readSessionSnapshot, getSessionRevision, removeToken, writeToken, subscribeSession } from '../../services/session-store';
+import { readSessionSnapshot, getSessionRevision, invalidateToken, removeToken, writeToken, subscribeSession } from '../../services/session-store';
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
 import { ChatError, decodeAiStatus, streamChat } from './stream';
 import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation, type ChatPlugin } from './state-model';
@@ -168,6 +168,7 @@ export function useChat(visible: boolean) {
     applySession(null); clearPrivateState(); setAuthBusy(true); setAuthOpen(false);
     try {
       if (previous) {
+        invalidateToken(previous.token);
         // Try both independently: a local storage failure must not skip server revocation.
         const [local, remote] = await Promise.allSettled([
           removeToken(previous.token),

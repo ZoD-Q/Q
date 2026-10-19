@@ -4,7 +4,10 @@ import { Action, Choice, Input, Sheet, Type, useDesign } from '../design';
 import type { ChatController } from './use-chat';
 import { chatErrorMessage } from './messages';
 
-export function ChatAuthSheet({ controller }: { controller: ChatController }) {
+export function ChatAuthSheet({ controller, description }: {
+  controller: Pick<ChatController, 'authOpen' | 'authBusy' | 'authError' | 'authenticate' | 'closeAuth'>;
+  description?: string;
+}) {
   const { text, colors } = useDesign();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [handle, setHandle] = useState('');
@@ -14,6 +17,11 @@ export function ChatAuthSheet({ controller }: { controller: ChatController }) {
     const subscription = AppState.addEventListener('change', value => { if (value !== 'active') setPassword(''); });
     return () => subscription.remove();
   }, []);
+  useEffect(() => {
+    // Closing through another account surface must also release an unfinished password.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!controller.authOpen) setPassword('');
+  }, [controller.authOpen]);
   const valid = /^[a-zA-Z0-9_]{3,24}$/.test(handle.trim()) && handle.trim().toLowerCase() !== 'xiaoq'
     && password.length >= (mode === 'register' ? 10 : 1) && password.length <= 128
     && (mode !== 'register' || name.trim().length > 0);
@@ -24,7 +32,7 @@ export function ChatAuthSheet({ controller }: { controller: ChatController }) {
     void controller.authenticate(mode, fields);
   };
   return <Sheet visible={controller.authOpen} title={text('登录小Q', 'Sign in to Q')} onClose={() => { setPassword(''); controller.closeAuth(); }}>
-    <Type size={14} muted>{text('使用已有 Q 账号继续对话。登录后草稿仍在，点击发送即可开始。', 'Use your existing Q account. Your draft stays here; send it when you are signed in.')}</Type>
+    <Type size={14} muted>{description ?? text('使用已有 Q 账号继续对话。登录后草稿仍在，点击发送即可开始。', 'Use your existing Q account. Your draft stays here; send it when you are signed in.')}</Type>
     <View style={{ flexDirection: 'row', gap: 8 }}>
       <Choice label={text('登录', 'Sign in')} selected={mode === 'login'} disabled={controller.authBusy} onPress={() => { setMode('login'); setPassword(''); }} />
       <Choice label={text('注册', 'Create account')} selected={mode === 'register'} disabled={controller.authBusy} onPress={() => { setMode('register'); setPassword(''); }} />

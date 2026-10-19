@@ -124,7 +124,7 @@ export async function workbenchRequest<T>(options: {
   baseUrl: string;
   path: string;
   token?: string | null;
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   decode: (value: unknown) => T;
   signal?: AbortSignal;

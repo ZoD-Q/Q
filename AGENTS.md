@@ -10,7 +10,8 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | --- | --- |
 | 当前移动端入口 | Expo 可交互前端原型，`DesignProvider` / `VideoStudioProvider` 驱动；聊天和 API 工作台按用户操作连接业务网络 |
 | AI 对话 | DeepSeek Flash / Pro 文本流式、多轮上下文、停止和重试；需要 Q 登录与服务端密钥，历史仅保留本次会话 |
-| 插件 / 金融 / 社交 | 插件支持真实 MCP 连接、显式工具确认和原生图片结果；金融与社交仍为展示和本地交互 |
+| 插件 / 金融 | 插件支持真实 MCP 连接、显式工具确认和原生图片结果；金融仍为展示和本地交互 |
+| 社交聊天 | 复用 Q 身份，好友申请、一对一文字、已读与重试、阅后消息、双向互动日和关系标签已接真实后端；前台轮询，无 OS 离线推送或端到端加密。见 [社交说明](mobile/docs/social-chat.md) |
 | 视频 | 原创本地演示短片保留；API 工作台支持个人可灵凭据与真实请求适配，供应商实账生成另行验证；不上传广场 |
 | API 工作台 | 复用 Q 身份，服务端加密个人可灵 API Key，持久化任务并查询结果；本地测试替身不等于供应商实测 |
 | 已保留后端 | Rust + PostgreSQL，支持身份、资料与模拟 QDC 账本；旧客户端联调代码保留，API 工作台复用身份端点 |
@@ -37,7 +38,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 
 移动端使用 npm workspaces（`native`、`shared`）；后端开发工具单独使用 npm。Node 清单要求 `>=22`，本地推荐 Node 24；若使用 22，需支持现有测试直接导入 TypeScript 的能力。Rust 使用支持 edition 2024 的 stable 工具链，尚未单独锁定工具链版本。本地 PostgreSQL 工具使用 17.10，服务器内部联调使用独立 PostgreSQL 18.6，详见第 9 节；公网生产验收尚未完成。
 
-已有主要客户端依赖：Reanimated / Worklets（动画）、Safe Area、Expo Video、Document Picker、SecureStore、Clipboard（复制工作台材料）、Lucide / SVG。优先复用已有能力；不要无理由新增状态库、UI 框架、数据库或编排框架。当前没有 LangChain、LangGraph 或 LangSmith。
+已有主要客户端依赖：Reanimated / Worklets（动画）、Safe Area、Expo Video、Document Picker、SecureStore、Clipboard（复制工作台材料）、Lucide / SVG、qrcode-generator（纯 JavaScript 邀请二维码编码）。优先复用已有能力；不要无理由新增状态库、UI 框架、数据库或编排框架。当前没有 LangChain、LangGraph 或 LangSmith。
 
 权威来源按问题选择：依赖看清单与锁文件，行为看代码和验证，接口看 [API 合同](backend/contracts/api.md) 与 [OpenAPI](backend/contracts/openapi.json)，设计看最新用户要求和 [设计记录](mobile/docs/ui-research-2026-10-18.md)。发现冲突应修正文档或明确记录差异，不能静默猜测。
 
@@ -96,7 +97,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 
 保留的 Web 联调客户端仅在内存保存 Bearer 令牌；localStorage 只保存不含令牌的待确认转账意图，重新登录后按发起人恢复。不能为跨重启恢复把会话令牌一并持久化。
 
-AI 已有鉴权流式代理与插件工具提案/确认/结果续答；云端聊天历史仍是后续工作。插件已有个人连接和调用模块；开发者、订单、金融服务、社交、内容、统计、推荐与通知是后续领域，详细边界见 [架构说明](mobile/docs/architecture.md)。按需要扩展模块化单体；这不是要求创建十个微服务。开发者和运营页面分别授权，不能建立绕过现有身份的第二套权限系统。
+AI 已有鉴权流式代理与插件工具提案/确认/结果续答；云端聊天历史仍是后续工作。插件已有个人连接和调用模块；社交已有好友、私聊、阅后、亲密与应用内社交通知。开发者、订单、金融服务、内容、统计、推荐与跨领域推送仍是后续领域，详细边界见 [架构说明](mobile/docs/architecture.md)。按需要扩展模块化单体；这不是要求创建十个微服务。开发者和运营页面分别授权，不能建立绕过现有身份的第二套权限系统。
 
 ## 6. UI、内容与原型真实性
 
@@ -141,7 +142,7 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 | --- | --- |
 | 所有提交 | `git diff --check`；暂存后再执行 `git diff --cached --check`，确认提交内容与已验证内容一致 |
 | 仅文档 | 上述自动化差异检查，加实际文件、命令和链接核对；检查新旧说明一致；不为文档改动运行会写账本的测试 |
-| 移动端代码 | `npm --prefix mobile run typecheck`、`npm --prefix mobile run lint`，以及 `npm --prefix mobile run test:utils`、`npm --prefix mobile run test:video`、`npm --prefix mobile run test:plugins`、`npm --prefix mobile run test:api-workbench` |
+| 移动端代码 | `npm --prefix mobile run typecheck`、`npm --prefix mobile run lint`，以及 `npm --prefix mobile run test:utils`、`npm --prefix mobile run test:video`、`npm --prefix mobile run test:plugins`、`npm --prefix mobile run test:api-workbench`、`npm --prefix mobile run test:account`、`npm --prefix mobile run test:social` |
 | UI / 导航 / 媒体 | 上述检查，加 `npm --prefix mobile run export:web` 和实际受影响页面检查；涉及原生行为时在对应设备/模拟器验证，记录未覆盖的平台 |
 | 独立 Web 原型 | `npm --prefix web run typecheck`、`lint`、`test`、`build`、`test:e2e`（均使用同一前缀）；实际检查桌面与窄屏；部署工具变更再运行Shell语法及 `python3 -m unittest discover -s web/deploy -p 'test_*.py'` |
 | Rust 代码 | `cargo fmt --manifest-path backend/Cargo.toml --check`、`cargo clippy --manifest-path backend/Cargo.toml --all-targets -- -D warnings`、`cargo test --manifest-path backend/Cargo.toml` |
@@ -151,6 +152,8 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 
 真实对话变更运行 `npm --prefix mobile run test:chat`，并检查共享会话的变更通知、原子清理及延迟响应隔离；不在客户端保存模型密钥，详见 [对话说明](mobile/docs/deepseek-chat.md)。
 
+社交与账号变更还需执行 `test:account`、`test:social` 和 `test:chat`；后端执行独立 PostgreSQL 库中的 `cargo test --manifest-path backend/Cargo.toml --test social -- --ignored`。修改到期/备份行为时再执行 `social_backup` 的真实 pg_dump/pg_restore 验收，使用匹配测试服务器主版本的 PostgreSQL 客户端与可创建测试数据库的专用角色。备份排除阅后正文、举报原因和证据；到期拒绝读取、后台清理与物理擦除是不同承诺。详见 [社交合同](backend/contracts/social.md)。
+
 插件工作台与连接结果逻辑运行 `npm --prefix mobile run test:plugins`；检查 URL 身份保留、关键字段、条件材料和生成地址冲突。该测试不能替代真实插件集成验收，详见 [工作台说明](mobile/docs/plugin-workbench.md)。插件后端还须运行 `cargo clippy --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings`，以及隔离 PG 下 `--all-features --test plugins -- --ignored` 和 `--all-features --test ai_plugins -- --ignored`。能力边界见 [MCP 宿主](mobile/docs/mcp-host.md)。
 
 一次提交涉及多个范围时，执行对应检查的并集；依赖、锁文件、构建脚本或测试配置变化按受影响的客户端或后端范围验证。测试后若继续修改受检内容，须重新运行受影响的检查。交付及 MR 中记录实际运行的命令、结果、未覆盖的平台和阻碍，不得把未执行的测试写为通过。
@@ -159,7 +162,7 @@ GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` 
 
 `cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。
 
-**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行四类自动验证（后端 17/18 矩阵，共五个自动作业）：`source-check` 检查提交差异，`web-check` 检查管理原型类型、规范、纯逻辑与浏览器交互、发布工具并保存同提交静态制品，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频、AI、插件及 AI 插件替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
+**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行四类自动验证（后端 17/18 矩阵，共五个自动作业）：`source-check` 检查提交差异，`web-check` 检查管理原型类型、规范、纯逻辑与浏览器交互、发布工具并保存同提交静态制品；`mobile-check` 检查类型、规范、功能测试、接口生成一致性与 Web 导出；`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、社交、备份恢复、视频、AI、插件和 AI 插件替身集成测试。备份恢复测试使用与 17/18 矩阵匹配的官方 PostgreSQL 客户端。CI 不代表 iOS/Android 真机或供应商实账验收。
 
 `package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变四类必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
 

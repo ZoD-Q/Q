@@ -578,6 +578,264 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/social/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["socialSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialRequestFriend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/requests/{id}/respond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialRespondRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/friends/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["socialDeleteFriend"];
+        options?: never;
+        head?: never;
+        patch: operations["socialUpdateFriend"];
+        trace?: never;
+    };
+    "/v1/social/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialBlock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/blocks/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["socialUnblock"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/friends/{user_id}/label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialProposeLabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/friends/{user_id}/label/respond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialRespondLabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/conversations/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["socialMessages"];
+        put?: never;
+        post: operations["socialSendMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/messages/by-client/{client_message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["socialMessageByClient"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/conversations/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialReadConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/messages/{id}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialOpenMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Idempotent report submission. Refusing unopened ephemeral evidence with 403 SOCIAL_FORBIDDEN reserves a content-free permanent rejection receipt; later GET or POST with that client_report_id returns 410 even after opening. Existing accepted receipts take precedence. See contracts/social.md. */
+        post: operations["socialReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["socialReadNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/conversations/{id}/ephemeral-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["socialEphemeralState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/social/reports/by-client/{client_report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Owner-only minimal acceptance receipt; unknown/foreign IDs return 404, expired or unavailable report/evidence returns 410. Never returns report target, reason, message ID or evidence. */
+        get: operations["socialReportByClient"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -952,6 +1210,177 @@ export interface components {
             arguments: {
                 [key: string]: unknown;
             };
+        };
+        SocialUser: {
+            /** Format: uuid */
+            id: string;
+            handle: string;
+            display_name: string;
+            avatar: components["schemas"]["AvatarName"];
+        };
+        SocialMutation: {
+            /** @enum {boolean} */
+            ok: true;
+        };
+        SocialEmpty: Record<string, never>;
+        SocialDecision: {
+            accept: boolean;
+        };
+        SocialTarget: {
+            /** Format: uuid */
+            user_id: string;
+        };
+        SocialFriendRequest: {
+            /** Format: uuid */
+            user_id: string;
+            note: string;
+        };
+        SocialFriendPatch: {
+            remark?: string;
+            muted?: boolean;
+            intimacy_enabled?: boolean;
+        };
+        SocialLabelRequest: {
+            /** @enum {string|null} */
+            label: "close_friend" | "partner" | "couple" | null;
+        };
+        SocialFriend: {
+            user: components["schemas"]["SocialUser"];
+            /** Format: uuid */
+            conversation_id: string;
+            remark: string;
+            muted: boolean;
+            intimacy_enabled: boolean;
+            peer_intimacy_enabled: boolean;
+            intimacy_score: number;
+            /** @enum {string|null} */
+            relationship_label: "close_friend" | "partner" | "couple" | null;
+            /** @enum {string|null} */
+            proposed_label: "close_friend" | "partner" | "couple" | null;
+            /** Format: uuid */
+            proposed_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SocialRequest: {
+            /** Format: uuid */
+            id: string;
+            from_user: components["schemas"]["SocialUser"];
+            to_user: components["schemas"]["SocialUser"];
+            note: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description Ephemeral body is always null here, including send responses, list results and snapshots. Only explicit receiver open returns ephemeral body. */
+        SocialMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversation_id: string;
+            seq: number;
+            /** Format: uuid */
+            sender_id: string;
+            /** Format: uuid */
+            client_message_id: string;
+            /** @enum {string} */
+            kind: "text" | "ephemeral";
+            body: string | null;
+            /** @enum {integer|null} */
+            ttl_seconds: 30 | 300 | 86400 | null;
+            /** Format: date-time */
+            opened_at: string | null;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            unopened_expires_at: string | null;
+            expired: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SocialConversation: {
+            /** Format: uuid */
+            id: string;
+            user: components["schemas"]["SocialUser"];
+            last_seq: number;
+            read_seq: number;
+            peer_read_seq: number;
+            unread_count: number;
+            /** @description Conversation preview only: ordinary body is at most 160 Unicode characters; retrieve full text through messages. Ephemeral body is always null. */
+            last_message: components["schemas"]["SocialMessage"] | null;
+            /** Format: date-time */
+            updated_at: string;
+            active: boolean;
+        };
+        SocialNotification: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "friend_request" | "friend_accepted" | "relationship_proposed" | "relationship_accepted";
+            user: components["schemas"]["SocialUser"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            read_at: string | null;
+        };
+        SocialSnapshot: {
+            /** Format: date-time */
+            server_time: string;
+            friends: components["schemas"]["SocialFriend"][];
+            requests: components["schemas"]["SocialRequest"][];
+            conversations: components["schemas"]["SocialConversation"][];
+            blocks: components["schemas"]["SocialUser"][];
+            notifications: components["schemas"]["SocialNotification"][];
+        };
+        SocialMessagePage: {
+            items: components["schemas"]["SocialMessage"][];
+            next_after_seq: number;
+            has_more: boolean;
+            /** Format: date-time */
+            server_time: string;
+        };
+        SocialSendRequest: {
+            /** Format: uuid */
+            client_message_id: string;
+            body: string;
+            /** @enum {integer|null} */
+            ttl_seconds: 30 | 300 | 86400 | null;
+        };
+        SocialReadRequest: {
+            through_seq: number;
+        };
+        SocialOpenedMessage: {
+            /** Format: uuid */
+            message_id: string;
+            body: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            server_time: string;
+        };
+        SocialReportRequest: {
+            /** Format: uuid */
+            client_report_id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: uuid */
+            message_id: string | null;
+            reason: string;
+            include_evidence: boolean;
+        };
+        SocialEphemeralState: {
+            items: components["schemas"]["SocialMessage"][];
+            /** Format: date-time */
+            server_time: string;
+        };
+        SocialReportReceipt: {
+            /** Format: uuid */
+            client_report_id: string;
+            /** @enum {string} */
+            status: "accepted";
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            server_time: string;
         };
     };
     responses: never;
@@ -2249,6 +2678,662 @@ export interface operations {
                 };
                 content: {
                     "text/html": string;
+                };
+            };
+        };
+    };
+    socialSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialSnapshot"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialRequestFriend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialFriendRequest"];
+            };
+        };
+        responses: {
+            /** @description Existing outgoing pending request */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialRequest"];
+                };
+            };
+            /** @description Success */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialRequest"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialRespondRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialDecision"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialDeleteFriend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialUpdateFriend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialFriendPatch"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialBlock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialTarget"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialUnblock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialProposeLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialRespondLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialDecision"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialMessages: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMessagePage"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialSendMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Replay of a committed message */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMessage"];
+                };
+            };
+            /** @description Success */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMessage"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialMessageByClient: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMessage"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialReadConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialReadRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialOpenMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialEmpty"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialOpenedMessage"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialReadNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialEmpty"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialMutation"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialEphemeralState: {
+        parameters: {
+            query: {
+                /** @description 1–100 unique comma-separated UUIDs of ephemeral messages from this conversation. */
+                message_ids: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialEphemeralState"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    socialReportByClient: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialReportReceipt"];
+                };
+            };
+            /** @description Structured social error; see contracts/social.md. */
+            default: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
         };

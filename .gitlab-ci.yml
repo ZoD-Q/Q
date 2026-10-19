@@ -91,6 +91,8 @@ mobile-check:
     - npm --prefix mobile run test:plugins
     - npm --prefix mobile run test:api-workbench
     - npm --prefix mobile run test:chat
+    - npm --prefix mobile run test:account
+    - npm --prefix mobile run test:social
     - npm --prefix mobile run api:generate
     - git diff --exit-code -- mobile/shared/src/generated.ts
     - npm --prefix mobile run export:web
@@ -109,6 +111,7 @@ backend-check:
     POSTGRES_DB: q_ci_test
     POSTGRES_USER: q_ci
     POSTGRES_PASSWORD: q_ci_disposable
+    PGPASSWORD: q_ci_disposable
     TEST_DATABASE_URL: postgresql://q_ci:q_ci_disposable@postgres:5432/q_ci_test
     CARGO_HOME: "$CI_PROJECT_DIR/.cargo-ci"
   cache:
@@ -121,7 +124,23 @@ backend-check:
       - .cargo-ci/git/
   before_script:
     - rustup component add rustfmt clippy
-    - apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    # pg_dump must match the matrix server major version; Bookworm's default client is older.
+    - |
+      apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+      install -d /usr/share/postgresql-common/pgdg
+      curl --fail --show-error --location --retry 2 --max-time 60 \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+      printf '%s\n' \
+        'Types: deb' \
+        'URIs: https://apt.postgresql.org/pub/repos/apt' \
+        'Suites: bookworm-pgdg' \
+        'Components: main' \
+        'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+        > /etc/apt/sources.list.d/pgdg.sources
+      apt-get update && apt-get install -y --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
+      export Q_PG_BIN_DIR="/usr/lib/postgresql/${POSTGRES_VERSION}/bin"
+      export PATH="$Q_PG_BIN_DIR:$PATH"
     - |
       ready=0
       for attempt in $(seq 1 30); do
@@ -138,6 +157,8 @@ backend-check:
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features video-test-fixtures -- -D warnings
     - cargo test --locked --manifest-path backend/Cargo.toml
     - cargo test --locked --manifest-path backend/Cargo.toml --test postgres -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --test social -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --test social_backup -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features ai-test-fixtures -- -D warnings
     - cargo test --locked --manifest-path backend/Cargo.toml --features ai-test-fixtures --test ai_chat -- --ignored

@@ -102,3 +102,7 @@ Limits: one admitted request per Q user, four globally, ten admissions per user 
 The response body owns the upstream future/response and concurrency permit. Client cancellation/drop stops polling and releases these resources; there is no detached generation task or automatic retry. This does not promise provider refunds or zero usage after cancellation. Chat requests do not write wallet entries or persist conversation text. Account registration still follows the existing identity/profile/demo-wallet transaction.
 
 The app uses the shared Q session store: native SecureStore, web memory only, serialized writes, guarded authentication results, conditional clearing and change notifications. A snapshot revision prevents delayed `/me` from restoring a logged-out session. Account changes and logout cancel in-flight chat and clear client conversation history, including hidden pages and sidebar titles.
+
+## Social conversations
+
+Authenticated friends, one-to-one messages, explicit ephemeral opening, intimacy, relationship confirmation and reports are specified in [Social API](social.md). They share Q identity but never share AI conversation content or provider credentials.

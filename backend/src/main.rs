@@ -44,6 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tracing::info!("explicit local demo seed enabled; existing accounts are preserved");
     }
     let listener = tokio::net::TcpListener::bind(bind).await?;
+    let social_cleanup = xiaoq_backend::social::spawn_cleanup(pool.clone());
     tracing::info!(%bind, mode = "demo", "小Q API listening");
     axum::serve(
         listener,
@@ -53,6 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await?;
+    social_cleanup.abort();
+    let _ = social_cleanup.await;
     pool.close().await;
     Ok(())
 }

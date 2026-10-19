@@ -36,8 +36,7 @@ export type PageId =
   | "finance"
   | "wallet"
   | "keys"
-  | "profile"
-  | "messages";
+  | "profile";
 export type ThemeId = "warm" | "light" | "dark";
 export type LocaleId = "zh" | "en";
 export interface Colors {
@@ -128,7 +127,7 @@ const Context = createContext<DesignState | null>(null);
 export function DesignProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<ThemeId>("light");
   const [locale, setLocale] = useState<LocaleId>("zh");
-  const [name, setName] = useState("Kai");
+  const [name, setName] = useState("访客");
   const [profileBio, setProfileBio] = useState("");
   const [profileAvatar, setProfileAvatar] = useState("orbit");
   const [notice, setNotice] = useState("");

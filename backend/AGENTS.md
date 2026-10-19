@@ -4,6 +4,7 @@
 
 - Q 的业务服务使用 Rust、Axum、Tokio、SQLx 与 PostgreSQL，保持模块化单体。Node/npm 只用于本地开发与验证工具；不用 SQLite 或内存假实现替换真实数据库验收。
 - 接口改动先读 [API 合同](contracts/api.md) 和 [OpenAPI](contracts/openapi.json)。合同与实现一起更新，再从根目录运行 `npm --prefix mobile run api:generate`；生成类型不得手改。
+- `social` 拥有好友、私聊、阅后、亲密与举报。双方变更锁已存在的 identities 行并按 UUID 稳定顺序；会话序号在同事务提交。阅后与举报按绝对时间到期，备份排除临时正文、报告和证据表，保留最小幂等墓碑。验收使用真实 PostgreSQL 与实际备份恢复，见 [社交合同](contracts/social.md)。
 - `identity` 拥有凭据与会话，`profiles` 拥有可编辑资料，`ledger` 独占余额与分录写入。`payments` 只是规划边界，不能写成已实现支付模块；其他未来领域按需求增加。
 - 注册时身份、资料、钱包与模拟欢迎金在同一数据库事务中完成。授权来自服务端会话，不相信客户端用户 ID；资料更新不能越权修改身份或金额。
 - 当前金额全部为模拟 QDC。整数最小单位、用户不可透支、稳定 UUID 锁顺序、借贷平衡和发起人级幂等必须同时成立；分录、缓存余额和幂等写入保持原子。重复请求返回原结果，不同载荷复用键返回冲突。

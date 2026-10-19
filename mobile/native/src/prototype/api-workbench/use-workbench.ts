@@ -1,168 +1,154 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { fetch as expoFetch } from "expo/fetch";
-import { randomUUID } from "expo-crypto";
-import type { User, VideoConnection, VideoConnectionRequest, VideoJob, VideoJobRequest } from "@xiaoq/shared";
-import { API_URL } from "../../services/api";
-import { readToken, removeToken, writeToken } from "../../services/session-store";
-import { decodeAuth, decodeConnection, decodeJob, decodeList, decodeUser, isSafeSubmissionRejection, loadWorkbenchSnapshot, workbenchRequest, WorkbenchError, type PendingVideo } from "./core";
-import { pendingStore } from "./pending-store";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { fetch as expoFetch } from 'expo/fetch';
+import { randomUUID } from 'expo-crypto';
+import type { AuthResponse, VideoConnection, VideoConnectionRequest, VideoJob, VideoJobRequest } from '@xiaoq/shared';
+import { API_URL } from '../../services/api';
+import { removeToken, subscribeSession } from '../../services/session-store';
+import { useQAccount } from '../account/account-state';
+import { decodeConnection, decodeJob, decodeList, isSafeSubmissionRejection, loadWorkbenchSnapshot, workbenchRequest, WorkbenchError, type PendingVideo } from './core';
+import { pendingStore } from './pending-store';
 
-type Session = { token: string; user: User };
-type Generation = Pick<VideoJobRequest, "connection_id" | "prompt" | "duration" | "aspect_ratio">;
+type Generation = Pick<VideoJobRequest, 'connection_id' | 'prompt' | 'duration' | 'aspect_ratio'>;
 
 export function useWorkbench() {
-  const [session, setSession] = useState<Session | null>(null);
-  const current = useRef<Session | null>(null);
+  const account = useQAccount();
+  const session = account.session;
+  const current = useRef<AuthResponse | null>(null);
+  const generation = useRef(0);
   const alive = useRef(true);
   const requests = useRef(new Set<AbortController>());
   const locked = useRef(false);
-  const [busy, setBusy] = useState<string | null>("restore");
+  const [busy, setBusy] = useState<string | null>('restore');
+  const [boundToken, setBoundToken] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [connections, setConnections] = useState<VideoConnection[]>([]);
   const [jobs, setJobs] = useState<VideoJob[]>([]);
   const [pending, setPending] = useState<PendingVideo | null>(null);
   const [ready, setReady] = useState(false);
-
-  const call = useCallback(async <T,>(path: string, decode: (value: unknown) => T, token: string | null, method: "GET" | "POST" | "DELETE" = "GET", body?: unknown) => {
-    if (!alive.current) throw new WorkbenchError("CANCELLED");
+  const isActive = useCallback((active: AuthResponse) => alive.current && current.current === active, []);
+  const clear = useCallback(() => {
+    generation.current++;
+    for (const request of requests.current) request.abort();
+    requests.current.clear(); locked.current = false; current.current = null;
+    setBoundToken(null); setConnections([]); setJobs([]); setPending(null); setReady(false); setLoadError(null); setError(null); setBusy(null);
+  }, []);
+  const call = useCallback(async <T,>(path: string, decode: (value: unknown) => T, token: string, method: 'GET' | 'POST' | 'DELETE' = 'GET', body?: unknown) => {
+    if (!alive.current) throw new WorkbenchError('CANCELLED');
     const controller = new AbortController();
     requests.current.add(controller);
-    try {
-      return await workbenchRequest({ baseUrl: API_URL, path, decode, token, method, body, signal: controller.signal, transport: expoFetch });
-    } finally { requests.current.delete(controller); }
+    try { return await workbenchRequest({ baseUrl: API_URL, path, decode, token, method, body, signal: controller.signal, transport: expoFetch }); }
+    finally { requests.current.delete(controller); }
   }, []);
-
-  const load = useCallback(async (active: Session) => {
-    if (alive.current) setReady(false);
+  const load = useCallback(async (active: AuthResponse) => {
+    if (!isActive(active)) return;
+    setReady(false);
     const snapshot = await loadWorkbenchSnapshot({
       pending: () => pendingStore.read(active.user.id),
-      connections: () => call("/v1/video/connections", decodeList(decodeConnection), active.token),
-      jobs: () => call("/v1/video/jobs", decodeList(decodeJob), active.token),
+      connections: () => call('/v1/video/connections', decodeList(decodeConnection), active.token),
+      jobs: () => call('/v1/video/jobs', decodeList(decodeJob), active.token),
     });
-    if (alive.current && current.current === active) {
-      // A corrupt pending record remains untouched, but known tasks and revocation stay usable.
-      if (snapshot.pending.status === "fulfilled") setPending(snapshot.pending.value);
-      if (snapshot.connections.status === "fulfilled") setConnections(snapshot.connections.value);
-      if (snapshot.jobs.status === "fulfilled") setJobs(snapshot.jobs.value);
-      setReady(snapshot.failure === null);
-      setLoadError(snapshot.failure?.reason ?? null);
-    }
+    if (!isActive(active)) return;
+    // Storage corruption keeps pending recovery blocked while server history remains usable.
+    if (snapshot.pending.status === 'fulfilled') setPending(snapshot.pending.value);
+    if (snapshot.connections.status === 'fulfilled') setConnections(snapshot.connections.value);
+    if (snapshot.jobs.status === 'fulfilled') setJobs(snapshot.jobs.value);
+    setReady(snapshot.failure === null); setLoadError(snapshot.failure?.reason ?? null);
     if (snapshot.failure) throw snapshot.failure.reason;
-  }, [call]);
-
+  }, [call, isActive]);
   const run = useCallback(async (name: string, action: () => Promise<void>) => {
-    if (locked.current) return false;
-    locked.current = true;
-    if (alive.current) { setBusy(name); setError(null); }
-    try { await action(); return true; }
+    if (locked.current || !alive.current) return false;
+    const version = generation.current;
+    const token = current.current?.token;
+    locked.current = true; setBusy(name); setError(null);
+    try { await action(); return alive.current && version === generation.current; }
     catch (failure) {
-      if (alive.current) {
+      if (alive.current && version === generation.current) {
         setError(failure);
-        if (failure instanceof WorkbenchError && failure.status === 401 && failure.code !== "INVALID_CREDENTIALS") {
-          const expiredToken = current.current?.token;
-          current.current = null;
-          setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false);
-          setLoadError(null);
-          if (expiredToken) await removeToken(expiredToken).catch(() => { setError(new WorkbenchError("STORAGE_ERROR")); });
+        if (failure instanceof WorkbenchError && failure.status === 401 && token) {
+          clear();
+          await removeToken(token).catch(() => { if (alive.current && current.current === null) setError(new WorkbenchError('STORAGE_ERROR')); });
         }
       }
       return false;
     } finally {
-      locked.current = false;
-      if (alive.current) setBusy(null);
+      if (alive.current && version === generation.current) { locked.current = false; setBusy(null); }
     }
-  }, []);
-
-  const restore = useCallback(() => run("restore", async () => {
-    const stored = await readToken();
-    if (!stored || !alive.current) return;
-    const user = await call("/v1/me", decodeUser, stored);
-    if (!alive.current) return;
-    const active = { token: stored, user };
-    current.current = active; setSession(active);
-    await load(active);
-  }), [call, load, run]);
-
+  }, [clear]);
+  const activate = useEffectEvent(() => {
+    clear();
+    if (!session) return;
+    current.current = session; setBoundToken(session.token);
+    void run('restore', () => load(session));
+  });
   useEffect(() => {
     alive.current = true;
-    void restore();
+    const unsubscribe = subscribeSession(token => {
+      if ((current.current?.token ?? null) !== token) clear();
+    });
     const inflight = requests.current;
-    return () => {
-      alive.current = false;
-      for (const controller of inflight) controller.abort();
-    };
-  }, [restore]);
+    const epoch = generation;
+    return () => { alive.current = false; epoch.current++; unsubscribe(); for (const request of inflight) request.abort(); };
+  }, [clear]);
+  useEffect(() => {
+    // Bind private workbench state to the globally verified Q identity, including external sign-out.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    activate();
+  }, [session?.token]);
 
-  const authenticate = (mode: "login" | "register", fields: { handle: string; password: string; display_name?: string }) => run("auth", async () => {
-    const result = await call(`/v1/auth/${mode}`, decodeAuth, null, "POST", fields);
-    if (!alive.current) return;
-    if (!await writeToken(result.token, () => alive.current)) return;
-    if (!alive.current) return;
-    current.current = result; setSession(result);
-    await load(result);
+  const refresh = () => run('refresh', async () => { if (current.current) await load(current.current); });
+  const restore = async () => { await account.refresh(); return true; };
+  const logout = async () => { clear(); await account.logout(); return true; };
+  const addConnection = (body: VideoConnectionRequest) => run('connection', async () => {
+    const active = current.current; if (!active) return;
+    const result = await call('/v1/video/connections', decodeConnection, active.token, 'POST', body);
+    if (isActive(active)) setConnections(items => [result, ...items]);
   });
-
-  const refresh = () => run("refresh", async () => {
-    const active = current.current;
-    if (active) await load(active);
+  const revokeConnection = (id: string) => run('revoke', async () => {
+    const active = current.current; if (!active) return;
+    await call('/v1/video/connections/' + encodeURIComponent(id), () => undefined, active.token, 'DELETE');
+    if (isActive(active)) setConnections(items => items.map(item => item.id === id ? { ...item, revoked: true } : item));
   });
-  const logout = () => run("logout", async () => {
-    const active = current.current;
-    if (!active) return;
-    await call("/v1/auth/logout", () => undefined, active.token, "POST");
-    await removeToken(active.token);
-    current.current = null;
-    if (alive.current) { setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false); setLoadError(null); }
-  });
-  const addConnection = (body: VideoConnectionRequest) => run("connection", async () => {
-    const active = current.current;
-    if (!active) return;
-    const result = await call("/v1/video/connections", decodeConnection, active.token, "POST", body);
-    if (alive.current) setConnections((items) => [result, ...items]);
-  });
-  const revokeConnection = (id: string) => run("revoke", async () => {
-    const active = current.current;
-    if (!active) return;
-    await call(`/v1/video/connections/${encodeURIComponent(id)}`, () => undefined, active.token, "DELETE");
-    if (alive.current) setConnections((items) => items.map((item) => item.id === id ? { ...item, revoked: true } : item));
-  });
-  const recordJob = (job: VideoJob) => { if (alive.current) setJobs((items) => [job, ...items.filter((item) => item.id !== job.id)]); };
-  const submitPending = async (active: Session, intent: PendingVideo) => {
-    let job: VideoJob;
-    try {
-      job = await call("/v1/video/jobs", decodeJob, active.token, "POST", intent.request);
-    } catch (error) {
-      if (isSafeSubmissionRejection(error)) {
-        await pendingStore.clear(active.user.id, intent.request.idempotency_key);
-        if (alive.current) setPending(null);
-      }
-      throw error;
-    }
-    recordJob(job);
-    await pendingStore.clear(active.user.id, intent.request.idempotency_key);
-    if (alive.current) setPending(null);
+  const recordJob = (active: AuthResponse, job: VideoJob) => {
+    if (isActive(active)) setJobs(items => [job, ...items.filter(item => item.id !== job.id)]);
   };
-  const createJob = (fields: Generation) => run("create", async () => {
-    const active = current.current;
-    if (!active || !ready) return;
-    const intent: PendingVideo = { owner_id: active.user.id, request: { ...fields, model_name: "kling-v2-6", mode: "pro", idempotency_key: randomUUID() } };
+  const submitPending = async (active: AuthResponse, intent: PendingVideo) => {
+    if (!isActive(active)) return;
+    let job: VideoJob;
+    try { job = await call('/v1/video/jobs', decodeJob, active.token, 'POST', intent.request); }
+    catch (failure) {
+      if (isSafeSubmissionRejection(failure)) {
+        await pendingStore.clear(active.user.id, intent.request.idempotency_key);
+        if (isActive(active)) setPending(null);
+      }
+      throw failure;
+    }
+    recordJob(active, job);
+    await pendingStore.clear(active.user.id, intent.request.idempotency_key);
+    if (isActive(active)) setPending(null);
+  };
+  const createJob = (fields: Generation) => run('create', async () => {
+    const active = current.current; if (!active || !ready) return;
+    const intent: PendingVideo = { owner_id: active.user.id, request: { ...fields, model_name: 'kling-v2-6', mode: 'pro', idempotency_key: randomUUID() } };
     await pendingStore.save(intent);
-    if (alive.current) setPending(intent);
+    if (!isActive(active)) return;
+    setPending(intent);
     await submitPending(active, intent);
   });
-  const recover = () => run("recover", async () => {
-    const active = current.current;
-    if (!active) return;
+  const recover = () => run('recover', async () => {
+    const active = current.current; if (!active) return;
     const intent = await pendingStore.read(active.user.id);
+    if (!isActive(active)) return;
     if (intent) await submitPending(active, intent);
     await load(active);
   });
-  const refreshJob = (id: string) => run("job", async () => {
-    const active = current.current;
-    if (!active) return;
-    recordJob(await call(`/v1/video/jobs/${encodeURIComponent(id)}`, decodeJob, active.token));
+  const refreshJob = (id: string) => run('job', async () => {
+    const active = current.current; if (!active) return;
+    recordJob(active, await call('/v1/video/jobs/' + encodeURIComponent(id), decodeJob, active.token));
   });
-
-  return { session, busy, error: error ?? loadError, connections, jobs, pending, ready, restore, authenticate, refresh, logout, addConnection, revokeConnection, createJob, recover, refreshJob };
+  const bound = !!session && boundToken === session.token;
+  return { session, busy: account.loading ? 'restore' : account.authBusy ? 'auth' : busy,
+    error: error ?? loadError ?? (account.error || account.logoutError ? new WorkbenchError(account.error || account.logoutError) : null),
+    connections: bound ? connections : [], jobs: bound ? jobs : [], pending: bound ? pending : null, ready: bound && ready,
+    restore, authenticate: account.authenticate, refresh, logout, addConnection, revokeConnection, createJob, recover, refreshJob };
 }

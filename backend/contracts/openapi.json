@@ -1812,6 +1812,1329 @@
           }
         }
       }
+    },
+    "/v1/social/snapshot": {
+      "get": {
+        "operationId": "socialSnapshot",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/requests": {
+      "post": {
+        "operationId": "socialRequestFriend",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialRequest"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Existing outgoing pending request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialRequest"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialFriendRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/requests/{id}/respond": {
+      "post": {
+        "operationId": "socialRespondRequest",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialDecision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/friends/{user_id}": {
+      "patch": {
+        "operationId": "socialUpdateFriend",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialFriendPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "socialDeleteFriend",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/social/blocks": {
+      "post": {
+        "operationId": "socialBlock",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialTarget"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/blocks/{user_id}": {
+      "delete": {
+        "operationId": "socialUnblock",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/social/friends/{user_id}/label": {
+      "post": {
+        "operationId": "socialProposeLabel",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialLabelRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/friends/{user_id}/label/respond": {
+      "post": {
+        "operationId": "socialRespondLabel",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialDecision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/conversations/{id}/messages": {
+      "get": {
+        "operationId": "socialMessages",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMessagePage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "socialSendMessage",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replay of a committed message",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMessage"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialSendRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/messages/by-client/{client_message_id}": {
+      "get": {
+        "operationId": "socialMessageByClient",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "client_message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/social/conversations/{id}/read": {
+      "post": {
+        "operationId": "socialReadConversation",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialReadRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/messages/{id}/open": {
+      "post": {
+        "operationId": "socialOpenMessage",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialOpenedMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialEmpty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/reports": {
+      "post": {
+        "operationId": "socialReport",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialReportRequest"
+              }
+            }
+          }
+        },
+        "description": "Idempotent report submission. Refusing unopened ephemeral evidence with 403 SOCIAL_FORBIDDEN reserves a content-free permanent rejection receipt; later GET or POST with that client_report_id returns 410 even after opening. Existing accepted receipts take precedence. See contracts/social.md."
+      }
+    },
+    "/v1/social/notifications/{id}/read": {
+      "post": {
+        "operationId": "socialReadNotification",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialMutation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialEmpty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/social/conversations/{id}/ephemeral-state": {
+      "get": {
+        "operationId": "socialEphemeralState",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialEphemeralState"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 3699
+            },
+            "description": "1–100 unique comma-separated UUIDs of ephemeral messages from this conversation."
+          }
+        ]
+      }
+    },
+    "/v1/social/reports/by-client/{client_report_id}": {
+      "get": {
+        "operationId": "socialReportByClient",
+        "tags": [
+          "social"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialReportReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured social error; see contracts/social.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "client_report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "description": "Owner-only minimal acceptance receipt; unknown/foreign IDs return 404, expired or unavailable report/evidence returns 410. Never returns report target, reason, message ID or evidence."
+      }
     }
   },
   "components": {
@@ -3172,6 +4495,652 @@
           "arguments"
         ],
         "additionalProperties": false
+      },
+      "SocialUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "avatar": {
+            "$ref": "#/components/schemas/AvatarName"
+          }
+        },
+        "required": [
+          "id",
+          "handle",
+          "display_name",
+          "avatar"
+        ]
+      },
+      "SocialMutation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "SocialEmpty": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "SocialDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accept": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accept"
+        ]
+      },
+      "SocialTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      },
+      "SocialFriendRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "user_id",
+          "note"
+        ]
+      },
+      "SocialFriendPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "remark": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "intimacy_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "minProperties": 1
+      },
+      "SocialLabelRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "enum": [
+              "close_friend",
+              "partner",
+              "couple",
+              null
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "label"
+        ]
+      },
+      "SocialFriend": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/SocialUser"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "intimacy_enabled": {
+            "type": "boolean"
+          },
+          "peer_intimacy_enabled": {
+            "type": "boolean"
+          },
+          "intimacy_score": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "relationship_label": {
+            "type": "string",
+            "enum": [
+              "close_friend",
+              "partner",
+              "couple",
+              null
+            ],
+            "nullable": true
+          },
+          "proposed_label": {
+            "type": "string",
+            "enum": [
+              "close_friend",
+              "partner",
+              "couple",
+              null
+            ],
+            "nullable": true
+          },
+          "proposed_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "user",
+          "conversation_id",
+          "remark",
+          "muted",
+          "intimacy_enabled",
+          "peer_intimacy_enabled",
+          "intimacy_score",
+          "relationship_label",
+          "proposed_label",
+          "proposed_by",
+          "created_at"
+        ]
+      },
+      "SocialRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "from_user": {
+            "$ref": "#/components/schemas/SocialUser"
+          },
+          "to_user": {
+            "$ref": "#/components/schemas/SocialUser"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "from_user",
+          "to_user",
+          "note",
+          "created_at"
+        ]
+      },
+      "SocialMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "sender_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "client_message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "ephemeral"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "enum": [
+              30,
+              300,
+              86400,
+              null
+            ],
+            "nullable": true
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "unopened_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "seq",
+          "sender_id",
+          "client_message_id",
+          "kind",
+          "body",
+          "ttl_seconds",
+          "opened_at",
+          "expires_at",
+          "unopened_expires_at",
+          "expired",
+          "created_at"
+        ],
+        "description": "Ephemeral body is always null here, including send responses, list results and snapshots. Only explicit receiver open returns ephemeral body."
+      },
+      "SocialConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user": {
+            "$ref": "#/components/schemas/SocialUser"
+          },
+          "last_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "read_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "peer_read_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unread_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_message": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SocialMessage"
+              }
+            ],
+            "nullable": true,
+            "description": "Conversation preview only: ordinary body is at most 160 Unicode characters; retrieve full text through messages. Ephemeral body is always null."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "user",
+          "last_seq",
+          "read_seq",
+          "peer_read_seq",
+          "unread_count",
+          "last_message",
+          "updated_at",
+          "active"
+        ]
+      },
+      "SocialNotification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "friend_request",
+              "friend_accepted",
+              "relationship_proposed",
+              "relationship_accepted"
+            ]
+          },
+          "user": {
+            "$ref": "#/components/schemas/SocialUser"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "user",
+          "created_at",
+          "read_at"
+        ]
+      },
+      "SocialSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "friends": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialFriend"
+            }
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialRequest"
+            }
+          },
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialConversation"
+            }
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialUser"
+            }
+          },
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialNotification"
+            }
+          }
+        },
+        "required": [
+          "server_time",
+          "friends",
+          "requests",
+          "conversations",
+          "blocks",
+          "notifications"
+        ]
+      },
+      "SocialMessagePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialMessage"
+            }
+          },
+          "next_after_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "items",
+          "next_after_seq",
+          "has_more",
+          "server_time"
+        ]
+      },
+      "SocialSendRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "enum": [
+              30,
+              300,
+              86400,
+              null
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "client_message_id",
+          "body",
+          "ttl_seconds"
+        ]
+      },
+      "SocialReadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "through_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "through_seq"
+        ]
+      },
+      "SocialOpenedMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "message_id",
+          "body",
+          "expires_at",
+          "server_time"
+        ]
+      },
+      "SocialReportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "include_evidence": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "client_report_id",
+          "user_id",
+          "message_id",
+          "reason",
+          "include_evidence"
+        ]
+      },
+      "SocialEphemeralState": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialMessage"
+            }
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "items",
+          "server_time"
+        ]
+      },
+      "SocialReportReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "client_report_id",
+          "status",
+          "expires_at",
+          "server_time"
+        ]
       }
     }
   }
