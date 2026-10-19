@@ -17,3 +17,5 @@
 - 从本目录运行 `npm run typecheck`、`npm run lint`，按变更运行 `test:utils` / `test:video`；UI 变更再做 `export:web` 和实际页面检查，原生行为在设备/模拟器验证。只测浏览器不能声称 iOS/Android 已验收。
 
 详细依据：[架构](docs/architecture.md)、[最新设计](docs/ui-research-2026-10-18.md)、[插件来源](docs/plugin-catalog-source.md)、[视频原型](docs/video-prototype.md)、[验收记录](docs/testing.md)。
+
+- DeepSeek 密钥只在服务端。聊天与 API 工作台共用串行会话存储，变更令牌须通知订阅者；旧 401 只条件删除对应令牌，延迟登录写入须有代次 guard。聊天停止应取消上游读取，不能只停止更新文字。见 [对话说明](docs/deepseek-chat.md)。

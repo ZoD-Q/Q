@@ -18,6 +18,7 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 
+pub mod ai;
 pub mod error;
 pub mod identity;
 pub mod ledger;
@@ -34,6 +35,7 @@ pub struct AppState {
     dummy_hash: Arc<String>,
     limiter: Arc<Mutex<AuthLimiter>>,
     pub video: Option<Arc<video::VideoRuntime>>,
+    pub ai: Option<Arc<ai::AiRuntime>>,
 }
 
 impl AppState {
@@ -49,6 +51,7 @@ impl AppState {
             dummy_hash,
             limiter: Arc::new(Mutex::new(AuthLimiter::default())),
             video: None,
+            ai: None,
         })
     }
     fn limit_auth(&self, key: String, limit: u32) -> ApiResult<()> {
@@ -143,6 +146,12 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .route("/v1/video/jobs", get(video::jobs).post(video::create_job))
         .route("/v1/video/jobs/{id}", get(video::job))
         .layer(DefaultBodyLimit::max(16 * 1024))
+        .merge(
+            Router::new()
+                .route("/v1/ai/status", get(ai::status))
+                .route("/v1/ai/chat", post(ai::chat))
+                .layer(DefaultBodyLimit::max(128 * 1024)),
+        )
         .layer(cors)
         .with_state(state)
 }

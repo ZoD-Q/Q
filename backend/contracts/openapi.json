@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "小Q API",
-    "version": "0.2.0",
-    "description": "QDC ledger is simulated; explicitly configured personal Kling connections can make real supplier requests. Local development, not production certified."
+    "version": "0.3.0",
+    "description": "QDC ledger is simulated. Configured DeepSeek chat and personal Kling connections make real supplier requests. Local development, not production certified."
   },
   "servers": [
     {
@@ -646,6 +646,85 @@
           }
         ]
       }
+    },
+    "/v1/ai/status": {
+      "get": {
+        "operationId": "aiStatus",
+        "tags": [
+          "ai"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Configuration presence and allowed models; no key fragments or environment values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured local error, before opening a stream. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ai/chat": {
+      "post": {
+        "operationId": "aiChat",
+        "tags": [
+          "ai"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE events: status {phase:thinking|responding}, delta {text}, done AiDone, or terminal error {code,message}. Provider connection failures are terminal SSE errors. No reasoning text. EOF without a terminal event is incomplete. See contracts/api.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "no-store"
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured local error, before opening a stream. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1283,6 +1362,147 @@
             "items": {
               "$ref": "#/components/schemas/VideoJob"
             }
+          }
+        }
+      },
+      "AiModel": {
+        "type": "string",
+        "enum": [
+          "deepseek-flash",
+          "deepseek-v4-pro"
+        ]
+      },
+      "AiModelInfo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/AiModel"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "AiStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configured",
+          "models"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiModelInfo"
+            }
+          }
+        }
+      },
+      "AiHistoryMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          }
+        }
+      },
+      "AiChatRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "thinking",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/AiModel"
+          },
+          "thinking": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 40,
+            "items": {
+              "$ref": "#/components/schemas/AiHistoryMessage"
+            },
+            "description": "At most 24000 Unicode characters in total. Last role must be user. No client system messages, tools, credentials or provider URLs."
+          }
+        }
+      },
+      "AiUsage": {
+        "type": "object",
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AiFinishReason": {
+        "type": "string",
+        "enum": [
+          "stop",
+          "length",
+          "content_filter",
+          "tool_calls",
+          "insufficient_system_resource",
+          "aborted"
+        ]
+      },
+      "AiDone": {
+        "type": "object",
+        "required": [
+          "model",
+          "finish_reason"
+        ],
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/AiModel"
+          },
+          "finish_reason": {
+            "$ref": "#/components/schemas/AiFinishReason"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AiUsage"
           }
         }
       }

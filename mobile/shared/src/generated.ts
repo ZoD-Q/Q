@@ -220,6 +220,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ai/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["aiStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["aiChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -390,6 +422,39 @@ export interface components {
         };
         VideoJobList: {
             items: components["schemas"]["VideoJob"][];
+        };
+        /** @enum {string} */
+        AiModel: "deepseek-flash" | "deepseek-v4-pro";
+        AiModelInfo: {
+            id: components["schemas"]["AiModel"];
+            name: string;
+        };
+        AiStatus: {
+            configured: boolean;
+            models: components["schemas"]["AiModelInfo"][];
+        };
+        AiHistoryMessage: {
+            /** @enum {string} */
+            role: "user" | "assistant";
+            content: string;
+        };
+        AiChatRequest: {
+            model: components["schemas"]["AiModel"];
+            thinking: boolean;
+            /** @description At most 24000 Unicode characters in total. Last role must be user. No client system messages, tools, credentials or provider URLs. */
+            messages: components["schemas"]["AiHistoryMessage"][];
+        };
+        AiUsage: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+        };
+        /** @enum {string} */
+        AiFinishReason: "stop" | "length" | "content_filter" | "tool_calls" | "insufficient_system_resource" | "aborted";
+        AiDone: {
+            model: components["schemas"]["AiModel"];
+            finish_reason: components["schemas"]["AiFinishReason"];
+            usage?: components["schemas"]["AiUsage"];
         };
     };
     responses: never;
@@ -889,6 +954,70 @@ export interface operations {
                 };
             };
             /** @description Structured error. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    aiStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration presence and allowed models; no key fragments or environment values. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiStatus"];
+                };
+            };
+            /** @description Safe structured local error, before opening a stream. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    aiChat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiChatRequest"];
+            };
+        };
+        responses: {
+            /** @description SSE events: status {phase:thinking|responding}, delta {text}, done AiDone, or terminal error {code,message}. Provider connection failures are terminal SSE errors. No reasoning text. EOF without a terminal event is incomplete. See contracts/api.md. */
+            200: {
+                headers: {
+                    /** @description no-store */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Safe structured local error, before opening a stream. See contracts/api.md. */
             default: {
                 headers: {
                     [name: string]: unknown;

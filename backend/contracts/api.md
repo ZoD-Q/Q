@@ -46,3 +46,26 @@ A durable owner-scoped idempotency record is committed before any supplier POST.
 Connection and job schemas are in OpenAPI. Status: `submitting|unknown|submitted|processing|succeeded|failed`. Nullable `provider_task_id`, `video_url`, `error_code`. Result media is a validated supplier HTTPS URL with supplier retention/expiry; Q does not guarantee permanent storage. Credentials are authenticated-encrypted under server `Q_VIDEO_ENCRYPTION_KEY` (standard Base64 of 32 random bytes), bound to owner and connection. Missing key fails closed for credential/network operations (`503 VIDEO_UNAVAILABLE`). All authenticated history remains owner-scoped.
 
 Errors include 404 `VIDEO_CONNECTION_NOT_FOUND`/`VIDEO_JOB_NOT_FOUND`, 409 `VIDEO_CONNECTION_REVOKED`/`IDEMPOTENCY_CONFLICT`, 429 `RATE_LIMITED`, and the usual validation/authentication errors. `VIDEO_SUBMISSION_UNKNOWN` in a job requires checking the existing supplier task, never blind resubmission. HTTP timeouts, bounded response bodies and disabled redirects keep provider credentials on fixed intended origins.
+
+## DeepSeek text conversations
+
+`GET /v1/ai/status` is public and returns `{configured, models:[{id,name}]}` only. `configured` means a server key exists, not that a paid provider request has succeeded. Allowed IDs are `deepseek-flash` and `deepseek-v4-pro`; the UI defaults to Flash. No key fragments, upstream headers or environment diagnostics are exposed.
+
+`POST /v1/ai/chat` requires the existing Q Bearer session. Body is `{model,thinking,messages:[{role:"user"|"assistant",content}]}`. Unknown fields, client system/tool roles, empty messages, unsupported models, over 40 messages, over 12000 Unicode characters per message, over 24000 total characters or a non-user final message are rejected. The route body limit is 128 KiB. The server supplies the system prompt, provider address, key and output budget; clients cannot override them.
+
+A successful local admission opens `text/event-stream`. These are SSE `event:` names and JSON `data:` bodies (the JSON has no `type` field):
+
+- `status`: `{phase:"thinking"|"responding"}`. Raw reasoning text is not forwarded.
+- `delta`: `{text}`. Append in order; a large provider delta is split at UTF-8 character boundaries into at most 8 KiB text segments, keeping public frames below 64 KiB after JSON escaping.
+- `done`: `{model,finish_reason,usage?}`. Usage, when present, has `prompt_tokens`, `completion_tokens`, `total_tokens` and is a request total, not a per-chunk increment. Only `stop` with a nonempty answer is complete. `length` or filtering means an incomplete answer. Unsupported/aborted provider termination can instead become a safe terminal error.
+- `error`: `{code,message}`. Terminal, never followed by `done`. The client localizes the code and does not display raw provider bodies.
+
+Local authentication/configuration/validation/admission failures return normal HTTP JSON errors before SSE. Provider connection or HTTP failures happen inside the response body and are terminal SSE errors even when the HTTP status is 200. EOF without a terminal success event is incomplete. Keep-alive comment frames are not answer content. The client retains partial answers after interruption; retries are explicit and do not duplicate the user message or include failed assistant text as model history.
+
+Codes include 503 `AI_NOT_CONFIGURED`, 429 `AI_BUSY` / `AI_RATE_LIMITED`, and existing 400 `VALIDATION_ERROR` / 401 `UNAUTHORIZED`. Stream errors include `AI_AUTH_ERROR`, `AI_QUOTA_EXCEEDED`, `AI_UPSTREAM_ERROR`, `AI_TIMEOUT`; provider errors contain no secrets or raw diagnostic bodies.
+
+Limits: one admitted request per Q user, four globally, ten admissions per user per minute; counters are process-local. Provider connect timeout 10s, idle timeout 60s, total deadline 180s. Output text is capped at 1 MiB, upstream raw data at 8 MiB and each upstream frame at 256 KiB. Output tokens are capped at 4096 normally or 8192 with thinking. The client allows 190s total, 40s without incoming bytes, 2 MiB response bytes, and 64 KiB per public SSE frame; server keep-alives keep an active thinking request alive.
+
+The response body owns the upstream future/response and concurrency permit. Client cancellation/drop stops polling and releases these resources; there is no detached generation task or automatic retry. This does not promise provider refunds or zero usage after cancellation. Chat requests do not write wallet entries or persist conversation text. Account registration still follows the existing identity/profile/demo-wallet transaction.
+
+The app uses the shared Q session store: native SecureStore, web memory only, serialized writes, guarded authentication results, conditional clearing and change notifications. A snapshot revision prevents delayed `/me` from restoring a logged-out session. Account changes and logout cancel in-flight chat and clear client conversation history, including hidden pages and sidebar titles.

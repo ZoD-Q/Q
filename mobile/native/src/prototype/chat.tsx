@@ -1,4 +1,4 @@
-import { useRef, useState, type ComponentRef } from "react";
+import { useEffect, useRef, useState, type ComponentRef } from "react";
 import {
   KeyboardAvoidingView,
   Pressable,
@@ -12,13 +12,14 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
-  Globe2,
   Lightbulb,
   Paperclip,
   Plus,
   Search,
   SlidersHorizontal,
   SquarePen,
+  Square,
+  RotateCcw,
 } from "lucide-react-native";
 import {
   Action,
@@ -33,16 +34,14 @@ import {
 } from "./design";
 import { Reveal, selectionFeedback } from "./motion";
 
-export interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-}
-export interface Conversation {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-}
+import type { Conversation } from "./ai-chat/state-model";
+import { MODEL_NAMES } from "./ai-chat/state-model";
+import type { ChatController } from "./ai-chat/use-chat";
+import { ChatAuthSheet } from "./ai-chat/auth-sheet";
+import { chatErrorMessage } from "./ai-chat/messages";
+import type { AiModel } from "@xiaoq/shared";
+export type { Conversation, ChatMessage } from "./ai-chat/state-model";
+
 export function QGlyph({ size = 48 }: { size?: number }) {
   const { colors } = useDesign();
   return (
@@ -66,31 +65,11 @@ export function QGlyph({ size = 48 }: { size?: number }) {
     </Svg>
   );
 }
-export function ChatPage({
-  conversation,
-  onSend,
-  onOpenPlugins,
-  draft,
-  setDraft,
-  model,
-  setModel,
-  think,
-  setThink,
-  search,
-  setSearch,
-}: {
-  model: string;
-  setModel: (value: string) => void;
-  think: boolean;
-  setThink: (value: boolean) => void;
-  search: boolean;
-  setSearch: (value: boolean) => void;
-  conversation: Conversation | null;
-  onSend: (value: string) => void;
+export function ChatPage({ controller, onOpenPlugins }: {
+  controller: ChatController;
   onOpenPlugins: () => void;
-  draft: string;
-  setDraft: (value: string) => void;
 }) {
+  const { conversation, draft, setDraft, model, setModel, think, setThink } = controller;
   const { colors, text, phone } = useDesign();
   const [models, setModels] = useState(false);
   const [tools, setTools] = useState(false);
@@ -98,12 +77,13 @@ export function ChatPage({
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   const reduced = useReducedMotion();
+  const followEnd = useRef(true);
+  useEffect(() => { followEnd.current = true; }, [conversation?.id]);
   const hasMessages = !!conversation?.messages.length;
   const send = () => {
-    if (!draft.trim()) return;
+    if (!draft.trim() || controller.busy || controller.authBusy) return;
     selectionFeedback();
-    onSend(draft.trim());
-    setDraft("");
+    if (controller.send(draft.trim())) { followEnd.current = true; setDraft(""); }
   };
   const suggestion = (value: string) => {
     setDraft(value);
@@ -183,19 +163,14 @@ export function ChatPage({
               selected={tools}
               onPress={() => setTools(true)}
             />
-            {think || search ? (
-              <View style={{ flexDirection: "row", gap: 6 }}>
-                {think ? <Lightbulb size={15} color={colors.accent} /> : null}
-                {search ? <Globe2 size={15} color={colors.accent} /> : null}
-              </View>
-            ) : null}
+            {think ? <Lightbulb size={15} color={colors.accent} /> : null}
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={text(
-                `选择模型，当前${model}`,
-                `Choose model, currently ${model}`,
+                `选择模型，当前${MODEL_NAMES[model]}`,
+                `Choose model, currently ${MODEL_NAMES[model]}`,
               )}
               onPress={() => setModels(true)}
               style={({ pressed }) => ({
@@ -208,41 +183,47 @@ export function ChatPage({
               })}
             >
               <Type size={13} muted>
-                {model}
+                {MODEL_NAMES[model]}
               </Type>
               <ChevronDown size={12} color={colors.muted} />
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={text("发送消息", "Send message")}
-              accessibilityState={{ disabled: !draft.trim() }}
-              disabled={!draft.trim()}
-              onPress={send}
+              accessibilityLabel={controller.busy ? text("停止回答", "Stop answer") : text("发送消息", "Send message")}
+              accessibilityState={{ disabled: !controller.busy && (!draft.trim() || controller.authBusy) }}
+              disabled={!controller.busy && (!draft.trim() || controller.authBusy)}
+              onPress={controller.busy ? controller.stop : send}
               style={({ pressed }) => ({
                 width: 44,
                 height: 44,
                 borderRadius: 16,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: draft.trim() ? colors.accent : colors.soft,
+                backgroundColor: controller.busy || draft.trim() ? colors.accent : colors.soft,
                 transform: [{ scale: pressed ? 0.94 : 1 }],
               })}
             >
-              <ArrowUp
+              {controller.busy ? <Square size={17} fill={colors.onAccent} color={colors.onAccent} /> : <ArrowUp
                 size={21}
                 strokeWidth={1.8}
                 color={draft.trim() ? colors.onAccent : colors.faint}
-              />
+              />}
             </Pressable>
           </View>
         </View>
       </View>
-      <Type size={11} muted style={{ textAlign: "center" }}>
-        {text(
-          "界面预览，尚未连接模型",
-          "Interface preview. Model not connected.",
-        )}
-      </Type>
+      {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+        <Type size={11} muted>{controller.authBusy ? text("正在恢复登录…", "Restoring session…") : controller.status?.configured
+          ? text("DeepSeek 已配置 · 对话仅保留本次会话", "DeepSeek configured · session-only conversations")
+          : text("Q 对话服务暂不可用", "Q chat is currently unavailable")}</Type>
+        {!controller.status?.configured ? <Action kind="ghost" label={text("重新连接", "Reconnect")} onPress={() => { void controller.restore(); }} disabled={controller.authBusy} /> : null}
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10 }}>
+        {controller.session ? <><Type size={12} muted>@{controller.session.user.handle}</Type><Action kind="ghost" label={text("退出登录", "Sign out")} onPress={() => { void controller.logout(); }} disabled={controller.authBusy} /></>
+          : <Action kind="ghost" label={text("登录后开始对话", "Sign in to start chatting")} onPress={controller.openAuth} disabled={controller.authBusy} />}
+      </View>
+      {controller.authError && !controller.authOpen ? <Type size={12} color={colors.danger}>{chatErrorMessage(controller.authError, text)}</Type> : null}
     </View>
   );
   const welcome = (
@@ -312,9 +293,9 @@ export function ChatPage({
         <>
           <ScrollView
             ref={scroll}
-            onContentSizeChange={() =>
-              scroll.current?.scrollToEnd({ animated: !reduced })
-            }
+            onScroll={event => { const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent; followEnd.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 90; }}
+            scrollEventThrottle={100}
+            onContentSizeChange={() => { if (followEnd.current) scroll.current?.scrollToEnd({ animated: !reduced && !controller.busy }); }}
             keyboardShouldPersistTaps="handled"
             contentInsetAdjustmentBehavior="automatic"
             contentContainerStyle={{
@@ -350,13 +331,22 @@ export function ChatPage({
                   >
                     <QGlyph size={23} />
                     <Type size={13} weight="500">
-                      小Q
+                      {message.model ? MODEL_NAMES[message.model] : "小Q"}
                     </Type>
                   </View>
                 ) : null}
-                <Type selectable size={16} style={{ lineHeight: 28 }}>
-                  {message.content}
-                </Type>
+                {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
+                {message.role === "assistant" && ["pending", "streaming"].includes(message.status) ? <View accessibilityLiveRegion="polite"><Type size={13} muted>
+                  {controller.phase === "thinking" ? text("正在思考…", "Thinking…") : controller.phase === "waiting" ? text("正在连接 DeepSeek…", "Connecting to DeepSeek…") : text("正在回答…", "Answering…")}
+                </Type></View> : null}
+                {message.status === "cancelled" ? <Type size={13} muted>{text("已停止接收，已收到的内容保留。", "Stopped receiving. The text received so far is preserved.")}</Type> : null}
+                {message.status === "error" ? <Type selectable size={13} color={colors.danger}>{chatErrorMessage(message.errorCode ?? "AI_UPSTREAM_ERROR", text)}</Type> : null}
+                {message.status === "incomplete" ? <Type size={13} muted>{message.finishReason === "length"
+                  ? text("回答达到本次长度上限，内容未完整结束。", "The answer reached this request’s length limit and is incomplete.")
+                  : text("供应商未完整返回本次回答。", "The provider did not complete this answer.")}</Type> : null}
+                {message.contextLimited ? <Type size={11} muted>{text("本次使用了最近的完整对话作为上下文。", "This answer used the most recent complete turns as context.")}</Type> : null}
+                {message.role === "assistant" && message.id === conversation?.messages.at(-1)?.id && ["error", "incomplete", "cancelled"].includes(message.status)
+                  ? <Action kind="ghost" icon={RotateCcw} label={text("重试回答", "Retry answer")} onPress={controller.retry} disabled={controller.busy || controller.authBusy} style={{ alignSelf: "flex-start" }} /> : null}
               </Reveal>
             ))}
           </ScrollView>
@@ -400,30 +390,12 @@ export function ChatPage({
         title={text("选择模型", "Choose model")}
         onClose={() => setModels(false)}
       >
-        {["DeepSeek", "Claude", "GPT"].map((item, index) => (
-          <Row
-            key={item}
-            title={item}
-            subtitle={
-              [
-                text("通用对话与推理", "Conversation and reasoning"),
-                text("写作与长文分析", "Writing and analysis"),
-                text("创意与知识探索", "Creativity and knowledge"),
-              ][index]
-            }
-            right={
-              model === item ? (
-                <Check size={18} color={colors.accent} />
-              ) : undefined
-            }
-            onPress={() => {
-              selectionFeedback();
-              setModel(item);
-              setModels(false);
-            }}
-            last={index === 2}
-          />
+        {(["deepseek-flash", "deepseek-v4-pro"] as AiModel[]).map((item, index) => (
+          <Row key={item} title={MODEL_NAMES[item]} subtitle={index === 0 ? text("日常问答，优先速度", "Everyday questions, faster responses") : text("更复杂的任务与分析", "More complex tasks and analysis")}
+            right={model === item ? <Check size={18} color={colors.accent} /> : undefined}
+            onPress={controller.busy ? undefined : () => { selectionFeedback(); setModel(item); setModels(false); }} last={index === 1} />
         ))}
+        {controller.busy ? <Type size={13} muted>{text("先停止当前回答，再切换模型。", "Stop the current answer before switching models.")}</Type> : null}
       </Sheet>
       <Sheet
         visible={tools}
@@ -433,11 +405,8 @@ export function ChatPage({
         <Row
           icon={Paperclip}
           title={text("添加文件", "Attach a file")}
-          subtitle={text("附件入口预览", "Attachment preview")}
-          onPress={() => {
-            setTools(false);
-            setDraft(text("请帮我阅读这份文件。", "Help me read this file."));
-          }}
+          subtitle={text("当前仅支持文字，附件尚未接入", "Text only for now; attachments are not connected")}
+
         />
         <Row
           icon={SlidersHorizontal}
@@ -452,15 +421,14 @@ export function ChatPage({
           <Choice
             label={text("深度思考", "Deep thinking")}
             selected={think}
-            onPress={() => setThink(!think)}
+            disabled={controller.busy}
+            onPress={() => { if (!controller.busy) setThink(!think); }}
           />
-          <Choice
-            label={text("联网搜索", "Web search")}
-            selected={search}
-            onPress={() => setSearch(!search)}
-          />
+
         </View>
+        <Type size={13} muted>{text("当前 Q 尚未接入联网搜索。深度思考可能需要更长时间。", "Web search is not connected in Q yet. Thinking mode may take longer.")}</Type>
       </Sheet>
+      {controller.authOpen ? <ChatAuthSheet controller={controller} /> : null}
     </KeyboardAvoidingView>
   );
 }

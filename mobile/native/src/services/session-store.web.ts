@@ -1,5 +1,12 @@
-// The browser preview deliberately keeps the bearer token in memory only.
+import { createSessionStore } from './session-core';
+// Browser bearer tokens remain memory-only. No localStorage or IndexedDB credentials.
 let memoryToken: string | null = null;
-export const readToken = async () => memoryToken;
-export const writeToken = async (token: string) => { memoryToken = token; };
-export const removeToken = async () => { memoryToken = null; };
+const store = createSessionStore({
+  get: async () => memoryToken,
+  set: async token => { memoryToken = token; },
+  remove: async () => { memoryToken = null; },
+});
+export const { readToken, writeToken, removeToken } = store;
+export const subscribeSession = store.subscribe;
+export const readSessionSnapshot = store.readSnapshot;
+export const getSessionRevision = store.getRevision;
