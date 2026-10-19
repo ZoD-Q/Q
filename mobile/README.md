@@ -1,6 +1,6 @@
 # 小Q · Q makes kai smile
 
-当前阶段是可交互的前端设计原型。首页以大模型对话与输入框为中心，侧栏承载视频创作、插件、分期、保险、理财、钱包、API Key、资料和消息。默认白色青蓝主题，同时保留暖色与夜色、中英文切换。
+当前阶段是可交互的前端设计原型。首页以大模型对话与输入框为中心，侧栏承载视频创作、插件、分期、保险、理财、钱包、API 工作台、资料和消息。默认白色青蓝主题，同时保留暖色与夜色、中英文切换。
 
 协作开发先读 [根 AGENTS.md](../AGENTS.md) 和 [移动端补充规范](AGENTS.md)。实际插件接入以 [Q 插件规范](../backend/docs/plugin-integration.md) 为准，当前插件页面仅为目录原型。
 
@@ -16,7 +16,7 @@ npm run dev
 
 浏览器地址通常为 http://localhost:8081 。原生Expo开发用 `npm run dev:native`；终端按i/a可打开已配置的模拟器。当前SDK58需要兼容版本Expo Go。
 
-默认启动只运行前端，不依赖Rust API或PostgreSQL。所有当前页面中的模型响应、余额、交易、保险方案和API密钥都是界面预览；不会发出业务网络请求或修改旧账本。
+默认启动只运行前端，不依赖Rust API或PostgreSQL。聊天模型响应、余额、交易和保险方案仍是界面预览；API 工作台可由用户主动连接 Rust API，使用个人可灵凭据生成视频。详见 [工作台说明](docs/video-api-workbench.md)。
 
 视频创作直接预览：http://localhost:8081/?view=video 。创作者广场：http://localhost:8081/?view=creators 。
 
@@ -29,18 +29,18 @@ npm run dev
 - 分期：服务商品、期数选择、每期和总额、完整计划预览。
 - 保险：场景、保障比较、所选方案和确认预览。
 - 钱包：演示余额、流水筛选、收款与转账流程、渠道选择。
-- API Key：项目与环境、示例凭证、权限与创建预览。
+- API 工作台：Q 登录、个人可灵连接、文生视频任务与结果；需单独启动后端并配置加密密钥。
 - 资料与消息：本次浏览的资料保存、三主题、双语，示例好友与会话。
 
-交互状态保留于本次浏览，刷新会重置。
+原型交互状态保留于本次浏览，刷新会重置；API 工作台的连接与任务由后端持久化。
 
 ## 目录
 
 根目录保留 `web`、`mobile`、`backend` 三个业务目录，以及 `AGENTS.md` 等必要仓库级文件。
 
-- `native/src/prototype`：本轮纯前端界面及设计组件。
+- `native/src/prototype`：界面、设计组件及主动启用的 API 工作台。
 - `native/src/app`：Expo路由入口。
-- `native/src/screens`、`providers`、`services`：上一阶段API联调实现保留，当前入口未加载。
+- `native/src/screens`、`providers`、`services`：上一阶段API联调实现保留，保留；工作台复用会话存储和现有身份端点。
 - `shared`：由后端OpenAPI生成的共享类型。
 - `docs`：设计依据、插件来源与验收记录。
 - `../backend`：Rust业务、API合同、数据库和后端开发工具。

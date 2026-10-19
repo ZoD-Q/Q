@@ -1,8 +1,8 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, sync::Arc};
 
 use axum::http::HeaderValue;
 use tracing_subscriber::EnvFilter;
-use xiaoq_backend::{AppState, app, connect_and_migrate, identity};
+use xiaoq_backend::{AppState, app, connect_and_migrate, identity, video::VideoRuntime};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -27,9 +27,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(str::parse::<HeaderValue>)
         .collect::<Result<Vec<_>, _>>()?;
     let pool = connect_and_migrate(&database_url).await?;
-    let state = AppState::new(pool.clone())
+    let mut state = AppState::new(pool.clone())
         .await
         .map_err(|e| format!("Initialization failed: {}", e.code))?;
+    state.video = VideoRuntime::from_env()?.map(Arc::new);
     if env::var("Q_SEED_DEMO").as_deref() == Ok("true") {
         identity::seed_demo(&state)
             .await

@@ -23,6 +23,7 @@ pub mod identity;
 pub mod ledger;
 pub mod profiles;
 pub mod validation;
+pub mod video;
 
 use error::{ApiError, ApiResult};
 
@@ -32,6 +33,7 @@ pub struct AppState {
     password_slots: Arc<Semaphore>,
     dummy_hash: Arc<String>,
     limiter: Arc<Mutex<AuthLimiter>>,
+    pub video: Option<Arc<video::VideoRuntime>>,
 }
 
 impl AppState {
@@ -46,6 +48,7 @@ impl AppState {
             password_slots,
             dummy_hash,
             limiter: Arc::new(Mutex::new(AuthLimiter::default())),
+            video: None,
         })
     }
     fn limit_auth(&self, key: String, limit: u32) -> ApiResult<()> {
@@ -112,7 +115,13 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .route_layer(middleware::from_fn_with_state(state.clone(), throttle_auth));
     let cors = CorsLayer::new()
         .allow_origin(allowed_origins)
-        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     Router::new()
         .merge(auth_routes)
@@ -123,6 +132,16 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .route("/v1/wallet", get(ledger::wallet))
         .route("/v1/wallet/transactions", get(ledger::history))
         .route("/v1/wallet/transfers", post(ledger::transfer))
+        .route(
+            "/v1/video/connections",
+            get(video::connections).post(video::create_connection),
+        )
+        .route(
+            "/v1/video/connections/{id}",
+            axum::routing::delete(video::revoke_connection),
+        )
+        .route("/v1/video/jobs", get(video::jobs).post(video::create_job))
+        .route("/v1/video/jobs/{id}", get(video::job))
         .layer(DefaultBodyLimit::max(16 * 1024))
         .layer(cors)
         .with_state(state)

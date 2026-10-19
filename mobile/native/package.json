@@ -45,7 +45,8 @@
     "lint": "eslint src",
     "export:web": "expo export --platform web",
     "test:utils": "node --test src/utils/*.test.mjs",
-    "test:video": "node --test src/prototype/video/pricing.test.mjs"
+    "test:video": "node --test src/prototype/video/pricing.test.mjs",
+    "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs"
   },
   "private": true
 }

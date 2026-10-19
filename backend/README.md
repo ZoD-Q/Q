@@ -1,6 +1,6 @@
 # 小Q demo backend
 
-Rust modular monolith: Axum, Tokio, SQLx and PostgreSQL. This backend only handles simulated QDC. It has no real payment provider, bank account, lending, insurance or investment connection.
+Rust modular monolith: Axum, Tokio, SQLx and PostgreSQL. Its ledger only handles simulated QDC. The opt-in video workbench can submit real Kling requests with user-owned API credentials. It has no real payment provider, bank account, lending, insurance or investment connection.
 
 Start with the [repository development rules](../AGENTS.md) and [backend rules](AGENTS.md). The [Q plugin integration specification](docs/plugin-integration.md) defines the future host contract; MCP, discovery, authorization and Apps support are not implemented in this release.
 
@@ -47,3 +47,20 @@ TEST_DATABASE_URL=postgresql://xiaoq:xiaoq_demo_local@127.0.0.1:55432/xiaoq_demo
 API tools run from this directory: `npm run test:api`, `npm run db:snapshot`, and `npm run db:verify`. The snapshot/verify pair reads account and ledger data without creating transactions. The API acceptance suite creates explicit test accounts, so run it only when that is intended.
 
 The three ignored-by-default integration tests require real PostgreSQL, use isolated temporary schemas, and cover auth/profile isolation, expiring/revoked sessions, balanced histories, duplicate requests, conflicting payloads, concurrent overspending, opposing transfer lock order, immutable entries, rejected incomplete commits and idempotent demo seeding. No SQLite or in-memory substitute exists. Production work still includes TLS, secret management, migrations with a separate database role, password recovery, account deletion, durable throttling, monitoring, and operational recovery. None of those make this demonstration a real financial system.
+
+## Personal video API workbench
+
+See [API contract](contracts/api.md) and [workbench guide](../mobile/docs/video-api-workbench.md). Set server-only `Q_VIDEO_ENCRYPTION_KEY` to standard Base64 encoding of 32 random bytes. Generate it locally with `openssl rand -base64 32`, save it in a protected environment/secret store, and keep a backup. Do not commit it or expose it with `EXPO_PUBLIC_*`. Missing configuration disables credential/network actions. Current encryption does not provide automated key rotation; replacing the key loses access to old encrypted connections.
+
+Credentials are bound to the authenticated owner, encrypted at rest, never returned, and erased on revoke. Fixed official provider hosts and disabled redirects prevent forwarding credentials to arbitrary URLs. The local frontend remains independent and the financial ledger stays simulated.
+
+Fixture-enabled PostgreSQL verification uses a dedicated test database:
+
+```sh
+TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST/TEST_DATABASE \
+  ~/.cargo/bin/cargo test --features video-test-fixtures --test video_workbench -- --ignored
+```
+
+The fixture feature is only for local validation; production/default builds use official endpoints. A passing fixture test proves the adapter lifecycle and data isolation, not a paid supplier generation.
+
+To reproduce the local UI fixture without supplier calls, create a dedicated loopback database named `xiaoq_video_preview`, set `DATABASE_URL` to it and `Q_VIDEO_ENCRYPTION_KEY` as above, then run `cargo run --features video-test-fixtures --example video_workbench_preview`. It binds only `127.0.0.1:8792`, uses the public `kai` / `Qdemo12345!` demo login, and never contacts Kling. Start Expo with `EXPO_PUBLIC_API_URL=http://127.0.0.1:8792 npm exec --workspace=@xiaoq/native -- expo start --port 8092` from `mobile/`. Enter a placeholder provider key only. The fixture produces task transitions and an explicit missing-video result (or failure when prompt contains `fail`), never a fake generated film. Do not use this fixture with real credentials.

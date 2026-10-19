@@ -69,7 +69,7 @@ function ResultPlayer({
     </View>
   );
 }
-export function VideoCreate({ onOpenFeed }: { onOpenFeed: () => void }) {
+export function VideoCreate({ onOpenFeed, onOpenApi }: { onOpenFeed: () => void; onOpenApi: () => void }) {
   const { colors, text, phone } = useDesign();
   const studio = useVideoStudio();
   const { draft, updateDraft, job } = studio;
@@ -159,6 +159,11 @@ export function VideoCreate({ onOpenFeed }: { onOpenFeed: () => void }) {
             icon={Film}
             onPress={onOpenFeed}
           />
+        </View>
+        <View style={{ gap: 10, padding: 16, backgroundColor: colors.accentBg, borderRadius: 16 }}>
+          <Type size={15} weight="500">{text("用自己的可灵 API 创作", "Create with your Kling API")}</Type>
+          <Type size={13} muted>{text("在 API 工作台连接账户，提交真实生成。下方保留本地演示。", "Connect your account in the API workbench for real generation. The local demo remains below.")}</Type>
+          <Action label={text("打开 API 工作台", "Open API workbench")} icon={KeyRound} onPress={onOpenApi} />
         </View>
         <View style={{ gap: 17 }}>
           <Type size={15} muted>
