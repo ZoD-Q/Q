@@ -1,0 +1,96 @@
+name: q
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:18-bookworm}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: q_admin
+      POSTGRES_PASSWORD: ${Q_DB_ADMIN_PASSWORD:?set Q_DB_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      PGDATA: /var/lib/postgresql/18/docker
+      Q_DB_PASSWORD: ${Q_DB_PASSWORD:?set Q_DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - /var/lib/q/postgres:/var/lib/postgresql
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-q.sh:ro
+    networks: [database]
+    cpus: 1.0
+    mem_limit: 512m
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U q_admin -d postgres']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+  api:
+    image: q-api:${Q_RELEASE:?set Q_RELEASE}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUNTIME_BASE: ${RUNTIME_BASE:-debian:bookworm-slim}
+        PROBE_BASE: ${PROBE_BASE:-nginx:stable-alpine}
+    restart: unless-stopped
+    user: '10001:10001'
+    read_only: true
+    tmpfs: ['/tmp:size=16m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DATABASE_URL: postgresql://q_app:${Q_DB_PASSWORD:?set Q_DB_PASSWORD}@db:5432/q
+      Q_BIND: 0.0.0.0:8787
+      Q_SEED_DEMO: 'false'
+      Q_VIDEO_ENCRYPTION_KEY: ${Q_VIDEO_ENCRYPTION_KEY:?set Q_VIDEO_ENCRYPTION_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      Q_CORS_ORIGINS: ${Q_CORS_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081}
+      RUST_LOG: xiaoq_backend=info
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [database, application]
+    cpus: 1.0
+    mem_limit: 512m
+    logging: *logging
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, /usr/local/bin/busybox, wget, -q, -T, '5', -O, /dev/null, http://127.0.0.1:8787/health]
+      interval: 30s
+      timeout: 7s
+      retries: 3
+      start_period: 45s
+  gateway:
+    image: ${NGINX_IMAGE:-nginx:stable-alpine}
+    restart: unless-stopped
+    user: '101:101'
+    entrypoint: [nginx, -g, 'daemon off;']
+    read_only: true
+    tmpfs: ['/tmp:size=8m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - 127.0.0.1:18787:8080
+    networks: [application]
+    depends_on:
+      api:
+        condition: service_healthy
+    cpus: 0.25
+    mem_limit: 64m
+    logging: *logging
+    healthcheck:
+      test: [CMD, wget, -q, -T, '5', -O, /dev/null, http://127.0.0.1:8080/health]
+      interval: 30s
+      timeout: 7s
+      retries: 3
+networks:
+  database:
+    internal: true
+  application: {}

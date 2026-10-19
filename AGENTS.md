@@ -35,7 +35,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | `backend/scripts/` | PostgreSQL、Rust API 启动与验收；这里的 Node 工具不是第二套业务后端 |
 | `mobile/docs/`、`backend/docs/` | 客户端设计与验收、平台接入规范及参考材料 |
 
-移动端使用 npm workspaces（`native`、`shared`）；后端开发工具单独使用 npm。Node 清单要求 `>=22`，本地推荐 Node 24；若使用 22，需支持现有测试直接导入 TypeScript 的能力。Rust 使用支持 edition 2024 的 stable 工具链，尚未单独锁定工具链版本。本地 PostgreSQL 工具使用 17.10；生产环境尚无部署方案。
+移动端使用 npm workspaces（`native`、`shared`）；后端开发工具单独使用 npm。Node 清单要求 `>=22`，本地推荐 Node 24；若使用 22，需支持现有测试直接导入 TypeScript 的能力。Rust 使用支持 edition 2024 的 stable 工具链，尚未单独锁定工具链版本。本地 PostgreSQL 工具使用 17.10，服务器内部联调使用独立 PostgreSQL 18.6，详见第 9 节；公网生产验收尚未完成。
 
 已有主要客户端依赖：Reanimated / Worklets（动画）、Safe Area、Expo Video、Document Picker、SecureStore、Clipboard（复制工作台材料）、Lucide / SVG。优先复用已有能力；不要无理由新增状态库、UI 框架、数据库或编排框架。当前没有 LangChain、LangGraph 或 LangSmith。
 
@@ -158,9 +158,9 @@ GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` 
 
 `cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。
 
-**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。当前初版每次运行全部三项任务：`source-check` 检查提交差异，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频及 AI 替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
+**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行三类自动验证（后端 17/18 矩阵，共四个自动作业）：`source-check` 检查提交差异，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频及 AI 替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
 
-`package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变三项必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
+`package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变三类必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
 
 Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标签匹配（2026-10-19 设置中可见 #28 KAI privileged Docker Runner）。任务不启动 Docker-in-Docker、不挂载宿主 Docker socket，也不配置部署；现有 Runner 的特权执行配置由管理员管理，不宣称已改为非特权。新增或迁移 Runner 时必须支持容器镜像及 PostgreSQL service，保持测试库隔离，不将个人电脑或业务服务器默认作为执行环境。
 
@@ -177,7 +177,12 @@ Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标�
 | 初期用途 | 小Q后端内部联调环境；生产就绪状态须单独验收 |
 | 首批部署范围 | Rust API、PostgreSQL、HTTPS 反向代理、数据库与密钥备份、基础健康监控 |
 | API 域名 | 内部部署验收后由用户交接运维分配；未配置可信 HTTPS 前，仅通过 SSH 隧道访问，不公开明文业务接口 |
-| 当前部署状态 | 2026-10-19 已核实 SSH、公钥身份、Ubuntu 26.04 x86_64、Docker 与既有业务；小Q独立部署准备中，完成后以实际验收结果更新本行 |
+| 当前部署状态 | 2026-10-19 内部联调部署已验收：Rust API、独立 PostgreSQL 18.6、Nginx 网关均 healthy；源码 `2e4e370`，公网域名/TLS 尚待运维配置 |
+| 内部入口 | 服务器 `http://127.0.0.1:18787`，健康检查 `/health`；数据库与 API 无宿主映射端口 |
+| 部署与数据 | `/opt/q/current` 指向发布目录；配置 `/etc/q/deploy.env`（root 0600）；数据 `/var/lib/q/postgres`；备份 `/var/backups/q` |
+| 定时任务 | `q-backup.timer` 每日备份，`q-health.timer` 每五分钟检查；外部告警、定时异地复制待运维配置 |
+
+操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。本次发布程序为已审核源码的本机 Linux 交叉构建，服务器实际运行通过；不等同于新 CI 流水线通过。AI 模块已随源码部署，但服务端 `DEEPSEEK_API_KEY` 尚未配置，真实模型调用不可用；真实供应商业务未验收。
 
 - 登录使用用户指定的本地 SSH 私钥或已配置别名；私钥、密码、数据库凭据和供应商密钥不得写入本文件或提交。`ecs-user` 作为运维登录身份，业务进程使用独立受限身份。
 - 部署前先核对系统、资源、现有服务、端口和数据；保留已有业务和数据库，不重置主机、不覆盖未知目录。默认部署经过人工审核的 `main` 明确提交，记录版本、配置位置、服务状态与回退方法；开发分支的新能力不能自动算作已部署。

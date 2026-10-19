@@ -67,8 +67,11 @@ mobile-check:
 backend-check:
   stage: verify
   image: rust:1-bookworm
+  parallel:
+    matrix:
+      - POSTGRES_VERSION: ['17', '18']
   services:
-    - name: postgres:17-bookworm
+    - name: postgres:${POSTGRES_VERSION}-bookworm
       alias: postgres
   variables:
     # Disposable CI service only; these are public test values, not business credentials.
