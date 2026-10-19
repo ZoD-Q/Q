@@ -176,3 +176,63 @@ test('transport rejects late cancellation, bounds response bytes, and surfaces o
   await assert.rejects(socialRequest({ ...options, transport: async () => Response.json({ error: { code: 'SOCIAL_MESSAGE_EXPIRED', message: 'private diagnostic' } }, { status: 410 }) }), error => error.code === 'SOCIAL_MESSAGE_EXPIRED' && error.status === 410 && !error.message.includes('private'));
   await assert.rejects(socialRequest({ ...options, timeoutMs: 5, transport: async (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))) }), { code: 'REQUEST_TIMEOUT' });
 });
+
+test('unstructured HTTP errors keep their status and identify missing social endpoints', async () => {
+  const options = { baseUrl: 'https://example.com', path: '/v1/social/snapshot', token: 'opaque-test-token', decode: decodeSnapshot };
+  const cases = [
+    [() => new Response(null, { status: 404 }), 'SOCIAL_UNAVAILABLE', 404],
+    [() => new Response('', { status: 404 }), 'SOCIAL_UNAVAILABLE', 404],
+    [() => new Response('<html>private upstream diagnostic</html>', { status: 404 }), 'SOCIAL_UNAVAILABLE', 404],
+    [() => new Response('<html>private upstream diagnostic</html>', { status: 502 }), 'REQUEST_FAILED', 502],
+    [() => new Response(null, { status: 401 }), 'UNAUTHORIZED', 401],
+    [() => new Response('private rate-limit diagnostic', { status: 429 }), 'RATE_LIMITED', 429],
+    [() => Response.json({ detail: 'private upstream diagnostic' }, { status: 503 }), 'REQUEST_FAILED', 503],
+    [() => Response.json(null, { status: 404 }), 'SOCIAL_UNAVAILABLE', 404],
+    [() => Response.json({ error: { message: 'private diagnostic' } }, { status: 404 }), 'SOCIAL_UNAVAILABLE', 404],
+    [() => Response.json({ error: { code: 'private invalid error code' } }, { status: 401 }), 'UNAUTHORIZED', 401],
+  ];
+  for (const [response, code, status] of cases) {
+    await assert.rejects(socialRequest({ ...options, transport: async () => response() }), error => {
+      assert.equal(error.code, code); assert.equal(error.status, status);
+      assert.ok(!error.message.includes('private'));
+      return true;
+    });
+  }
+});
+
+test('structured HTTP error codes retain auth, rate-limit and resource-not-found semantics', async () => {
+  const options = { baseUrl: 'https://example.com', path: '/v1/social/snapshot', token: 'opaque-test-token', decode: decodeSnapshot };
+  for (const [code, status] of [['UNAUTHORIZED', 401], ['RATE_LIMITED', 429], ['SOCIAL_NOT_FOUND', 404], ['USER_NOT_FOUND', 404], ['IDEMPOTENCY_CONFLICT', 409], ['SOCIAL_MESSAGE_EXPIRED', 410]]) {
+    await assert.rejects(socialRequest({ ...options, transport: async () => Response.json({ error: { code, message: 'private diagnostic' } }, { status }) }),
+      error => error.code === code && error.status === status && !error.message.includes('private'));
+  }
+});
+
+test('successful responses with missing, malformed or incompatible data still fail decoding', async () => {
+  const options = { baseUrl: 'https://example.com', path: '/v1/social/snapshot', token: 'opaque-test-token', decode: decodeSnapshot };
+  for (const response of [() => new Response(null), () => new Response(''), () => new Response('<html>not an API response</html>'), () => Response.json({}), () => Response.json({ error: { code: 'SOCIAL_NOT_FOUND' } })]) {
+    await assert.rejects(socialRequest({ ...options, transport: async () => response() }), { code: 'INVALID_RESPONSE', status: 0 });
+  }
+});
+
+test('oversized HTTP error bodies are cancelled without losing the HTTP status', async () => {
+  let cancelled = false, decoded = false;
+  const stream = new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1)); },
+    cancel() { cancelled = true; },
+  });
+  await assert.rejects(socialRequest({ baseUrl: 'https://example.com', path: '/v1/social/snapshot', token: 'opaque-test-token',
+    decode: () => { decoded = true; }, transport: async () => new Response(stream, { status: 502 }) }), { code: 'REQUEST_FAILED', status: 502 });
+  assert.equal(cancelled, true); assert.equal(decoded, false);
+});
+
+test('cancellation and timeout take precedence over a late bodyless HTTP error', async () => {
+  const options = { baseUrl: 'https://example.com', path: '/v1/social/snapshot', token: 'opaque-test-token', decode: decodeSnapshot };
+  const controller = new AbortController();
+  await assert.rejects(socialRequest({ ...options, signal: controller.signal, transport: async () => {
+    controller.abort(); return new Response(null, { status: 404 });
+  } }), { code: 'CANCELLED', status: 0 });
+  await assert.rejects(socialRequest({ ...options, timeoutMs: 1, transport: async () => {
+    await new Promise(resolve => setTimeout(resolve, 10)); return new Response(null, { status: 404 });
+  } }), { code: 'REQUEST_TIMEOUT', status: 0 });
+});

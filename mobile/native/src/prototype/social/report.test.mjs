@@ -72,6 +72,23 @@ test('unknown or expired report outcomes preserve identity and never create anot
   await assert.rejects(inspectReportReceipt(pending, owner, async () => { throw new SocialError('NETWORK_ERROR'); }), { code: 'NETWORK_ERROR' });
 });
 
+test('unstructured receipt errors cannot confirm absence or expiry of a pending report', async () => {
+  const memoryStore = memory(), store = createReportStore(memoryStore.adapter, hash, false), pending = await store.save(owner, request);
+  const cases = [
+    [() => new Response(null, { status: 404 }), 'SOCIAL_UNAVAILABLE', 404],
+    [() => new Response('<html>service unavailable</html>', { status: 410 }), 'REQUEST_FAILED', 410],
+    [() => Response.json({ detail: 'service unavailable' }, { status: 410 }), 'REQUEST_FAILED', 410],
+    [() => new Response(null, { status: 401 }), 'UNAUTHORIZED', 401],
+    [() => new Response(null, { status: 429 }), 'RATE_LIMITED', 429],
+    [() => Response.json({ error: { code: 'SOCIAL_MESSAGE_EXPIRED' } }, { status: 410 }), 'SOCIAL_MESSAGE_EXPIRED', 410],
+  ];
+  for (const [response, code, status] of cases) {
+    const lookup = clientId => socialRequest({ baseUrl: 'https://example.com', path: `/v1/social/reports/by-client/${clientId}`, token: 'opaque', decode: decodeReportReceipt, transport: async () => response() });
+    await assert.rejects(inspectReportReceipt(pending, owner, lookup), { code, status });
+    assert.equal((await store.meta(owner)).clientReportId, reportId, 'a service error must preserve the original recovery pointer');
+  }
+});
+
 test('a report manifest whose write rejected after commit is still recoverable with its original ID', async () => {
   const memoryStore = memory(); let reject = true;
   const store = createReportStore({ ...memoryStore.adapter, set: async (key, value) => {

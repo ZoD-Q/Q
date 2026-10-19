@@ -77,6 +77,15 @@ export function decodeReportReceipt(value: unknown): SocialReportReceipt {
   return { client_report_id: id(x.client_report_id), status: choice(x.status, ['accepted'] as const), expires_at: timestamp(x.expires_at), server_time: timestamp(x.server_time) };
 }
 
+function httpFailure(status: number, payload: unknown = null): SocialError {
+  try {
+    const code = record(record(payload).error).code;
+    if (typeof code === 'string' && /^[A-Z_]{1,60}$/.test(code)) return new SocialError(code, status);
+  } catch { /* Empty or nonstandard error bodies still carry a meaningful HTTP status. */ }
+  const code = status === 401 ? 'UNAUTHORIZED' : status === 429 ? 'RATE_LIMITED' : status === 404 ? 'SOCIAL_UNAVAILABLE' : 'REQUEST_FAILED';
+  return new SocialError(code, status);
+}
+
 export async function socialRequest<T>(options: {
   baseUrl: string; path: string; token: string; decode: (value: unknown) => T;
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; signal?: AbortSignal; transport?: typeof fetch; timeoutMs?: number;
@@ -96,27 +105,24 @@ export async function socialRequest<T>(options: {
       headers: { Accept: 'application/json', Authorization: `Bearer ${options.token}`, ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
     });
+    if (controller.signal.aborted) throw new SocialError(options.signal?.aborted ? 'CANCELLED' : 'REQUEST_TIMEOUT');
     const reader = response.body?.getReader();
-    if (!reader) throw new SocialError('INVALID_RESPONSE');
+    if (!reader) throw response.ok ? new SocialError('INVALID_RESPONSE') : httpFailure(response.status);
     const decoder = new TextDecoder(); let raw = '', bytes = 0;
     try {
       while (true) {
         const part = await reader.read();
-        if (controller.signal.aborted) throw new SocialError('CANCELLED');
+        if (controller.signal.aborted) throw new SocialError(options.signal?.aborted ? 'CANCELLED' : 'REQUEST_TIMEOUT');
         if (part.done) break;
         bytes += part.value.byteLength;
-        if (bytes > 2 * 1024 * 1024) { await reader.cancel(); throw new SocialError('INVALID_RESPONSE'); }
+        if (bytes > 2 * 1024 * 1024) { await reader.cancel(); throw response.ok ? new SocialError('INVALID_RESPONSE') : httpFailure(response.status); }
         raw += decoder.decode(part.value, { stream: true });
       }
       raw += decoder.decode();
     } finally { reader.releaseLock(); }
     let payload: unknown;
-    try { payload = JSON.parse(raw); } catch { throw new SocialError('INVALID_RESPONSE'); }
-    if (!response.ok) {
-      const error = record(record(payload).error);
-      const code = typeof error.code === 'string' && /^[A-Z_]{1,60}$/.test(error.code) ? error.code : 'REQUEST_FAILED';
-      throw new SocialError(code, response.status);
-    }
+    try { payload = JSON.parse(raw); } catch { throw response.ok ? new SocialError('INVALID_RESPONSE') : httpFailure(response.status); }
+    if (!response.ok) throw httpFailure(response.status, payload);
     return options.decode(payload);
   } catch (error) {
     if (error instanceof SocialError) throw error;
