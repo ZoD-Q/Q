@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildContext, finishStatus, prepareRetry } from './state-model.ts';
 const message = (id,role,content,status='complete') => ({id,role,content,status});
+test('failed tool continuation retains its saved invocation IDs and preceding tool card', () => {
+  const ids=['11111111-1111-4111-8111-111111111111'];
+  const proposal={...message('tool','assistant','','tool'),toolProposalId:ids[0]};
+  const failed={...message('retry','assistant','half','error'),toolInvocationIds:ids};
+  const conversation={id:'c',title:'gallery',messages:[message('u','user','browse'),proposal,failed]};
+  assert.deepEqual(prepareRetry(conversation),conversation.messages.slice(0,-1));
+  assert.deepEqual(conversation.messages.at(-1).toolInvocationIds,ids);
+  const complete={...failed,status:'complete',content:'Shown in viewer'};
+  const context=buildContext([conversation.messages[0],proposal,complete,message('next','user','continue')]);
+  assert.deepEqual(context.messages,[{role:'user',content:'browse'},{role:'assistant',content:'Shown in viewer'},{role:'user',content:'continue'}]);
+});
 test('multi-turn context keeps full answers and the latest user request', () => {
   const result=buildContext([message('1','user','记住松树'),message('2','assistant','记住了'),message('3','user','是什么？')]);
   assert.deepEqual(result,{messages:[{role:'user',content:'记住松树'},{role:'assistant',content:'记住了'},{role:'user',content:'是什么？'}],limited:false});

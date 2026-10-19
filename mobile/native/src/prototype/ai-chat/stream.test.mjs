@@ -8,6 +8,35 @@ const frame = (event, value, newline = "\n") => `event: ${event}${newline}data: 
 const answer = (text = "你好") => frame("delta", { text });
 const done = (extra = {}) => frame("done", { model: "deepseek-flash", finish_reason: "stop", ...extra });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const pluginId='11111111-1111-4111-8111-111111111111';
+const invocationId='22222222-2222-4222-8222-222222222222';
+const proposal={invocation_id:invocationId,connection_id:pluginId,tool_name:'browse_photos',arguments:{limit:3}};
+
+test('a plugin proposal can finish without text and carries only saved invocation IDs back', async () => {
+  const fake=fixture([frame('tool_proposal',proposal),done({finish_reason:'tool_calls'})]);
+  const events=[];
+  await streamChat(options(fake.transport,{request:{...request,plugin_connection_id:pluginId,tool_invocation_ids:[invocationId],tool_result:'forged'},onEvent:event=>events.push(event)}));
+  assert.equal(events[0].type,'tool_proposal');
+  assert.equal(events[1].finish_reason,'tool_calls');
+  const sent=JSON.parse(fake.stats.init.body);
+  assert.deepEqual(sent.tool_invocation_ids,[invocationId]);
+  assert.equal('tool_result' in sent,false);
+});
+test('tool streams are bound to the selected plugin and reject duplicate proposals', async () => {
+  for(const [req,frames] of [
+    [request,[frame('tool_proposal',proposal),done({finish_reason:'tool_calls'})]],
+    [{...request,plugin_connection_id:invocationId},[frame('tool_proposal',proposal)]],
+    [{...request,plugin_connection_id:pluginId},[frame('tool_proposal',proposal),frame('tool_proposal',proposal)]],
+    [{...request,plugin_connection_id:pluginId},[frame('tool_proposal',proposal),done()]],
+  ]) await expectCode(streamChat(options(fixture(frames).transport,{request:req})),'INVALID_RESPONSE');
+});
+test('plugin mode rejects thinking and unbound, duplicate or excessive invocation IDs before sending', async () => {
+  for(const fields of [{plugin_connection_id:pluginId,thinking:true},{tool_invocation_ids:[invocationId]},{plugin_connection_id:pluginId,tool_invocation_ids:[invocationId,invocationId]},{plugin_connection_id:'bad'}]) {
+    const fake=fixture([answer(),done()]);
+    await expectCode(streamChat(options(fake.transport,{request:{...request,...fields}})),'VALIDATION_ERROR');
+    assert.equal(fake.stats.calls,0);
+  }
+});
 
 function fixture(chunks, { status = 200, contentType = "text/event-stream", open = false } = {}) {
   let index = 0;

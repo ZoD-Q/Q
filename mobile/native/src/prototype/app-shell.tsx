@@ -29,6 +29,7 @@ import { VideoCreate } from "./video/video-create";
 import { CreatorFeed } from "./video/creator-feed";
 import { useChat } from "./ai-chat/use-chat";
 import { PluginWorkbenchPage } from "./plugin-workbench/workbench";
+import { PluginHostPage } from "./plugin-host/page";
 
 const serviceNavigation: {
   id: PageId;
@@ -422,7 +423,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [page, setPage] = useState<PageId>(initialPage);
   const [sidebar, setSidebar] = useState(true);
   const [drawer, setDrawer] = useState(false);
-  const chat = useChat(page === "chat");
+  const chat = useChat(page === "chat" || page === "plugins");
   const items = chat.items;
   const reduced = useReducedMotion();
   const navigate = (next: PageId) => {
@@ -549,6 +550,8 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
             <MessagesPage />
           ) : page === "plugin-workbench" ? (
             <PluginWorkbenchPage onBack={() => navigate("plugins")} />
+          ) : page === "plugins" ? (
+            <PluginHostPage chat={chat} onOpenWorkbench={() => navigate("plugin-workbench")} onSelect={connection => { chat.selectPlugin({ id: connection.id, title: connection.title || connection.name, endpoint_url: connection.endpoint_url }); navigate("chat"); }} />
           ) : (
             <ServicePage page={page} onOpenWorkbench={() => navigate("plugin-workbench")} />
           )}

@@ -245,7 +245,333 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. The proposal is persisted but not executed. Send completed invocation IDs in a subsequent request to continue. Model receives bounded text/resource metadata, not image bytes. */
         post: operations["aiChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pluginStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["discoverPlugins"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listPluginConnections"];
+        put?: never;
+        post: operations["addPluginConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getPluginConnection"];
+        put?: never;
+        post?: never;
+        delete: operations["revokePluginConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refreshPluginConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/accept-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["acceptPluginUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listPluginTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listPluginResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/resources/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Standard MCP resources/read result. URI is sent only to this connection, never fetched as a host URL. Raster images are bounded and verified; HTML is never executed. */
+        post: operations["readPluginResource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listPluginPrompts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/prompts/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["getPluginPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/oauth/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startPluginOAuth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/oauth/attempts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getPluginOAuthAttempt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/invocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Latest 50 invocations for the owner; recover status across restarts. Never retry an unknown invocation. Results are null in the list summary; use GET /v1/plugins/invocations/{id} to load one complete result. */
+        get: operations["listPluginInvocations"];
+        put?: never;
+        /** @description Persist a proposal only. No business tool executes until confirm. Reusing the same owner-scoped idempotency key with a different request conflicts. */
+        post: operations["preparePluginInvocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/invocations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getPluginInvocation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/invocations/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Atomically claims an awaiting proposal once. Unknown/running/completed records cannot trigger another upstream call. */
+        post: operations["confirmPluginInvocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/invocations/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelPluginInvocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/client-metadata.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pluginClientMetadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Consumes a one-use OAuth state and redirects to a clean local completion page. No Q bearer token or plugin token in redirect URLs. */
+        get: operations["pluginOAuthCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pluginOAuthComplete"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -438,11 +764,15 @@ export interface components {
             role: "user" | "assistant";
             content: string;
         };
+        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. */
         AiChatRequest: {
             model: components["schemas"]["AiModel"];
             thinking: boolean;
             /** @description At most 24000 Unicode characters in total. Last role must be user. No client system messages, tools, credentials or provider URLs. */
             messages: components["schemas"]["AiHistoryMessage"][];
+            /** Format: uuid */
+            plugin_connection_id?: string;
+            tool_invocation_ids?: string[];
         };
         AiUsage: {
             prompt_tokens: number;
@@ -455,6 +785,173 @@ export interface components {
             model: components["schemas"]["AiModel"];
             finish_reason: components["schemas"]["AiFinishReason"];
             usage?: components["schemas"]["AiUsage"];
+        };
+        PluginStatus: {
+            available: boolean;
+            oauth_configured: boolean;
+            /** @enum {string} */
+            protocol_version: "2026-07-28";
+        };
+        PluginCandidate: {
+            /** Format: uuid */
+            candidate_id: string;
+            card_url: string;
+            name: string;
+            title: string;
+            description: string;
+            version: string;
+            endpoint_url: string;
+        };
+        PluginDiscoveryRequest: {
+            entry: string;
+            /** @enum {string} */
+            kind: "card" | "catalog" | "page" | "domain";
+        };
+        PluginDiscovery: {
+            /** Format: uuid */
+            discovery_id: string;
+            /** Format: date-time */
+            expires_at: string;
+            candidates: components["schemas"]["PluginCandidate"][];
+        };
+        PluginAddRequest: {
+            /** Format: uuid */
+            discovery_id: string;
+            /** Format: uuid */
+            candidate_id: string;
+        };
+        PluginTool: {
+            name: string;
+            title?: string | null;
+            description: string;
+            inputSchema: {
+                [key: string]: unknown;
+            };
+            outputSchema?: unknown;
+            annotations?: unknown;
+            _meta?: unknown;
+        } & {
+            [key: string]: unknown;
+        };
+        PluginConnection: {
+            /** Format: uuid */
+            id: string;
+            card_url: string;
+            name: string;
+            title: string;
+            description: string;
+            version: string;
+            endpoint_url: string;
+            revision: number;
+            /** @enum {string} */
+            status: "ready" | "auth_required" | "blocked" | "needs_review" | "revoked";
+            /** @enum {string} */
+            auth_status: "none" | "required" | "authorized" | "blocked";
+            last_error_code: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            pending_update: boolean;
+            pending_update_details: {
+                candidate?: {
+                    card_url: string;
+                    name: string;
+                    title: string;
+                    description: string;
+                    version: string;
+                    endpoint_url: string;
+                };
+                tools?: components["schemas"]["PluginTool"][];
+                previous_tools?: components["schemas"]["PluginTool"][];
+            } | null;
+        };
+        PluginInvocationRequest: {
+            /** Format: uuid */
+            connection_id: string;
+            tool_name: string;
+            arguments: {
+                [key: string]: unknown;
+            };
+            /** Format: uuid */
+            idempotency_key: string;
+        };
+        PluginInvocation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            connection_id: string;
+            connection_title: string;
+            card_url: string;
+            tool_name: string;
+            arguments: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            status: "awaiting_confirmation" | "running" | "succeeded" | "tool_error" | "unknown" | "cancelled" | "expired" | "input_required" | "failed";
+            result: unknown;
+            error_code: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            connection_revision: number;
+            endpoint_url: string;
+        };
+        PluginOAuthStart: {
+            /** Format: uuid */
+            attempt_id: string;
+            authorization_url: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PluginOAuthAttempt: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            connection_id: string;
+            /** @enum {string} */
+            status: "pending" | "exchanging" | "succeeded" | "failed" | "expired";
+            error_code: string | null;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PluginResource: {
+            uri: string;
+            name: string;
+            title?: string;
+            description?: string;
+            mimeType?: string;
+        } & {
+            [key: string]: unknown;
+        };
+        PluginResourceRead: {
+            uri: string;
+        };
+        PluginPromptRequest: {
+            name: string;
+            arguments?: {
+                [key: string]: string;
+            };
+        };
+        PluginConfirmRequest: {
+            /** @enum {boolean} */
+            confirmed: true;
+        };
+        PluginUpdateRequest: {
+            revision: number;
+        };
+        PluginToolProposal: {
+            /** Format: uuid */
+            invocation_id: string;
+            /** Format: uuid */
+            connection_id: string;
+            tool_name: string;
+            arguments: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: never;
@@ -1024,6 +1521,734 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    pluginStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginStatus"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    discoverPlugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginDiscoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginDiscovery"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listPluginConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["PluginConnection"][];
+                    };
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    addPluginConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginConnection"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getPluginConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginConnection"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    revokePluginConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disconnected */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    refreshPluginConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginConnection"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    acceptPluginUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginConnection"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listPluginTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["PluginTool"][];
+                    };
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listPluginResources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        resultType: "complete";
+                        resources: components["schemas"]["PluginResource"][];
+                    };
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    readPluginResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginResourceRead"];
+            };
+        };
+        responses: {
+            /** @description Standard MCP resources/read result. URI is sent only to this connection, never fetched as a host URL. Raster images are bounded and verified; HTML is never executed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listPluginPrompts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getPluginPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    startPluginOAuth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginOAuthStart"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getPluginOAuthAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginOAuthAttempt"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listPluginInvocations: {
+        parameters: {
+            query?: {
+                connection_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest 50 invocations for the owner; recover status across restarts. Never retry an unknown invocation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["PluginInvocation"][];
+                    };
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    preparePluginInvocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginInvocationRequest"];
+            };
+        };
+        responses: {
+            /** @description Persist a proposal only. No business tool executes until confirm. Reusing the same owner-scoped idempotency key with a different request conflicts. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginInvocation"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getPluginInvocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginInvocation"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    confirmPluginInvocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Atomically claims an awaiting proposal once. Unknown/running/completed records cannot trigger another upstream call. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginInvocation"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    cancelPluginInvocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginInvocation"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    pluginClientMetadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    pluginOAuthCallback: {
+        parameters: {
+            query: {
+                state: string;
+                code?: string;
+                iss?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description See /oauth/complete */
+            303: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    pluginOAuthComplete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Static completion page without tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
                 };
             };
         };

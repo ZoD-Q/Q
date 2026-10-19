@@ -1,5 +1,7 @@
-//! Authenticated text streaming through a fixed DeepSeek endpoint. No tools, history storage,
-//! retries, wallet changes, or raw reasoning forwarding. Each response body owns its request.
+//! Authenticated streaming through a fixed DeepSeek endpoint. Plugin tools are proposals only;
+//! a separate explicit confirmation executes them. Each response body owns its request.
+mod plugin_turn;
+use plugin_turn::{PluginTurn, ProposedCall};
 use std::{
     collections::HashMap,
     convert::Infallible,
@@ -72,10 +74,28 @@ pub struct ChatRequest {
     pub model: ChatModel,
     pub thinking: bool,
     pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub plugin_connection_id: Option<Uuid>,
+    #[serde(default)]
+    pub tool_invocation_ids: Vec<Uuid>,
 }
 
 impl ChatRequest {
     fn validate(&self) -> ApiResult<()> {
+        if self.tool_invocation_ids.len() > 8
+            || self
+                .tool_invocation_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != self.tool_invocation_ids.len()
+            || (self.plugin_connection_id.is_none() && !self.tool_invocation_ids.is_empty())
+            || (self.plugin_connection_id.is_some() && self.thinking)
+        {
+            return Err(ApiError::validation(
+                "Plugin mode requires thinking disabled and at most eight distinct saved invocation IDs.",
+            ));
+        }
         if self.messages.is_empty() || self.messages.len() > MAX_MESSAGES {
             return Err(ApiError::validation("Send between 1 and 40 messages."));
         }
@@ -251,16 +271,25 @@ impl AiRuntime {
             user_id,
         })
     }
-    fn response(self: Arc<Self>, request: ChatRequest, permit: Admission) -> Response {
+    fn response(
+        self: Arc<Self>,
+        request: ChatRequest,
+        permit: Admission,
+        plugin: Option<PluginTurn>,
+    ) -> Response {
         let deadline = Deadline::now() + self.total_timeout;
         let model = request.model;
         let thinking = request.thinking;
-        let body = request.provider_body();
+        let mut body = request.provider_body();
+        if let Some(plugin) = &plugin {
+            plugin.augment(&mut body);
+        }
         let stream: EventStream = Box::pin(async_stream::stream! {
             // No spawned task: dropping the HTTP body drops this future, upstream and permit.
             let permit = permit;
             let mut upstream = None;
             let mut terminal = Err(StreamFailure::Upstream);
+            let mut proposed = None;
             let result = timeout_at(deadline, self.client.post(self.endpoint.clone())
                 .header(header::AUTHORIZATION, self.authorization.clone())
                 .header(header::ACCEPT, "text/event-stream")
@@ -276,7 +305,7 @@ impl AiRuntime {
             }
             if let Some(bytes) = upstream.as_mut() {
                 let mut decoder = SseDecoder::default();
-                let mut parser = CompletionParser::default();
+                let mut parser = CompletionParser { allow_tools: plugin.is_some(), ..CompletionParser::default() };
                 let mut phase = if thinking { "thinking" } else { "responding" };
                 let mut input_bytes = 0usize;
                 yield Ok(event("status", json!({"phase":phase})));
@@ -298,6 +327,7 @@ impl AiRuntime {
                     for frame in frames {
                         if frame.trim().is_empty() { continue; }
                         if frame.trim() == "[DONE]" {
+                            proposed = parser.tool_call.clone();
                             terminal = parser.finish();
                             break 'receive;
                         }
@@ -319,9 +349,20 @@ impl AiRuntime {
             }
             // Release the provider socket and admission before yielding the terminal event.
             drop(upstream);
-            drop(permit);
             match terminal {
                 Ok((finish_reason, usage)) => {
+                    if finish_reason == "tool_calls" {
+                        let prepared = match (plugin.as_ref(), proposed.as_ref()) {
+                            (Some(plugin),Some(call)) => timeout_at(deadline, plugin.propose(call)).await,
+                            _ => { yield Ok(event("error", json!({"code":"AI_UPSTREAM_ERROR","message":"The model returned an invalid tool proposal."}))); return; }
+                        };
+                        match prepared {
+                            Ok(Ok(proposal)) => yield Ok(event("tool_proposal", proposal)),
+                            Ok(Err(error)) => { yield Ok(event("error", json!({"code":error.code,"message":error.message}))); return; }
+                            Err(_) => { yield Ok(event("error", json!({"code":"AI_TIMEOUT","message":"Tool proposal preparation timed out."}))); return; }
+                        }
+                    }
+                    drop(permit);
                     let mut data = json!({"model":model,"finish_reason":finish_reason});
                     if let Some(usage) = usage { data["usage"] = json!(usage); }
                     yield Ok(event("done", data));
@@ -360,7 +401,8 @@ pub async fn chat(
         )
     })?;
     let permit = runtime.reserve(auth.user_id)?;
-    Ok(runtime.response(request, permit))
+    let plugin = PluginTurn::load(&state, auth.user_id, &request).await?;
+    Ok(runtime.response(request, permit, plugin))
 }
 
 #[derive(Default)]
@@ -537,6 +579,8 @@ struct CompletionParser {
     has_answer: bool,
     finish_reason: Option<String>,
     usage: Option<Usage>,
+    allow_tools: bool,
+    tool_call: Option<ProposedCall>,
 }
 struct Update {
     text: Option<String>,
@@ -573,10 +617,16 @@ impl CompletionParser {
             .get("delta")
             .and_then(Value::as_object)
             .ok_or(StreamFailure::Upstream)?;
-        if delta.get("tool_calls").is_some_and(|value| {
-            !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty())
-        }) {
-            return Err(StreamFailure::Upstream);
+        if let Some(calls) = delta.get("tool_calls").filter(|value| !value.is_null()) {
+            let calls = calls.as_array().ok_or(StreamFailure::Upstream)?;
+            if !calls.is_empty() {
+                if !self.allow_tools || calls.len() != 1 || self.finish_reason.is_some() {
+                    return Err(StreamFailure::Upstream);
+                }
+                self.tool_call
+                    .get_or_insert_with(ProposedCall::default)
+                    .append(&calls[0])?;
+            }
         }
         if delta
             .get("role")
@@ -607,7 +657,9 @@ impl CompletionParser {
         }
         if let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null()) {
             let reason = reason.as_str().ok_or(StreamFailure::Upstream)?;
-            if !["stop", "length", "content_filter"].contains(&reason) {
+            if !["stop", "length", "content_filter"].contains(&reason)
+                && !(self.allow_tools && reason == "tool_calls")
+            {
                 return Err(StreamFailure::Upstream);
             }
             if self
@@ -622,7 +674,11 @@ impl CompletionParser {
         Ok(Update { text })
     }
     fn finish(self) -> Result<(String, Option<Usage>), StreamFailure> {
-        if !self.has_answer {
+        if self.finish_reason.as_deref() == Some("tool_calls") {
+            if !self.allow_tools || self.tool_call.as_ref().is_none_or(|call| !call.valid()) {
+                return Err(StreamFailure::Upstream);
+            }
+        } else if !self.has_answer || self.tool_call.is_some() {
             return Err(StreamFailure::Upstream);
         }
         Ok((
@@ -647,6 +703,8 @@ mod tests {
         ChatRequest {
             model: ChatModel::Flash,
             thinking: false,
+            plugin_connection_id: None,
+            tool_invocation_ids: Vec::new(),
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: "Hello".into(),
@@ -925,7 +983,7 @@ mod tests {
 
     async fn collect(stub: &Stub, runtime: Arc<AiRuntime>) -> Vec<(String, Value)> {
         let permit = runtime.reserve(Uuid::new_v4()).unwrap();
-        let response = runtime.clone().response(request(), permit);
+        let response = runtime.clone().response(request(), permit, None);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         let bytes = to_bytes(response.into_body(), 2 * MAX_OUTPUT_BYTES)
             .await
@@ -983,9 +1041,10 @@ mod tests {
     async fn one_large_provider_delta_is_split_into_complete_bounded_public_events() {
         let stub = Stub::start("large_delta").await;
         let runtime = stub.runtime(Duration::from_secs(3), Duration::from_secs(1));
-        let response = runtime
-            .clone()
-            .response(request(), runtime.reserve(Uuid::new_v4()).unwrap());
+        let response =
+            runtime
+                .clone()
+                .response(request(), runtime.reserve(Uuid::new_v4()).unwrap(), None);
         let bytes = to_bytes(response.into_body(), 2 * MAX_OUTPUT_BYTES)
             .await
             .unwrap();
@@ -1053,7 +1112,7 @@ mod tests {
         let user = Uuid::new_v4();
         let response = runtime
             .clone()
-            .response(request(), runtime.reserve(user).unwrap());
+            .response(request(), runtime.reserve(user).unwrap(), None);
         let mut body = response.into_body().into_data_stream();
         while let Some(Ok(bytes)) = body.next().await {
             if String::from_utf8_lossy(&bytes).contains("event: delta") {
@@ -1080,7 +1139,7 @@ mod tests {
         drop(
             runtime
                 .clone()
-                .response(request(), runtime.reserve(user).unwrap()),
+                .response(request(), runtime.reserve(user).unwrap(), None),
         );
         assert_eq!(stub.calls.load(Ordering::SeqCst), 0);
         assert_eq!(runtime.admissions.lock().unwrap().active, 0);

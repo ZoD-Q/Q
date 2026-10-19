@@ -110,6 +110,9 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features ai-test-fixtures -- -D warnings
     - cargo test --locked --manifest-path backend/Cargo.toml --features ai-test-fixtures --test ai_chat -- --ignored
+    - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test plugins -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
 
 # Produces a Linux release from reviewed main history; never connects to the server.
 package-release:

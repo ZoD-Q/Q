@@ -3,7 +3,8 @@ use std::{env, net::SocketAddr, sync::Arc};
 use axum::http::HeaderValue;
 use tracing_subscriber::EnvFilter;
 use xiaoq_backend::{
-    AppState, ai::AiRuntime, app, connect_and_migrate, identity, video::VideoRuntime,
+    AppState, ai::AiRuntime, app, connect_and_migrate, identity, plugins::PluginRuntime,
+    video::VideoRuntime,
 };
 
 #[tokio::main]
@@ -35,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state.video = VideoRuntime::from_env()?.map(Arc::new);
     // Environment-backed provider configuration is deliberately limited to executable startup.
     state.ai = AiRuntime::from_env()?.map(Arc::new);
+    state.plugins = Some(Arc::new(PluginRuntime::from_env()?));
     if env::var("Q_SEED_DEMO").as_deref() == Ok("true") {
         identity::seed_demo(&state)
             .await
