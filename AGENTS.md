@@ -158,15 +158,17 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 
 一次提交涉及多个范围时，执行对应检查的并集；依赖、锁文件、构建脚本或测试配置变化按受影响的客户端或后端范围验证。测试后若继续修改受检内容，须重新运行受影响的检查。交付及 MR 中记录实际运行的命令、结果、未覆盖的平台和阻碍，不得把未执行的测试写为通过。
 
-GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` / `hera` 后自动运行，并让 MR 展示最新提交的结果。数据库测试使用独立测试库；流水线不得访问真实业务数据库、执行真实付款或自动部署。原生设备检查和真实服务验收仍按上表单独记录，不能由流水线通过替代。合并继续由人工执行，不启用自动合并。
+GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` / `hera` 后自动运行，并让 MR 展示最新提交的结果。数据库测试使用独立测试库；自动检查不得访问业务数据库、执行真实付款或自动部署。仅受保护 main 上人工点击的 staging 部署作业可通过受限接收器执行指定环境备份、迁移和发布。原生设备检查和真实服务验收仍按上表单独记录，不能由流水线通过替代。合并继续由人工执行，不启用自动合并。
 
 `cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。
 
-**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行四类自动验证（后端 17/18 矩阵，共五个自动作业）：`source-check` 检查提交差异，`web-check` 检查管理原型类型、规范、纯逻辑与浏览器交互、发布工具并保存同提交静态制品；`mobile-check` 检查类型、规范、功能测试、接口生成一致性与 Web 导出；`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、社交、备份恢复、视频、AI、插件和 AI 插件替身集成测试。备份恢复测试使用与 17/18 矩阵匹配的官方 PostgreSQL 客户端。CI 不代表 iOS/Android 真机或供应商实账验收。
+**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行五类自动验证（后端 17/18 矩阵，共六个自动作业）：`source-check` 检查提交差异，`web-check` 检查管理原型类型、规范、纯逻辑与浏览器交互、发布工具并保存同提交静态制品；`mobile-check` 检查类型、规范、功能测试、接口生成一致性与 Web 导出；`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、社交、备份恢复、视频、AI、插件和 AI 插件替身集成测试。备份恢复测试使用与 17/18 矩阵匹配的官方 PostgreSQL 客户端。`deploy-check` 检查发布打包、部署客户端、服务端接收器和管理网页发布工具。CI 不代表 iOS/Android 真机或供应商实账验收。
 
-`package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变四类必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
+`package-release` 在受保护 main 检查通过后自动构建当前流水线的 Linux amd64 发布包，包含源码提交、SQLx 迁移 SHA384 清单和文件校验和；main 不允许覆盖源码版本。其他允许分支仍可手动打包已合入 main 的历史版本。打包不会部署。
 
-Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标签匹配（2026-10-19 设置中可见 #28 KAI privileged Docker Runner）。任务不启动 Docker-in-Docker、不挂载宿主 Docker socket，也不配置部署；现有 Runner 的特权执行配置由管理员管理，不宣称已改为非特权。新增或迁移 Runner 时必须支持容器镜像及 PostgreSQL service，保持测试库隔离，不将个人电脑或业务服务器默认作为执行环境。
+`deploy-staging-api` / `deploy-staging-admin` 仅出现在受保护 main，所有检查与打包通过后由有权限的人手动点击。两个任务串行发布至现有内部联调环境，执行健康与实际版本校验，GitLab 分别记录 `staging/api` 和 `staging/admin`。未点击时 main 流水线显示等待手动任务；MR 不含部署任务，合并继续人工处理。设置、受限账号、迁移失败处理与验收边界见 [GitLab 部署流程](backend/deploy/gitlab-cd.md)。
+
+Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标签匹配（2026-10-19 设置中可见 #28 KAI privileged Docker Runner）。任务不启动 Docker-in-Docker、不挂载宿主 Docker socket，只通过专用受限 SSH 入口执行人工触发的部署；现有 Runner 的特权执行配置由管理员管理，不宣称已改为非特权。新增或迁移 Runner 时必须支持容器镜像及 PostgreSQL service，保持测试库隔离，不将个人电脑或业务服务器默认作为执行环境。
 
 首次配置或修改 CI 后，必须查看对应提交在 GitLab 的实际流水线和 Runner 结果；本地测试通过、YAML 解析成功或设置中可见 Runner 均不能替代远端运行通过。GitLab 项目须关闭默认 Auto DevOps，启用“Pipelines must succeed”，且不把跳过的流水线视为成功；保留长期开发分支与人工合并流程。配置合入 `main` 后，另一开发者需先同步 `main`，其分支才能包含并使用该配置。
 
