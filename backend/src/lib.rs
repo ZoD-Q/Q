@@ -24,6 +24,7 @@ pub mod identity;
 pub mod ledger;
 pub mod plugins;
 pub mod profiles;
+pub mod social;
 pub mod validation;
 pub mod video;
 
@@ -131,6 +132,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     Router::new()
         .merge(auth_routes)
+        .merge(social::router())
         .route("/health", get(health))
         .route("/v1/auth/logout", post(identity::logout))
         .route("/v1/me", get(profiles::me).patch(profiles::patch))

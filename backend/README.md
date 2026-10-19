@@ -2,7 +2,9 @@
 
 Rust modular monolith: Axum, Tokio, SQLx and PostgreSQL. Its ledger only handles simulated QDC. Configured DeepSeek chat and the opt-in video workbench make real provider requests. Kling uses user-owned API credentials. There is no real payment provider, bank account, lending, insurance or investment connection.
 
-Start with the [repository development rules](../AGENTS.md) and [backend rules](AGENTS.md). The [Q plugin integration specification](docs/plugin-integration.md) defines the future host contract; MCP, discovery, authorization and Apps support are not implemented in this release.
+Start with the [repository development rules](../AGENTS.md) and [backend rules](AGENTS.md). The [Q plugin integration specification](docs/plugin-integration.md) defines the host contract; personal MCP connections and explicit tool calls are implemented, while Apps sandboxing and a public index remain future work.
+
+The `social` module reuses Q identity for friend requests, private text conversations, read receipts, ephemeral messages, mutual interaction days and reports. See [the social API contract](contracts/social.md) and [the client guide](../mobile/docs/social-chat.md). Foreground polling is not OS push; automatic expiry is not end-to-end encryption. These changes do not deploy the feature.
 
 ## Run locally
 
@@ -35,6 +37,8 @@ Transfers lock both wallets in UUID order, recheck sender-scoped idempotency und
 Profiles and credentials do not embed balances. Login ownership is the authenticated session, never a client-supplied user ID. SQL uses bound parameters. Auth endpoints use per-IP and per-handle minute limits and reject excessive password hashing concurrency. Rate limits are process-local and reset on restart; internet deployment needs a shared limiter and trusted proxy configuration. The server deliberately ignores untrusted forwarded IP headers.
 
 ## Verification
+
+Social changes additionally run the ignored `social` integration test against an isolated `TEST_DATABASE_URL`. `social_backup` requires matching-major `pg_dump`/`pg_restore` (PATH or `Q_PG_BIN_DIR`), libpq credentials such as `PGPASSWORD`, and a disposable role allowed to create databases. It creates, restores and drops its own uniquely named databases using the deployment exclusion policy. Install the updated backup policy together with any future social deployment.
 
 ```sh
 ~/.cargo/bin/cargo fmt --check

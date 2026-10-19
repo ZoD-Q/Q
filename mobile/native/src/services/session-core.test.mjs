@@ -2,6 +2,31 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createSessionStore } from "./session-core.ts";
 
+test('logical invalidation notifies all consumers and survives a failed physical removal', async () => {
+  const db = memory('alice', { remove: async () => { throw Error('storage'); } });
+  const store = createSessionStore(db.storage), events = [];
+  await store.readSnapshot(); store.subscribe(token => events.push(token));
+  const before = store.getRevision(); store.invalidateToken('alice');
+  assert.equal(store.getRevision(), before + 1); assert.deepEqual(events, [null]);
+  await assert.rejects(store.removeToken('alice'));
+  assert.equal(await store.readToken(), null); assert.equal((await store.readSnapshot()).token, null);
+  assert.equal(await store.writeToken('alice'), false);
+  assert.equal(await store.writeToken('bob'), true); assert.equal(await store.readToken(), 'bob');
+  const revision = store.getRevision(); store.invalidateToken('alice');
+  assert.equal(store.getRevision(), revision); assert.equal(await store.readToken(), 'bob');
+  assert.deepEqual(events, [null, 'bob']);
+});
+
+test('a token invalidated during an unguarded delayed write cannot be published afterward', async () => {
+  const entered = deferred(), gate = deferred();
+  const db = memory(null, { set: async value => { if (value === 'alice') { entered.resolve(); await gate.promise; } } });
+  const store = createSessionStore(db.storage), events = []; store.subscribe(token => events.push(token));
+  const writing = store.writeToken('alice'); await entered.promise;
+  store.invalidateToken('alice'); gate.resolve();
+  assert.equal(await writing, false); assert.equal(await store.readToken(), null);
+  assert.equal(events.includes('alice'), false);
+});
+
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });

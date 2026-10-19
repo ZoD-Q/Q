@@ -20,6 +20,7 @@
     "expo-system-ui": "~58.0.6",
     "expo-video": "~58.0.11",
     "lucide-react-native": "^1.59.0",
+    "qrcode-generator": "2.0.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.0",
@@ -49,7 +50,9 @@
     "test:video": "node --test src/prototype/video/pricing.test.mjs",
     "test:plugins": "node --test src/prototype/plugin-workbench/materials.test.mjs src/prototype/plugin-host/*.test.mjs",
     "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs",
-    "test:chat": "node --test src/prototype/ai-chat/*.test.mjs src/services/session-core.test.mjs"
+    "test:chat": "node --test src/prototype/ai-chat/*.test.mjs src/services/session-core.test.mjs",
+    "test:account": "node --test src/prototype/account/*.test.mjs",
+    "test:social": "node --test src/prototype/social/*.test.mjs"
   },
   "private": true
 }

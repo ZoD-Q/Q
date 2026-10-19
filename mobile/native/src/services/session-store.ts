@@ -6,7 +6,7 @@ const store = createSessionStore({
   set: token => SecureStore.setItemAsync(KEY, token),
   remove: () => SecureStore.deleteItemAsync(KEY),
 });
-export const { readToken, writeToken, removeToken } = store;
+export const { readToken, writeToken, removeToken, invalidateToken } = store;
 export const subscribeSession = store.subscribe;
 export const readSessionSnapshot = store.readSnapshot;
 export const getSessionRevision = store.getRevision;

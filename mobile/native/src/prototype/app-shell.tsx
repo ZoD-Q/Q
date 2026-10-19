@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { BackHandler, Modal, Pressable, ScrollView, View } from "react-native";
+import { AppState, BackHandler, Modal, Pressable, ScrollView, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import { Reveal, selectionFeedback } from "./motion";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
+import { useIsFocused } from "expo-router/react-navigation";
 import {
-  Bell,
+  MessageCircle,
   Clapperboard,
   ChevronRight,
   CreditCard,
@@ -23,13 +25,15 @@ import {
 } from "lucide-react-native";
 import { Divider, IconAction, Type, useDesign, type PageId } from "./design";
 import { ChatPage, HistoryPage, type Conversation } from "./chat";
-import { ProfilePage, MessagesPage } from "./account-pages";
+import { ProfilePage } from "./account-pages";
 import { ServicePage } from "./services";
 import { VideoCreate } from "./video/video-create";
 import { CreatorFeed } from "./video/creator-feed";
 import { useChat } from "./ai-chat/use-chat";
 import { PluginWorkbenchPage } from "./plugin-workbench/workbench";
 import { PluginHostPage } from "./plugin-host/page";
+import { useQAccount } from "./account/account-state";
+import { useSocial } from "./social";
 
 const serviceNavigation: {
   id: PageId;
@@ -123,6 +127,7 @@ function Sidebar({
   onOpen: (id: string) => void;
 }) {
   const { colors, text, name, phone } = useDesign();
+  const account = useQAccount();
   const nav = (
     id: PageId,
     label: string,
@@ -274,10 +279,10 @@ function Sidebar({
           </View>
           <View style={{ flex: 1 }}>
             <Type size={13} weight="500">
-              account
+              {account.session?.user.display_name ?? text("账号", "Account")}
             </Type>
             <Type size={11} muted>
-              {text("登录以继续", "Sign in to continue")}
+              {account.session ? `@${account.session.user.handle}` : text("登录以继续", "Sign in to continue")}
             </Type>
           </View>
           <ChevronRight size={15} color={colors.faint} />
@@ -423,7 +428,11 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [page, setPage] = useState<PageId>(initialPage);
   const [sidebar, setSidebar] = useState(true);
   const [drawer, setDrawer] = useState(false);
-  const chat = useChat(page === "chat" || page === "plugins");
+  const focused = useIsFocused();
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
+  const social = useSocial();
+  const active = focused && foreground;
+  const chat = useChat(active && (page === "chat" || page === "plugins"));
   const items = chat.items;
   const reduced = useReducedMotion();
   const navigate = (next: PageId) => {
@@ -434,12 +443,16 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const newChat = () => { chat.newConversation(); navigate("chat"); };
   const open = (id: string) => { chat.openConversation(id); navigate("chat"); };
   useEffect(() => {
+    const subscription = AppState.addEventListener("change", value => setForeground(value === "active"));
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => notify(""), 4000);
     return () => clearTimeout(timer);
   }, [notice, notify]);
   useEffect(() => {
-    if (process.env.EXPO_OS !== "android") return;
+    if (process.env.EXPO_OS !== "android" || !focused) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (drawer) {
         setDrawer(false);
@@ -452,7 +465,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
       return false;
     });
     return () => sub.remove();
-  }, [drawer, page]);
+  }, [drawer, page, focused]);
   return (
     <View
       style={{
@@ -528,15 +541,21 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
               </Type>
             </Pressable>
           </View>
-          <IconAction
-            icon={Bell}
-            label={text("消息", "Messages")}
-            selected={page === "messages"}
-            onPress={() => navigate("messages")}
-          />
+          <View>
+            <IconAction
+              icon={MessageCircle}
+              label={social.unreadCount ? text(`消息，${social.unreadCount} 条未读`, `Messages, ${social.unreadCount} unread`) : text("消息", "Messages")}
+              onPress={() => { selectionFeedback(); setDrawer(false); router.push("/social"); }}
+            />
+            {social.unreadCount > 0 ? <View pointerEvents="none" accessibilityElementsHidden
+              style={{ position: "absolute", top: 3, right: 2, minWidth: 18, minHeight: 18, paddingHorizontal: 4,
+                borderRadius: 10, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }}>
+              <Type size={10} color={colors.onAccent}>{social.unreadCount > 99 ? "99+" : String(social.unreadCount)}</Type>
+            </View> : null}
+          </View>
         </View>
         <Reveal key={page} style={{ flex: 1 }}>
-          {page === "chat" ? (
+          {!active ? <View style={{ flex: 1 }} /> : page === "chat" ? (
             <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} />
           ) : page === "video" ? (
             <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
@@ -546,8 +565,6 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
             <HistoryPage items={items} onOpen={open} onNew={newChat} />
           ) : page === "profile" ? (
             <ProfilePage />
-          ) : page === "messages" ? (
-            <MessagesPage />
           ) : page === "plugin-workbench" ? (
             <PluginWorkbenchPage onBack={() => navigate("plugins")} />
           ) : page === "plugins" ? (

@@ -19,7 +19,9 @@
     "test:video": "npm run test:video --workspace=@xiaoq/native",
     "test:plugins": "npm run test:plugins --workspace=@xiaoq/native",
     "test:api-workbench": "npm run test:api-workbench --workspace=@xiaoq/native",
-    "test:chat": "npm run test:chat --workspace=@xiaoq/native"
+    "test:chat": "npm run test:chat --workspace=@xiaoq/native",
+    "test:account": "npm run test:account --workspace=@xiaoq/native",
+    "test:social": "npm run test:social --workspace=@xiaoq/native"
   },
   "engines": {
     "node": ">=22"

@@ -45,6 +45,10 @@ curl --fail --max-time 8 http://127.0.0.1:18787/health
 
 ## 恢复验证与回退
 
+包含社交模块的版本必须一并更新 `backup.sh` 与 `backup-policy.sh`。备份保留 schema、普通聊天与最小幂等/到期墓碑，但排除 `social_ephemeral_payloads`、`social_reports`、`social_report_evidence` 的数据。恢复后缺少正文的封套不可用，旧举报编号不重新创建内容或延长保留期限。不要另行全量备份这些临时表来绕过该约定。`social_backup` 使用同一策略进行实际恢复验收；CI 的 PostgreSQL 17/18 任务均安装匹配主版本的客户端。
+
+社交迁移只添加表，不改已有迁移。回退 API 不会回退数据或备份策略；恢复旧版全量备份前须核验临时内容排除与到期清理。本次变更仅包含代码和部署材料，不代表服务器已经启用社交。
+
 每次首部署至少在同一 PostgreSQL 实例内新建一个专用恢复验证库（名称必须确认不存在），不能覆盖业务库。通过 `docker compose … exec -T db` 调用 PostgreSQL 工具：管理员创建由 `q_app` 拥有的新库，将指定 `.dump` 送入 `pg_restore --exit-on-error --no-owner --role=q_app --dbname=<验证库>`。检查迁移记录、关键表和约束，再删除本次明确创建的验证库。记录备份时间、恢复结果与检查项。`pg_restore --list` 只能验证归档目录可读，不能代替实际恢复。
 
 真实恢复需停 API 写入，确认恢复点和数据损失范围，在新库中完成恢复校验后切换，保留原库供核对。同时恢复匹配的加密密钥和数据库凭据；数据库转储本身不包含角色密码。不得直接对现有库使用 `--clean` 或删除持久化目录。

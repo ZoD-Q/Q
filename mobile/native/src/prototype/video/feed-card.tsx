@@ -3,6 +3,7 @@ import { ActivityIndicator, AppState, Pressable, View } from "react-native";
 import { useEvent } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useReducedMotion } from "react-native-reanimated";
+import { useIsFocused } from "expo-router/react-navigation";
 import {
   Pause,
   Play,
@@ -60,6 +61,7 @@ export function VideoStage({
 }) {
   const { text } = useDesign();
   const reduced = useReducedMotion();
+  const focused = useIsFocused();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
@@ -90,11 +92,11 @@ export function VideoStage({
     player.muted = muted;
   }, [player, muted]);
   useEffect(() => {
-    if (active && foreground && !paused && status === "readyToPlay")
+    if (active && focused && foreground && !paused && status === "readyToPlay")
       player.play();
     else player.pause();
     return () => player.pause();
-  }, [active, foreground, paused, player, status]);
+  }, [active, focused, foreground, paused, player, status]);
   const reload = () => {
     setLoadFailed(false);
     setRetry((value) => value + 1);
