@@ -61,7 +61,9 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 
 - 开工先确认当前分支和远端进度。使用对应开发者的分支，不把一人的工作推到另一人的分支；分支已存在时复用，不重置、覆盖或重复创建。
 - 开发前获取最新远端信息，在工作区干净时将 `origin/main` 的新增提交合入自己的开发分支；解决冲突并验证后再推送。已共享分支不通过重写历史或强推来同步。
-- 推送使用明确目标：`git push origin Mandow` 或 `git push origin hera`。检查通过后创建目标为 `main` 的 MR，写明变化、验证和未覆盖事项，等待人工处理。
+- 每次提交前必须按第 8 节运行本次改动适用的自动化检查和测试，通过后才可提交；测试失败或必要测试无法运行时，先修复或报告阻碍，不得默认跳过后提交、推送。
+- 统一集成流程：**推送 `Mandow` / `hera` → 自动检查 → 人工审核 MR → 合入 `main`**。推送使用明确目标：`git push origin Mandow` 或 `git push origin hera`。开发分支的每次推送均须触发 GitLab 流水线，检查通过后提交目标为 `main` 的 MR 供人工审核；已存在 MR 时更新该 MR，写明变化、验证和未覆盖事项。
+- MR 的通过依据必须对应最新提交；追加提交或解决冲突后重新检查，不能沿用旧提交的通过结果。流水线失败、未运行、取消或必要任务被跳过，均不能视为通过；不得使用 `[skip ci]`、`[ci skip]` 或同类选项绕过检查。
 - 人工合并后保留这两条长期开发分支；后续继续同步 `main`。不能把“验证通过”理解为 Agent 可以自动合并。
 - 本文件规定协作流程；GitLab 服务端的分支保护和成员权限由项目设置管理，不能仅凭文档宣称已启用保护。
 
@@ -136,8 +138,9 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 
 | 修改范围 | 必要验证 |
 | --- | --- |
-| 文档 | 核对实际文件、命令和链接；检查新旧说明一致；不为文档改动运行会写账本的测试 |
-| 移动端代码 | `npm --prefix mobile run typecheck`、`npm --prefix mobile run lint`；按涉及逻辑运行 `test:utils` / `test:video` |
+| 所有提交 | `git diff --check`；暂存后再执行 `git diff --cached --check`，确认提交内容与已验证内容一致 |
+| 仅文档 | 上述自动化差异检查，加实际文件、命令和链接核对；检查新旧说明一致；不为文档改动运行会写账本的测试 |
+| 移动端代码 | `npm --prefix mobile run typecheck`、`npm --prefix mobile run lint`，以及 `npm --prefix mobile run test:utils`、`npm --prefix mobile run test:video`、`npm --prefix mobile run test:plugins`、`npm --prefix mobile run test:api-workbench` |
 | UI / 导航 / 媒体 | 上述检查，加 `npm --prefix mobile run export:web` 和实际受影响页面检查；涉及原生行为时在对应设备/模拟器验证，记录未覆盖的平台 |
 | Rust 代码 | `cargo fmt --manifest-path backend/Cargo.toml --check`、`cargo clippy --manifest-path backend/Cargo.toml --all-targets -- -D warnings`、`cargo test --manifest-path backend/Cargo.toml` |
 | 数据库 / 身份 / 账本 | 上述检查，加独立 PostgreSQL 测试库中的 `TEST_DATABASE_URL=… cargo test --manifest-path backend/Cargo.toml --test postgres -- --ignored`；按行为补充账户隔离、并发和幂等验证 |
@@ -146,6 +149,16 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 
 插件工作台本地逻辑运行 `npm --prefix mobile run test:plugins`；检查 URL 身份保留、关键字段、条件材料和生成地址冲突。该测试不能替代真实插件集成验收，详见 [工作台说明](mobile/docs/plugin-workbench.md)。
 
-`cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。当前没有 GitLab CI 配置，不得声称流水线已通过。
+一次提交涉及多个范围时，执行对应检查的并集；依赖、锁文件、构建脚本或测试配置变化按受影响的客户端或后端范围验证。测试后若继续修改受检内容，须重新运行受影响的检查。交付及 MR 中记录实际运行的命令、结果、未覆盖的平台和阻碍，不得把未执行的测试写为通过。
+
+GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` / `hera` 后自动运行，并让 MR 展示最新提交的结果。数据库测试使用独立测试库；流水线不得访问真实业务数据库、执行真实付款或自动部署。原生设备检查和真实服务验收仍按上表单独记录，不能由流水线通过替代。合并继续由人工执行，不启用自动合并。
+
+`cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。
+
+**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。当前初版每次运行全部三项任务：`source-check` 检查提交差异，`mobile-check` 检查类型、规范、四组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本和视频替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
+
+Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标签匹配（2026-10-19 设置中可见 #28 KAI privileged Docker Runner）。任务不启动 Docker-in-Docker、不挂载宿主 Docker socket，也不配置部署；现有 Runner 的特权执行配置由管理员管理，不宣称已改为非特权。新增或迁移 Runner 时必须支持容器镜像及 PostgreSQL service，保持测试库隔离，不将个人电脑或业务服务器默认作为执行环境。
+
+首次配置或修改 CI 后，必须查看对应提交在 GitLab 的实际流水线和 Runner 结果；本地测试通过、YAML 解析成功或设置中可见 Runner 均不能替代远端运行通过。GitLab 项目须关闭默认 Auto DevOps，启用“Pipelines must succeed”，且不把跳过的流水线视为成功；保留长期开发分支与人工合并流程。配置合入 `main` 后，另一开发者需先同步 `main`，其分支才能包含并使用该配置。
 
 完成前检查差异仅含本任务内容、无秘密或生成垃圾、相关规范与合同已更新、必要验证通过或如实说明阻碍；提交和推送按用户授权完成。对外能力必须区分“界面可用、协议可连接、授权完成、宿主联调通过、真实业务验证”，只报告实际有证据的状态。

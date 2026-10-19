@@ -15,9 +15,10 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
+use tokio::sync::Notify;
 use tower::ServiceExt;
 use uuid::Uuid;
 use xiaoq_backend::{AppState, app, video::VideoRuntime};
@@ -28,6 +29,12 @@ struct Vendor {
     polls: AtomicUsize,
     trapped: AtomicUsize,
     tasks: Mutex<HashMap<String, String>>,
+    rejection_started: Notify,
+    release_rejection: Notify,
+    next_poll: Mutex<Option<Value>>,
+    hold_next_poll: AtomicBool,
+    held_poll_started: Notify,
+    release_held_poll: Notify,
 }
 async fn submit(
     State(vendor): State<Arc<Vendor>>,
@@ -43,6 +50,11 @@ async fn submit(
     let external = body["external_task_id"].as_str().unwrap().to_owned();
     Uuid::parse_str(&external).unwrap();
     let prompt = body["prompt"].as_str().unwrap();
+    if prompt == "delayed reject" {
+        vendor.rejection_started.notify_one();
+        vendor.release_rejection.notified().await;
+        return (StatusCode::BAD_REQUEST, Json(json!({"code":1200}))).into_response();
+    }
     if prompt == "reject" {
         return (
             StatusCode::BAD_REQUEST,
@@ -80,16 +92,27 @@ async fn poll(
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    vendor.polls.fetch_add(1, Ordering::SeqCst);
+    let revision = vendor.polls.fetch_add(1, Ordering::SeqCst) + 1;
     assert_eq!(headers["authorization"], "Bearer fixture-secret-api-key");
-    let tasks = vendor.tasks.lock().unwrap();
-    let task = tasks
-        .get(&id)
-        .or_else(|| tasks.values().find(|task| *task == &id));
-    match task {
-        Some(task_id) => Json(json!({"code":0,"data":{"task_id":task_id,"task_status":"succeed","task_result":{"videos":[{"url":"https://v1.klingai.com/generated.mp4?signature=fixture"}]}}})).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+    let response = {
+        if let Some(response) = vendor.next_poll.lock().unwrap().take() {
+            Json(response).into_response()
+        } else {
+            let tasks = vendor.tasks.lock().unwrap();
+            let task = tasks
+                .get(&id)
+                .or_else(|| tasks.values().find(|task| *task == &id));
+            match task {
+                Some(task_id) => Json(json!({"code":0,"data":{"task_id":task_id,"task_status":"succeed","task_result":{"videos":[{"url":format!("https://v1.klingai.com/generated.mp4?signature=fixture-{revision}")}]}}})).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    };
+    if vendor.hold_next_poll.swap(false, Ordering::SeqCst) {
+        vendor.held_poll_started.notify_one();
+        vendor.release_held_poll.notified().await;
     }
+    response
 }
 async fn trapped(State(vendor): State<Arc<Vendor>>) -> StatusCode {
     vendor.trapped.fetch_add(1, Ordering::SeqCst);
@@ -525,4 +548,141 @@ async fn missing_configuration_fails_closed_and_old_contract_fields_rejected() {
             .is_err()
     );
     h.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated TEST_DATABASE_URL; uses only a coordinated loopback fixture"]
+async fn definitive_submission_rejection_resolves_an_early_unknown_lookup() {
+    let h = Harness::new().await;
+    let (alice, _) = h.register("alice").await;
+    let connection = h.connection(&alice).await;
+    let router = h.router.clone();
+    let owner = alice.clone();
+    let body = job_body(connection, Uuid::new_v4(), "delayed reject");
+    let submission = tokio::spawn(async move {
+        send(&router, "POST", "/v1/video/jobs", Some(&owner), Some(body)).await
+    });
+    h.vendor.rejection_started.notified().await;
+    let (_, history) = h.request("GET", "/v1/video/jobs", Some(&alice), None).await;
+    let id = history["items"][0]["id"].as_str().unwrap();
+    // Simulates the production 15s request remaining in flight beyond the 3s poll interval.
+    h.allow_poll(id).await;
+    let (_, early) = h
+        .request("GET", &format!("/v1/video/jobs/{id}"), Some(&alice), None)
+        .await;
+    h.vendor.release_rejection.notify_one();
+    let (_, final_job) = submission.await.unwrap();
+    let posts = h.vendor.posts.load(Ordering::SeqCst);
+    h.finish().await;
+    assert_eq!(early["status"], "unknown");
+    assert_eq!(
+        final_job["status"], "failed",
+        "A definitive rejection must resolve the prior missing lookup: {final_job}"
+    );
+    assert_eq!(final_job["error_code"], "VIDEO_PROVIDER_REJECTED");
+    assert_eq!(posts, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated TEST_DATABASE_URL; never fetches the fixture media URL"]
+async fn completed_job_refreshes_signed_media_without_creating_another_task() {
+    let h = Harness::new().await;
+    let (alice, _) = h.register("alice").await;
+    let connection = h.connection(&alice).await;
+    let (_, created) = h
+        .request(
+            "POST",
+            "/v1/video/jobs",
+            Some(&alice),
+            Some(job_body(connection, Uuid::new_v4(), "safe")),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap();
+    h.allow_poll(id).await;
+    let (_, first) = h
+        .request("GET", &format!("/v1/video/jobs/{id}"), Some(&alice), None)
+        .await;
+    h.allow_poll(id).await;
+    let (_, refreshed) = h
+        .request("GET", &format!("/v1/video/jobs/{id}"), Some(&alice), None)
+        .await;
+    let provider_id = refreshed["provider_task_id"].as_str().unwrap();
+    *h.vendor.next_poll.lock().unwrap() = Some(
+        json!({"code":0,"data":{"task_id":provider_id,"task_status":"succeed","task_result":{"videos":[{"url":"https://untrusted.example/video.mp4"}]}}}),
+    );
+    h.allow_poll(id).await;
+    let (_, unsafe_result) = h
+        .request("GET", &format!("/v1/video/jobs/{id}"), Some(&alice), None)
+        .await;
+    *h.vendor.next_poll.lock().unwrap() =
+        Some(json!({"code":0,"data":{"task_id":provider_id,"task_status":"processing"}}));
+    h.allow_poll(id).await;
+    let (_, stale_result) = h
+        .request("GET", &format!("/v1/video/jobs/{id}"), Some(&alice), None)
+        .await;
+    *h.vendor.next_poll.lock().unwrap() = Some(json!({"invalid_response":true}));
+    h.allow_poll(id).await;
+    let (_, unavailable) = h
+        .request("GET", &format!("/v1/video/jobs/{id}"), Some(&alice), None)
+        .await;
+    let posts = h.vendor.posts.load(Ordering::SeqCst);
+    let polls = h.vendor.polls.load(Ordering::SeqCst);
+    h.finish().await;
+    assert_eq!(first["status"], "succeeded");
+    assert_eq!(refreshed["status"], "succeeded");
+    assert_ne!(
+        first["video_url"], refreshed["video_url"],
+        "An explicit refresh must replace an expired signed URL"
+    );
+    assert_eq!(unsafe_result["video_url"], refreshed["video_url"]);
+    assert_eq!(unsafe_result["error_code"], "VIDEO_RESULT_URL_UNSUPPORTED");
+    assert_eq!(stale_result["status"], "succeeded");
+    assert_eq!(stale_result["video_url"], refreshed["video_url"]);
+    assert_eq!(unavailable["status"], "succeeded");
+    assert_eq!(unavailable["video_url"], refreshed["video_url"]);
+    assert_eq!(unavailable["error_code"], "VIDEO_POLL_UNAVAILABLE");
+    assert_eq!(polls, 5);
+    assert_eq!(posts, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated TEST_DATABASE_URL; uses only coordinated loopback reads"]
+async fn delayed_poll_cannot_overwrite_a_more_recent_signed_url() {
+    let h = Harness::new().await;
+    let (alice, _) = h.register("alice").await;
+    let connection = h.connection(&alice).await;
+    let (_, created) = h
+        .request(
+            "POST",
+            "/v1/video/jobs",
+            Some(&alice),
+            Some(job_body(connection, Uuid::new_v4(), "safe")),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap();
+    let path = format!("/v1/video/jobs/{id}");
+    h.allow_poll(id).await;
+    h.request("GET", &path, Some(&alice), None).await;
+    h.allow_poll(id).await;
+    h.vendor.hold_next_poll.store(true, Ordering::SeqCst);
+    let router = h.router.clone();
+    let owner = alice.clone();
+    let pending_path = path.clone();
+    let earlier =
+        tokio::spawn(async move { send(&router, "GET", &pending_path, Some(&owner), None).await });
+    h.vendor.held_poll_started.notified().await;
+    h.allow_poll(id).await;
+    let (_, newest) = h.request("GET", &path, Some(&alice), None).await;
+    h.vendor.release_held_poll.notify_one();
+    let (_, delayed) = earlier.await.unwrap();
+    let (_, stored) = h.request("GET", &path, Some(&alice), None).await;
+    let posts = h.vendor.posts.load(Ordering::SeqCst);
+    h.finish().await;
+    assert_eq!(
+        stored["video_url"], newest["video_url"],
+        "A late response must not restore an older signed URL"
+    );
+    assert_eq!(delayed["video_url"], newest["video_url"]);
+    assert_eq!(stored["status"], "succeeded");
+    assert_eq!(posts, 1);
 }

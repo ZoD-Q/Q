@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
-import { createPendingStore, decodeAuth, decodeConnection, decodeJob, decodePending, isSafeSubmissionRejection, safeVideoUrl, WorkbenchError, workbenchRequest } from "./core.ts";
+import { createPendingStore, decodeAuth, decodeConnection, decodeJob, decodePending, isSafeSubmissionRejection, loadWorkbenchSnapshot, safeVideoUrl, WorkbenchError, workbenchRequest } from "./core.ts";
 
 const owner = "11111111-1111-4111-8111-111111111111";
 const secondOwner = "22222222-2222-4222-8222-222222222222";
@@ -66,6 +66,48 @@ test("storage failure before manifest prevents accepting an unsafe submission in
   const store = createPendingStore({ ...memory.adapter, set: async (name, value) => { if (++calls === 2) throw new Error("full"); await memory.adapter.set(name, value); } });
   await assert.rejects(store.save({ ...intent, request: { ...intent.request, prompt: "海".repeat(2500) } }), { code: "STORAGE_ERROR" });
   assert.equal(await createPendingStore(memory.adapter).read(owner), null);
+});
+
+test("damaged pending storage preserves server history and connections without enabling submission", async () => {
+  const memory = storage();
+  const store = createPendingStore(memory.adapter);
+  await store.save(intent);
+  memory.values.delete(`xiaoq.video.pending.v1.${owner}.${key}.0`);
+  const originalStorage = new Map(memory.values);
+  const savedConnection = { id: connection, name: "Kling", region: "cn", provider: "kling", created_at: created, revoked: false };
+  let reads = 0;
+  const snapshot = await loadWorkbenchSnapshot({
+    pending: () => store.read(owner),
+    connections: async () => { reads++; return [savedConnection]; },
+    jobs: async () => { reads++; return [decodeJob(job)]; },
+  });
+  assert.equal(reads, 2);
+  assert.equal(snapshot.pending.status, "rejected");
+  assert.deepEqual(snapshot.connections, { status: "fulfilled", value: [savedConnection] });
+  assert.deepEqual(snapshot.jobs, { status: "fulfilled", value: [decodeJob(job)] });
+  assert.equal(snapshot.failure.reason.code, "STORAGE_ERROR");
+  assert.deepEqual(memory.values, originalStorage);
+});
+
+test("session expiry outranks storage and network failures regardless of completion order", async () => {
+  let expire;
+  const expiry = new Promise((_resolve, reject) => { expire = reject; });
+  const unauthorized = new WorkbenchError("UNAUTHORIZED", 401);
+  const loading = loadWorkbenchSnapshot({
+    pending: () => { throw new WorkbenchError("STORAGE_ERROR"); },
+    connections: async () => { throw new WorkbenchError("NETWORK_ERROR"); },
+    jobs: () => expiry,
+  });
+  await Promise.resolve();
+  expire(unauthorized);
+  const snapshot = await loading;
+  assert.equal(snapshot.failure.reason, unauthorized);
+});
+
+test("snapshot can enable submission only after all recovery and server reads succeed", async () => {
+  const snapshot = await loadWorkbenchSnapshot({ pending: async () => intent, connections: async () => [], jobs: async () => [decodeJob(job)] });
+  assert.equal(snapshot.failure, null);
+  assert.deepEqual(snapshot.pending, { status: "fulfilled", value: intent });
 });
 
 test("only documented pre-reservation errors permit discarding the original intent", () => {
