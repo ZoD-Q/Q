@@ -1,8 +1,12 @@
 ARG RUNTIME_BASE=debian:bookworm-slim
+ARG PROBE_BASE=nginx:stable-alpine
+FROM ${PROBE_BASE} AS probe
 FROM ${RUNTIME_BASE}
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libssl3 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 q && useradd --uid 10001 --gid q --no-create-home --shell /usr/sbin/nologin q
+# This release targets Linux amd64. Reuse the official gateway image's HTTP probe
+# and its musl loader; the Rust executable continues to use Debian's glibc.
+COPY --from=probe /bin/busybox /usr/local/bin/busybox
+COPY --from=probe /lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
+COPY --from=probe /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --chmod=0555 artifact/xiaoq-backend /usr/local/bin/xiaoq-backend
 USER 10001:10001
 WORKDIR /tmp
