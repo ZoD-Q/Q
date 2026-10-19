@@ -14,7 +14,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | 视频 | 原创本地演示短片保留；API 工作台支持个人可灵凭据与真实请求适配，供应商实账生成另行验证；不上传广场 |
 | API 工作台 | 复用 Q 身份，服务端加密个人可灵 API Key，持久化任务并查询结果；本地测试替身不等于供应商实测 |
 | 已保留后端 | Rust + PostgreSQL，支持身份、资料与模拟 QDC 账本；旧客户端联调代码保留，API 工作台复用身份端点 |
-| 独立 Web | `web/` 仅有说明，尚未实现；Expo web 是开发预览 |
+| 独立 Web | `web/` 已有 `/q-admin/` 平台管理静态演示原型；真实管理接口和普通用户 Web 产品未实现；Expo web 仍是移动端开发预览 |
 | 插件协议 | MCP 2026-07-28 客户端、四类远程发现、个人连接、OAuth/CIMD、工具/资源/提示词与聊天提案已实现；Apps HTML 沙箱及公共索引未实现。见 [实现边界](mobile/docs/mcp-host.md) |
 
 **不得把原型、规范、未来领域或测试替身写成已上线能力。** 接入真实服务是单独的开发任务；本规范本身不授权部署、交易或对外发送信息。
@@ -29,7 +29,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | `mobile/native/src/prototype/` | 当前对话、服务、视频和设计组件；语义主题、文案与会话状态集中管理 |
 | `mobile/native/src/screens/`、`providers/`、`services/` | 保留的 API 联调实现，接回前核对与当前入口的差异 |
 | `mobile/shared/` | OpenAPI 生成类型与可共享纯逻辑，不依赖原生 UI、服务端秘密或数据库 |
-| `web/` | 后续独立 React / TypeScript 网页、开发者工作台和运营界面；具体框架尚未选定 |
+| `web/` | React / TypeScript / Vite 管理工作台演示原型；本地虚构数据、三主题、双语；真实管理授权与业务接口另行接入 |
 | `backend/` | Rust 2024 edition 模块化单体，Axum 0.8、Tokio 1、SQLx 0.8、PostgreSQL |
 | `backend/contracts/` | API 字段、权限、错误及机器可读 OpenAPI 合同 |
 | `backend/scripts/` | PostgreSQL、Rust API 启动与验收；这里的 Node 工具不是第二套业务后端 |
@@ -143,6 +143,7 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 | 仅文档 | 上述自动化差异检查，加实际文件、命令和链接核对；检查新旧说明一致；不为文档改动运行会写账本的测试 |
 | 移动端代码 | `npm --prefix mobile run typecheck`、`npm --prefix mobile run lint`，以及 `npm --prefix mobile run test:utils`、`npm --prefix mobile run test:video`、`npm --prefix mobile run test:plugins`、`npm --prefix mobile run test:api-workbench` |
 | UI / 导航 / 媒体 | 上述检查，加 `npm --prefix mobile run export:web` 和实际受影响页面检查；涉及原生行为时在对应设备/模拟器验证，记录未覆盖的平台 |
+| 独立 Web 原型 | `npm --prefix web run typecheck`、`lint`、`test`、`build`、`test:e2e`（均使用同一前缀）；实际检查桌面与窄屏；部署工具变更再运行Shell语法及 `python3 -m unittest discover -s web/deploy -p 'test_*.py'` |
 | Rust 代码 | `cargo fmt --manifest-path backend/Cargo.toml --check`、`cargo clippy --manifest-path backend/Cargo.toml --all-targets -- -D warnings`、`cargo test --manifest-path backend/Cargo.toml` |
 | 数据库 / 身份 / 账本 | 上述检查，加独立 PostgreSQL 测试库中的 `TEST_DATABASE_URL=… cargo test --manifest-path backend/Cargo.toml --test postgres -- --ignored`；按行为补充账户隔离、并发和幂等验证 |
 | API 合同 | 再生共享类型，检查生成差异并通过客户端类型检查；需要端到端验证时对指定演示环境运行 `npm --prefix backend run test:api` |
@@ -158,9 +159,9 @@ GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` 
 
 `cargo` 不在 PATH 时用 `$HOME/.cargo/bin/cargo`。`test:api` 会创建测试账户和交易；只在指定开发/测试环境运行。`db:snapshot` / `db:verify` 读取数据库并使用本地快照，不能替代功能验收。
 
-**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行三类自动验证（后端 17/18 矩阵，共四个自动作业）：`source-check` 检查提交差异，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频、AI、插件及 AI 插件替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
+**CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行四类自动验证（后端 17/18 矩阵，共五个自动作业）：`source-check` 检查提交差异，`web-check` 检查管理原型类型、规范、纯逻辑与浏览器交互、发布工具并保存同提交静态制品，`mobile-check` 检查类型、规范、五组测试、接口生成一致性与 Web 导出，`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、视频、AI、插件及 AI 插件替身集成测试。CI 不代表 iOS/Android 真机或供应商实账验收。
 
-`package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变三类必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
+`package-release` 是检查后的可选手动打包任务，使用 Linux amd64 环境构建默认分支已合入历史中的 Rust 发布版本，产物记录源码提交与校验和；可通过 `Q_RELEASE_REF` 指定该历史中的版本。它不连接服务器、不自动部署，其未运行或失败不改变四类必需验证的通过要求；部署前必须单独确认发布产物构建成功并核验版本。
 
 Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标签匹配（2026-10-19 设置中可见 #28 KAI privileged Docker Runner）。任务不启动 Docker-in-Docker、不挂载宿主 Docker socket，也不配置部署；现有 Runner 的特权执行配置由管理员管理，不宣称已改为非特权。新增或迁移 Runner 时必须支持容器镜像及 PostgreSQL service，保持测试库隔离，不将个人电脑或业务服务器默认作为执行环境。
 

@@ -41,6 +41,37 @@ source-check:
       fi
       git diff --check "$base" "$CI_COMMIT_SHA"
 
+web-check:
+  stage: verify
+  image: node:24-bookworm
+  cache:
+    key:
+      files:
+        - web/package-lock.json
+      prefix: q-admin-node24
+    paths:
+      - web/.cache/npm/
+  script:
+    - npm --prefix web ci --cache "$CI_PROJECT_DIR/web/.cache/npm" --prefer-offline
+    - npm --prefix web run typecheck
+    - npm --prefix web run lint
+    - npm --prefix web test
+    - bash -n web/deploy/deploy.sh web/deploy/remote.sh
+    - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
+    - npm --prefix web run build
+    - cd web && npx playwright install --with-deps chromium && npm run test:e2e
+    - node -e "const v=JSON.parse(require('fs').readFileSync('dist/version.json')); if(v.sha!==process.env.CI_COMMIT_SHA || v.mode!=='demo' || v.sourceDirty) process.exit(1)"
+    - mkdir -p .local && (cd dist && find . -type f -print0 | sort -z | xargs -0 sha256sum) > .local/SHA256SUMS
+  artifacts:
+    name: q-admin-demo-$CI_COMMIT_SHORT_SHA
+    access: developer
+    expire_in: 14 days
+    paths:
+      - web/dist/
+      - web/.local/SHA256SUMS
+    reports:
+      junit: web/test-results/junit.xml
+
 mobile-check:
   stage: verify
   image: node:24-bookworm
