@@ -22,12 +22,13 @@ function useAppState() {
     if (session.current !== expectedToken) return;
     generation.current++;
     session.current = null; setToken(null); setUser(null);
-    await storeOperation(removeToken);
+    if (expectedToken) await storeOperation(() => removeToken(expectedToken));
   }, [storeOperation]);
   const restore = useCallback(() => {
     const attempt = generation.current;
     return storeOperation(readToken).then(stored => {
       if (!stored) return;
+      session.current = stored;
       return request<User>('/v1/me', stored).then(profile => {
         if (generation.current === attempt) { session.current = stored; setToken(stored); setUser(profile); }
       });
@@ -43,7 +44,7 @@ function useAppState() {
     const attempt = ++generation.current;
     const auth = await request<AuthResponse>(`/v1/auth/${mode}`, null, 'POST', data);
     if (generation.current !== attempt) return;
-    await storeOperation(async () => { if (generation.current === attempt) await writeToken(auth.token); });
+    await storeOperation(async () => { if (generation.current === attempt) await writeToken(auth.token, () => generation.current === attempt); });
     if (generation.current !== attempt) return;
     session.current = auth.token; setToken(auth.token); setUser(auth.user); setSessionExpired(false);
   };

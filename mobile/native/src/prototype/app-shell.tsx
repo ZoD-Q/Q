@@ -27,6 +27,7 @@ import { ProfilePage, MessagesPage } from "./account-pages";
 import { ServicePage } from "./services";
 import { VideoCreate } from "./video/video-create";
 import { CreatorFeed } from "./video/creator-feed";
+import { useChat } from "./ai-chat/use-chat";
 import { PluginWorkbenchPage } from "./plugin-workbench/workbench";
 
 const serviceNavigation: {
@@ -421,29 +422,16 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [page, setPage] = useState<PageId>(initialPage);
   const [sidebar, setSidebar] = useState(true);
   const [drawer, setDrawer] = useState(false);
-  const [items, setItems] = useState<Conversation[]>([]);
-  const [active, setActive] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [model, setModel] = useState("DeepSeek");
-  const [think, setThink] = useState(false);
-  const [search, setSearch] = useState(false);
+  const chat = useChat(page === "chat");
+  const items = chat.items;
   const reduced = useReducedMotion();
   const navigate = (next: PageId) => {
     selectionFeedback();
     setPage(next);
     setDrawer(false);
   };
-  const newChat = () => {
-    setDraft("");
-    setActive(null);
-    navigate("chat");
-  };
-  const open = (id: string) => {
-    setDraft("");
-    setActive(id);
-    navigate("chat");
-  };
-  const conversation = items.find((item) => item.id === active) ?? null;
+  const newChat = () => { chat.newConversation(); navigate("chat"); };
+  const open = (id: string) => { chat.openConversation(id); navigate("chat"); };
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => notify(""), 4000);
@@ -464,37 +452,6 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
     });
     return () => sub.remove();
   }, [drawer, page]);
-  const send = (value: string) => {
-    const id = active ?? `chat-${Date.now()}`;
-    const messages = [
-      { id: `u-${Date.now()}`, role: "user" as const, content: value },
-      {
-        id: `a-${Date.now()}`,
-        role: "assistant" as const,
-        content: text(
-          "这里将显示小Q的回答。模型尚未连接，你可以继续体验对话界面。",
-          "Q’s response will appear here. The model is not connected yet; you can continue exploring the conversation interface.",
-        ),
-      },
-    ];
-    setItems((current) =>
-      active
-        ? current.map((item) =>
-            item.id === id
-              ? { ...item, messages: [...item.messages, ...messages] }
-              : item,
-          )
-        : [
-            {
-              id,
-              title: value.length > 24 ? `${value.slice(0, 24)}…` : value,
-              messages,
-            },
-            ...current,
-          ],
-    );
-    setActive(id);
-  };
   return (
     <View
       style={{
@@ -579,19 +536,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         </View>
         <Reveal key={page} style={{ flex: 1 }}>
           {page === "chat" ? (
-            <ChatPage
-              model={model}
-              setModel={setModel}
-              think={think}
-              setThink={setThink}
-              search={search}
-              setSearch={setSearch}
-              draft={draft}
-              setDraft={setDraft}
-              conversation={conversation}
-              onSend={send}
-              onOpenPlugins={() => navigate("plugins")}
-            />
+            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} />
           ) : page === "video" ? (
             <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
           ) : page === "creators" ? (

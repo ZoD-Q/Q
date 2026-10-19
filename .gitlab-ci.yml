@@ -58,6 +58,7 @@ mobile-check:
     - npm --prefix mobile run test:video
     - npm --prefix mobile run test:plugins
     - npm --prefix mobile run test:api-workbench
+    - npm --prefix mobile run test:chat
     - npm --prefix mobile run api:generate
     - git diff --exit-code -- mobile/shared/src/generated.ts
     - npm --prefix mobile run export:web
@@ -103,3 +104,5 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml
     - cargo test --locked --manifest-path backend/Cargo.toml --test postgres -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
+    - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features ai-test-fixtures -- -D warnings
+    - cargo test --locked --manifest-path backend/Cargo.toml --features ai-test-fixtures --test ai_chat -- --ignored

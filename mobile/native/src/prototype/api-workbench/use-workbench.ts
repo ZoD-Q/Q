@@ -60,10 +60,11 @@ export function useWorkbench() {
       if (alive.current) {
         setError(failure);
         if (failure instanceof WorkbenchError && failure.status === 401 && failure.code !== "INVALID_CREDENTIALS") {
+          const expiredToken = current.current?.token;
           current.current = null;
           setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false);
           setLoadError(null);
-          await removeToken().catch(() => { setError(new WorkbenchError("STORAGE_ERROR")); });
+          if (expiredToken) await removeToken(expiredToken).catch(() => { setError(new WorkbenchError("STORAGE_ERROR")); });
         }
       }
       return false;
@@ -96,7 +97,7 @@ export function useWorkbench() {
   const authenticate = (mode: "login" | "register", fields: { handle: string; password: string; display_name?: string }) => run("auth", async () => {
     const result = await call(`/v1/auth/${mode}`, decodeAuth, null, "POST", fields);
     if (!alive.current) return;
-    await writeToken(result.token);
+    if (!await writeToken(result.token, () => alive.current)) return;
     if (!alive.current) return;
     current.current = result; setSession(result);
     await load(result);
@@ -110,7 +111,7 @@ export function useWorkbench() {
     const active = current.current;
     if (!active) return;
     await call("/v1/auth/logout", () => undefined, active.token, "POST");
-    await removeToken();
+    await removeToken(active.token);
     current.current = null;
     if (alive.current) { setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false); setLoadError(null); }
   });

@@ -398,19 +398,23 @@ export function Choice({
   label,
   selected,
   onPress,
+  disabled = false,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   const { colors } = useDesign();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
+        opacity: disabled ? 0.5 : 1,
         minHeight: 44,
         paddingVertical: 10,
         paddingHorizontal: 15,

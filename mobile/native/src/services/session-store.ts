@@ -1,5 +1,12 @@
 import * as SecureStore from 'expo-secure-store';
+import { createSessionStore } from './session-core';
 const KEY = 'xiaoq.session.v1';
-export const readToken = () => SecureStore.getItemAsync(KEY);
-export const writeToken = (token: string) => SecureStore.setItemAsync(KEY, token);
-export const removeToken = () => SecureStore.deleteItemAsync(KEY);
+const store = createSessionStore({
+  get: () => SecureStore.getItemAsync(KEY),
+  set: token => SecureStore.setItemAsync(KEY, token),
+  remove: () => SecureStore.deleteItemAsync(KEY),
+});
+export const { readToken, writeToken, removeToken } = store;
+export const subscribeSession = store.subscribe;
+export const readSessionSnapshot = store.readSnapshot;
+export const getSessionRevision = store.getRevision;

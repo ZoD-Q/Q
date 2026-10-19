@@ -48,7 +48,8 @@
     "test:utils": "node --test src/utils/*.test.mjs",
     "test:video": "node --test src/prototype/video/pricing.test.mjs",
     "test:plugins": "node --test src/prototype/plugin-workbench/materials.test.mjs",
-    "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs"
+    "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs",
+    "test:chat": "node --test src/prototype/ai-chat/*.test.mjs src/services/session-core.test.mjs"
   },
   "private": true
 }

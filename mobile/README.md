@@ -16,7 +16,7 @@ npm run dev
 
 浏览器地址通常为 http://localhost:8081 。原生Expo开发用 `npm run dev:native`；终端按i/a可打开已配置的模拟器。当前SDK58需要兼容版本Expo Go。
 
-默认启动只运行前端，不依赖Rust API或PostgreSQL。聊天模型响应、余额、交易和保险方案仍是界面预览；API 工作台可由用户主动连接 Rust API，使用个人可灵凭据生成视频。详见 [工作台说明](docs/video-api-workbench.md)。
+默认启动只运行前端，不依赖Rust API或PostgreSQL。余额、交易和保险方案仍是界面预览；首页可登录 Q 后通过 Rust API 使用真实 DeepSeek 对话，API 工作台可使用个人可灵凭据生成视频。详见 [工作台说明](docs/video-api-workbench.md)。
 
 视频创作直接预览：http://localhost:8081/?view=video 。创作者广场：http://localhost:8081/?view=creators 。
 
@@ -26,7 +26,7 @@ npm run dev
 
 - 视频创作：提示词、模型/API Key演示配置、1000品牌选择、每个5%最高50%的模拟优惠、生成/取消/结果、本地发布。
 - 创作者广场：内置原创演示短片、上下浏览、暂停/静音/喜欢、本地视频选择与会话内发布，不联网生成或上传。
-- 聊天：多行输入、模型选择、思考/搜索状态、工具入口、本地对话与历史。
+- 聊天：DeepSeek Flash / Pro、深度思考、多轮上下文、流式回答、停止和手动重试；复用 Q 登录，未接入的搜索和附件明确标注。见 [对话说明](docs/deepseek-chat.md)。
 - 插件：指定Excel中的139条有内容记录，原名/简介/讨论组筛选，搜索、详情与本地收藏。
 - 插件工作台：四类入口说明与本地链接检查，分步生成 Server Card / Catalog / 介绍页 / 接入清单，可检查粘贴 Card 的关键字段。清楚区分必需、按需交付与添加、授权、首次调用；不联网探测，不提交或接通插件。
 - 分期：服务商品、期数选择、每期和总额、完整计划预览。
@@ -43,7 +43,7 @@ npm run dev
 
 - `native/src/prototype`：界面、设计组件及主动启用的 API 工作台。
 - `native/src/app`：Expo路由入口。
-- `native/src/screens`、`providers`、`services`：上一阶段API联调实现保留，保留；工作台复用会话存储和现有身份端点。
+- `native/src/screens`、`providers`、`services`：上一阶段API联调实现保留；聊天与工作台复用会话存储和现有身份端点。
 - `shared`：由后端OpenAPI生成的共享类型。
 - `docs`：设计依据、插件来源与验收记录。
 - `../backend`：Rust业务、API合同、数据库和后端开发工具。
@@ -55,6 +55,7 @@ npm run dev
 npm run typecheck
 npm run lint
 npm run test:plugins
+npm run test:chat
 npm run export:web
 ```
 
