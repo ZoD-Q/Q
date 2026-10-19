@@ -14,7 +14,7 @@
 ## GitLab 配置
 
 - main 必须受保护；`staging/api`、`staging/admin` 受保护且只允许 Maintainer 发布。
-- 新增专用 `Q_STAGING_SSH_KEY_B64`（Variable 类型，Masked，Protected，Environment scope `staging/*`，关闭 Expand variable reference）。它是专用 qdeploy 私钥的 base64 单行值，不是个人 SSH 密钥。不能提交、打印到日志或放进制品。
+- 新增专用 `Q_STAGING_SSH_KEY_B64`（Variable 类型，Masked and hidden，Protected，Environment scope `staging/*`，关闭 Expand variable reference）。它是专用 qdeploy 私钥的 base64 单行值，不是个人 SSH 密钥。不能提交、打印到日志或放进制品。
 - 禁止 MR 流水线访问 protected variables/runners；普通测试无需这些资源。流水线变量最低角色设为 Maintainer，避免覆盖预定义变量。
 - 保留既有共享 Runner；无业务数据库凭据进入检查任务。服务器使用当前作业的短期 `CI_JOB_TOKEN` 向固定 GitLab API 核验 project 197、作业名称、running 状态、pipeline、SHA、main 及当前受保护分支；不创建长期 GitLab API token。
 - 关闭 Auto DevOps，保留 Pipelines must succeed；不启用自动回退或自动合并。旧 GitLab 版本若不支持所需 API 或环境权限，先停止启用并升级/调整经过审核的实现。
@@ -42,4 +42,4 @@
 启用后的首次真实验收必须记录：配置合入的 main SHA、流水线/作业 ID、两个环境的实际成功记录、健康及版本回执。未完成这些步骤前只能报告代码/安装/配置已完成，不能报告端到端部署通过。iOS/Android 真机、真实支付和供应商实账均不在此部署流程验收范围。
 
 
-2026-10-19 接线验收：本地 48 项部署测试与 20 项网页发布测试通过；服务器入口已安装，API/admin readiness 通过；专用 SSH 强制命令拒绝任意命令与无效作业 token，非白名单 sudo 被拒绝，当前业务发布版本未改变。GitLab 目前仅建立 `staging/api` 环境记录；环境保护、专用 CI 变量和首次真实作业验收仍待完成，不能据此声明 CD 已启用。
+2026-10-19 接线验收：本地 48 项部署测试与 20 项网页发布测试通过；服务器入口已安装，API/admin readiness 通过；专用 SSH 强制命令拒绝任意命令与无效作业 token，非白名单 sudo 被拒绝，当前业务发布版本未改变。GitLab 已建立 `staging/api` 和 `staging/admin`，均限制 Maintainer 部署；流水线变量最低角色为 Maintainer，MR 对受保护变量/Runner 的访问已关闭。经用户确认，专用 CI 变量已保存为 Protected、Masked、Hidden，范围 `staging/*`。实例不支持 `artifacts:access:maintainer`，已改用支持的 `developer`（回执不含秘密）。首次 main 真实部署作业验收仍待人工合并后完成，不能据此声明端到端 CD 已通过。
