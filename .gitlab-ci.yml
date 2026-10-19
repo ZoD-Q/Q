@@ -204,6 +204,8 @@ package-release:
     paths:
       - .cargo-ci/registry/
       - .cargo-ci/git/
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends python3
   script:
     - test "$(uname -m)" = x86_64
     - bash backend/deploy/package-release.sh
