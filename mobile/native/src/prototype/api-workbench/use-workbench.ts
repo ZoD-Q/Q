@@ -4,7 +4,7 @@ import { randomUUID } from "expo-crypto";
 import type { User, VideoConnection, VideoConnectionRequest, VideoJob, VideoJobRequest } from "@xiaoq/shared";
 import { API_URL } from "../../services/api";
 import { readToken, removeToken, writeToken } from "../../services/session-store";
-import { decodeAuth, decodeConnection, decodeJob, decodeList, decodeUser, isSafeSubmissionRejection, workbenchRequest, WorkbenchError, type PendingVideo } from "./core";
+import { decodeAuth, decodeConnection, decodeJob, decodeList, decodeUser, isSafeSubmissionRejection, loadWorkbenchSnapshot, workbenchRequest, WorkbenchError, type PendingVideo } from "./core";
 import { pendingStore } from "./pending-store";
 
 type Session = { token: string; user: User };
@@ -18,6 +18,7 @@ export function useWorkbench() {
   const locked = useRef(false);
   const [busy, setBusy] = useState<string | null>("restore");
   const [error, setError] = useState<unknown>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [connections, setConnections] = useState<VideoConnection[]>([]);
   const [jobs, setJobs] = useState<VideoJob[]>([]);
   const [pending, setPending] = useState<PendingVideo | null>(null);
@@ -34,18 +35,20 @@ export function useWorkbench() {
 
   const load = useCallback(async (active: Session) => {
     if (alive.current) setReady(false);
-    // Local recovery is read first: a corrupt store must never enable a new request.
-    const saved = await pendingStore.read(active.user.id);
-    if (alive.current && current.current === active) setPending(saved);
-    const [connectionList, jobList] = await Promise.all([
-      call("/v1/video/connections", decodeList(decodeConnection), active.token),
-      call("/v1/video/jobs", decodeList(decodeJob), active.token),
-    ]);
+    const snapshot = await loadWorkbenchSnapshot({
+      pending: () => pendingStore.read(active.user.id),
+      connections: () => call("/v1/video/connections", decodeList(decodeConnection), active.token),
+      jobs: () => call("/v1/video/jobs", decodeList(decodeJob), active.token),
+    });
     if (alive.current && current.current === active) {
-      setConnections(connectionList);
-      setJobs(jobList);
-      setReady(true);
+      // A corrupt pending record remains untouched, but known tasks and revocation stay usable.
+      if (snapshot.pending.status === "fulfilled") setPending(snapshot.pending.value);
+      if (snapshot.connections.status === "fulfilled") setConnections(snapshot.connections.value);
+      if (snapshot.jobs.status === "fulfilled") setJobs(snapshot.jobs.value);
+      setReady(snapshot.failure === null);
+      setLoadError(snapshot.failure?.reason ?? null);
     }
+    if (snapshot.failure) throw snapshot.failure.reason;
   }, [call]);
 
   const run = useCallback(async (name: string, action: () => Promise<void>) => {
@@ -60,6 +63,7 @@ export function useWorkbench() {
           const expiredToken = current.current?.token;
           current.current = null;
           setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false);
+          setLoadError(null);
           if (expiredToken) await removeToken(expiredToken).catch(() => { setError(new WorkbenchError("STORAGE_ERROR")); });
         }
       }
@@ -109,7 +113,7 @@ export function useWorkbench() {
     await call("/v1/auth/logout", () => undefined, active.token, "POST");
     await removeToken(active.token);
     current.current = null;
-    if (alive.current) { setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false); }
+    if (alive.current) { setSession(null); setConnections([]); setJobs([]); setPending(null); setReady(false); setLoadError(null); }
   });
   const addConnection = (body: VideoConnectionRequest) => run("connection", async () => {
     const active = current.current;
@@ -160,5 +164,5 @@ export function useWorkbench() {
     recordJob(await call(`/v1/video/jobs/${encodeURIComponent(id)}`, decodeJob, active.token));
   });
 
-  return { session, busy, error, connections, jobs, pending, ready, restore, authenticate, refresh, logout, addConnection, revokeConnection, createJob, recover, refreshJob };
+  return { session, busy, error: error ?? loadError, connections, jobs, pending, ready, restore, authenticate, refresh, logout, addConnection, revokeConnection, createJob, recover, refreshJob };
 }

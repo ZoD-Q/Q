@@ -1,0 +1,108 @@
+# Tests only. No deployment or automatic merge jobs.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_OPEN_MERGE_REQUESTS && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "Mandow" || $CI_COMMIT_BRANCH == "hera" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)'
+    - if: '$CI_PIPELINE_SOURCE == "web" && ($CI_COMMIT_BRANCH == "Mandow" || $CI_COMMIT_BRANCH == "hera" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)'
+    - when: never
+
+stages:
+  - verify
+
+default:
+  tags:
+    - docker
+    - linux
+  interruptible: true
+  timeout: 30 minutes
+
+variables:
+  GIT_DEPTH: "0"
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "2"
+  EXPO_NO_TELEMETRY: "1"
+
+source-check:
+  stage: verify
+  image: alpine:3.22
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        base="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ "${CI_COMMIT_BEFORE_SHA:-0000000000000000000000000000000000000000}" != "0000000000000000000000000000000000000000" ]; then
+        base="$CI_COMMIT_BEFORE_SHA"
+      else
+        base="$(git hash-object -t tree /dev/null)"
+      fi
+      git diff --check "$base" "$CI_COMMIT_SHA"
+
+mobile-check:
+  stage: verify
+  image: node:24-bookworm
+  cache:
+    key:
+      files:
+        - mobile/package-lock.json
+      prefix: npm-node24
+    paths:
+      - .npm/
+  script:
+    - npm --prefix mobile ci --cache "$CI_PROJECT_DIR/.npm" --prefer-offline
+    - npm --prefix mobile run typecheck
+    - npm --prefix mobile run lint
+    - npm --prefix mobile run test:utils
+    - npm --prefix mobile run test:video
+    - npm --prefix mobile run test:plugins
+    - npm --prefix mobile run test:api-workbench
+    - npm --prefix mobile run test:chat
+    - npm --prefix mobile run api:generate
+    - git diff --exit-code -- mobile/shared/src/generated.ts
+    - npm --prefix mobile run export:web
+
+backend-check:
+  stage: verify
+  image: rust:1-bookworm
+  services:
+    - name: postgres:17-bookworm
+      alias: postgres
+  variables:
+    # Disposable CI service only; these are public test values, not business credentials.
+    POSTGRES_DB: q_ci_test
+    POSTGRES_USER: q_ci
+    POSTGRES_PASSWORD: q_ci_disposable
+    TEST_DATABASE_URL: postgresql://q_ci:q_ci_disposable@postgres:5432/q_ci_test
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-ci"
+  cache:
+    key:
+      files:
+        - backend/Cargo.lock
+      prefix: cargo-registry
+    paths:
+      - .cargo-ci/registry/
+      - .cargo-ci/git/
+  before_script:
+    - rustup component add rustfmt clippy
+    - apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    - |
+      ready=0
+      for attempt in $(seq 1 30); do
+        if pg_isready -h postgres -U q_ci -d q_ci_test; then
+          ready=1
+          break
+        fi
+        sleep 2
+      done
+      test "$ready" = 1
+  script:
+    - cargo fmt --manifest-path backend/Cargo.toml --check
+    - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets -- -D warnings
+    - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features video-test-fixtures -- -D warnings
+    - cargo test --locked --manifest-path backend/Cargo.toml
+    - cargo test --locked --manifest-path backend/Cargo.toml --test postgres -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
+    - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features ai-test-fixtures -- -D warnings
+    - cargo test --locked --manifest-path backend/Cargo.toml --features ai-test-fixtures --test ai_chat -- --ignored

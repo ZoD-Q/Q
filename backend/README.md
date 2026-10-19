@@ -65,6 +65,8 @@ The fixture feature is only for local validation; production/default builds use 
 
 To reproduce the local UI fixture without supplier calls, create a dedicated loopback database named `xiaoq_video_preview`, set `DATABASE_URL` to it and `Q_VIDEO_ENCRYPTION_KEY` as above, then run `cargo run --features video-test-fixtures --example video_workbench_preview`. It binds only `127.0.0.1:8792`, uses the public `kai` / `Qdemo12345!` demo login, and never contacts Kling. Start Expo with `EXPO_PUBLIC_API_URL=http://127.0.0.1:8792 npm exec --workspace=@xiaoq/native -- expo start --port 8092` from `mobile/`. Enter a placeholder provider key only. The fixture produces task transitions and an explicit missing-video result (or failure when prompt contains `fail`), never a fake generated film. Do not use this fixture with real credentials.
 
+The UI fixture also recognizes `[fixture:unknown]` in a prompt (stores the supplier task, returns an uncertain response) and `[fixture:slow]` (delays the supplier response beyond the fixture transport timeout). Both can subsequently be queried by the original external task ID to verify recovery without another submission.
+
 ## DeepSeek chat
 
 Set server-only `DEEPSEEK_API_KEY` in the ignored `backend/.env` (owner-only permissions). Chat uses the existing Q identity and a fixed official HTTPS endpoint; no key is returned to clients. `GET /v1/ai/status` reports configuration, and authenticated `POST /v1/ai/chat` returns bounded SSE text. See the [chat guide](../mobile/docs/deepseek-chat.md) and [API contract](contracts/api.md) for models, budgets, errors, cancellation and tests. No chat history or provider reasoning is stored. Model requests are real when configured, while the QDC ledger remains simulated.

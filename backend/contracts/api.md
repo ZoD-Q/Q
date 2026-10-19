@@ -47,6 +47,8 @@ Connection and job schemas are in OpenAPI. Status: `submitting|unknown|submitted
 
 Errors include 404 `VIDEO_CONNECTION_NOT_FOUND`/`VIDEO_JOB_NOT_FOUND`, 409 `VIDEO_CONNECTION_REVOKED`/`IDEMPOTENCY_CONFLICT`, 429 `RATE_LIMITED`, and the usual validation/authentication errors. `VIDEO_SUBMISSION_UNKNOWN` in a job requires checking the existing supplier task, never blind resubmission. HTTP timeouts, bounded response bodies and disabled redirects keep provider credentials on fixed intended origins.
 
+Manual GET of a completed job may refresh its expiring signed media URL under the same 3-second poll guard. Only the latest database poll claim may update the result. A failed refresh preserves completed state and the last safe URL while recording `VIDEO_POLL_UNAVAILABLE`; unavailable startup configuration leaves saved completed history readable. An early inconclusive lookup does not suppress a later definitive rejection from the original POST while the reservation still has no provider task ID.
+
 ## DeepSeek text conversations
 
 `GET /v1/ai/status` is public and returns `{configured, models:[{id,name}]}` only. `configured` means a server key exists, not that a paid provider request has succeeded. Allowed IDs are `deepseek-flash` and `deepseek-v4-pro`; the UI defaults to Flash. No key fragments, upstream headers or environment diagnostics are exposed.
