@@ -337,3 +337,50 @@ test('navigation and state-changing demo interactions request only same-site sta
   await expect(page.getByRole('heading', { level: 1, name: '今日工作台', exact: true })).toBeVisible()
   expect(unexpected).toEqual([])
 })
+
+test('danger and primary buttons plus ordinary text meet 4.5 contrast in every theme', async ({ page }) => {
+  const checkContrast = async (target: Locator, label: string) => {
+    await expect(target).toBeVisible()
+    const colors = await target.evaluate((element) => {
+      const rgb = (value: string): number[] => {
+        const channels = value.match(/[\d.]+/g)?.map(Number)
+        if (!channels || channels.length < 3) throw new Error(`Unsupported computed color: ${value}`)
+        return channels
+      }
+      const foreground = getComputedStyle(element).color
+      let current: Element | null = element
+      let background = 'rgb(255, 255, 255)'
+      while (current) {
+        const value = getComputedStyle(current).backgroundColor
+        const channels = rgb(value)
+        if (channels.length === 3 || channels[3] === 1) { background = value; break }
+        if (channels[3] !== 0) throw new Error(`Translucent background requires explicit compositing: ${value}`)
+        current = current.parentElement
+      }
+      const luminance = (value: string) => rgb(value).slice(0, 3).reduce((sum, channel, index) => {
+        const srgb = channel / 255
+        const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+        return sum + linear * [0.2126, 0.7152, 0.0722][index]!
+      }, 0)
+      const a = luminance(foreground)
+      const b = luminance(background)
+      return { foreground, background, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
+    })
+    expect.soft(colors.ratio, `${label}: ${colors.foreground} on ${colors.background}`).toBeGreaterThanOrEqual(4.5)
+  }
+  await page.goto('sessions')
+  for (const theme of ['light', 'dark', 'warm']) {
+    await page.getByRole('combobox', { name: '外观主题', exact: true }).selectOption(theme)
+    await checkContrast(page.locator('.page-heading p'), `${theme} page description`)
+    await page.getByRole('button', { name: '林间 · iPhone 会话', exact: true }).click()
+    const record = page.getByRole('dialog', { name: '记录详情' }).getByRole('article')
+    await record.getByRole('button', { name: '撤销会话', exact: true }).click()
+    await checkContrast(record.getByRole('button', { name: '确认演示操作', exact: true }), `${theme} danger button`)
+    await checkContrast(record.locator('.action-form > p'), `${theme} action description`)
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: '重置演示', exact: true }).click()
+    const reset = page.getByRole('dialog', { name: '重置演示', exact: true })
+    await checkContrast(reset.getByRole('button', { name: '确认重置', exact: true }), `${theme} primary button`)
+    await reset.getByRole('button', { name: '取消', exact: true }).click()
+  }
+})
