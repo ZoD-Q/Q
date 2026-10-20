@@ -5,11 +5,13 @@
 ## 发布与结果
 
 1. main 上 `source-check`、`web-check`、`mobile-check`、`backend-check`（PostgreSQL 17/18）及 `deploy-check` 必须通过。
-2. `package-release` 构建当前流水线的确切提交。API 包含程序、`SOURCE_COMMIT`、`MIGRATIONS` 与 `SHA256SUMS`；管理网页来自同流水线的 `web-check` 制品。
+2. `package-release` 构建当前流水线的确切提交。构建容器可运行于 Linux ARM64 或 x86_64，程序目标固定为 `x86_64-unknown-linux-gnu.2.36`，打包前验证实际 ELF 架构和加载器。API 包含程序、`SOURCE_COMMIT`、`MIGRATIONS` 与 `SHA256SUMS`；管理网页来自同流水线的 `web-check` 制品。
 3. 在 Pipeline 点击 `deploy-staging-api` 或 `deploy-staging-admin`。两个任务共享资源锁，不能并发。main 前进后旧流水线会被拒绝；必须重新验证新 main。未点击的任务显示 blocked/waiting，不是测试失败。
 4. 成功前必须核验服务健康与实际版本。API 同时核对运行容器 image ID 和 `/proc/1/exe` 摘要；管理网页核对 release 目标、文件摘要及 HTTPS smoke。GitLab Environments 显示对应提交、作业和部署结果，作业保留不含凭据的 receipt 制品 30 天。
 
 管理网页地址为 `https://8.163.108.216/q-admin/`。API 暂无可信公网域名，仍走内部入口；不把 localhost 填成 GitLab 外部入口。
+
+打包使用固定的 `cargo-zigbuild 0.23.4` 与 `ziglang 0.17.0`，仅安装 [工具清单](release-tools.requirements.txt) 中校验过的官方 Linux ARM64/x86_64 wheels，不增加业务运行依赖。更新工具版本时须同步哈希，并在实际 Runner 重新构建、核对下载的制品。`.2.36` 是构建目标设置，不能替代实际动态依赖与运行兼容性验收。用 [cargo-zigbuild 官方方式](https://github.com/rust-cross/cargo-zigbuild#specify-glibc-version) 显式指定目标，避免把 Runner 标签或宿主 `uname` 当作产物架构证明。
 
 ## GitLab 配置
 
