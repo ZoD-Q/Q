@@ -7,9 +7,11 @@
     "scheme": "xiaoq",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.kaicloud.xiaoq",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.kaicloud.xiaoq",
       "predictiveBackGestureEnabled": true
     },
     "web": {
