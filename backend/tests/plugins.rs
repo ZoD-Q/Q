@@ -34,6 +34,7 @@ struct Harness {
     result_mode: Arc<AtomicUsize>,
     tool_revision: Arc<AtomicUsize>,
     card_revision: Arc<AtomicUsize>,
+    card_owner: Arc<Mutex<Option<Value>>>,
     token_requests: Arc<Mutex<Vec<HashMap<String, String>>>>,
     business_tokens: Arc<Mutex<Vec<String>>>,
     model_calls: Arc<AtomicUsize>,
@@ -73,6 +74,8 @@ impl Harness {
         let result_mode = Arc::new(AtomicUsize::new(0));
         let tool_revision = Arc::new(AtomicUsize::new(0));
         let card_revision = Arc::new(AtomicUsize::new(0));
+        let card_owner = Arc::new(Mutex::new(None));
+        let remote_owner = card_owner.clone();
         let token_requests = Arc::new(Mutex::new(Vec::new()));
         let business_tokens = Arc::new(Mutex::new(Vec::new()));
         let model_calls = Arc::new(AtomicUsize::new(0));
@@ -96,17 +99,21 @@ impl Harness {
         );
         let router = Router::new()
             .route("/card", get(move |headers:HeaderMap| {
-                let (origin, card) = (card_origin.clone(), card.clone());
+                let (origin, card, owner) = (card_origin.clone(), card.clone(), remote_owner.clone());
                 async move {
                     assert!(!headers.contains_key("authorization"));
                     let revision=card.load(Ordering::SeqCst);
                     let endpoint=if revision==0 {format!("{origin}/mcp")} else {format!("{origin}/mcp?card_revision={revision}")};
-                    ([("content-type","application/mcp-server-card+json")], Json(json!({
+                    let mut value = json!({
                         "$schema":"https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
                         "name":"io.example.fixture/records","title":format!("Fixture Records v{revision}"),"description":"Isolated local records",
                         "version":format!("1.0.{revision}"),
                         "remotes":[{"type":"streamable-http","url":endpoint,"supportedProtocolVersions":["2026-07-28"]}]
-                    })))
+                    });
+                    if let Some(owner) = owner.lock().unwrap().clone() {
+                        value["_meta"] = json!({"com.kaicloudpay.q/owner": owner});
+                    }
+                    ([("content-type","application/mcp-server-card+json")], Json(value))
                 }
             }))
             .route("/mcp", post(move |headers:HeaderMap, Json(request):Json<Value>| {
@@ -202,6 +209,7 @@ impl Harness {
             result_mode,
             tool_revision,
             card_revision,
+            card_owner,
             token_requests,
             business_tokens,
             model_calls,
@@ -330,6 +338,180 @@ fn add_body(discovery: &Value) -> Value {
 }
 fn prepare_body(connection: &str, key: Uuid) -> Value {
     json!({"connection_id":connection,"tool_name":"fixture.lookup","arguments":{"query":"local-fixture"},"idempotency_key":key})
+}
+
+#[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; only contacts a loopback fixture"]
+async fn declared_owner_and_automatic_discovery_preserve_identity_and_historical_metadata() {
+    let h = Harness::new().await;
+    let alice = h.register("owner_display_alice").await;
+    let named_owner = h.register("mandow").await;
+    let discovery = h
+        .json(
+            "POST",
+            "/v1/plugins/discover",
+            &alice,
+            Some(json!({"entry":format!("{}/card?x=2&x=1",h.origin)})),
+            StatusCode::OK,
+        )
+        .await;
+    assert!(discovery["candidates"][0]["owner_name"].is_null());
+    assert!(
+        discovery["candidates"][0]["card_url"]
+            .as_str()
+            .unwrap()
+            .ends_with("?x=2&x=1")
+    );
+    let resolved: String =
+        sqlx::query_scalar("SELECT entry_kind FROM plugin_discoveries WHERE id=$1")
+            .bind(Uuid::parse_str(discovery["discovery_id"].as_str().unwrap()).unwrap())
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(resolved, "card");
+    let mut forged = add_body(&discovery);
+    forged["owner_name"] = json!("mandow");
+    h.json(
+        "POST",
+        "/v1/plugins/connections",
+        &alice,
+        Some(forged),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    let connection = h
+        .json(
+            "POST",
+            "/v1/plugins/connections",
+            &alice,
+            Some(add_body(&discovery)),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert!(connection["owner_name"].is_null());
+    let connection = connection["id"].as_str().unwrap();
+    let legacy_source = h.prepare(&alice, connection, Uuid::new_v4()).await;
+    let legacy_id = Uuid::new_v4();
+    // Insert an old-format fixture. Existing proposals must remain immutable,
+    // including during a compatibility test.
+    sqlx::query(
+        "INSERT INTO plugin_invocations(id,user_id,connection_id,connection_revision,connection_snapshot,idempotency_key,request_fingerprint,tool_name,arguments,tool_snapshot,schema_fingerprint,expires_at) SELECT $1,user_id,connection_id,connection_revision,connection_snapshot-'owner_name',gen_random_uuid(),request_fingerprint,tool_name,arguments,tool_snapshot,schema_fingerprint,expires_at FROM plugin_invocations WHERE id=$2",
+    )
+    .bind(legacy_id)
+    .bind(Uuid::parse_str(legacy_source["id"].as_str().unwrap()).unwrap())
+    .execute(&h.state.pool)
+    .await
+    .unwrap();
+
+    *h.card_owner.lock().unwrap() = Some(json!({"name":"mandow"}));
+    let updated = h
+        .json(
+            "POST",
+            &format!("/v1/plugins/connections/{connection}/refresh"),
+            &alice,
+            None,
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(updated["status"], "needs_review");
+    assert!(updated["owner_name"].is_null());
+    assert_eq!(
+        updated["pending_update_details"]["candidate"]["owner_name"],
+        "mandow"
+    );
+    let accepted = h
+        .json(
+            "POST",
+            &format!("/v1/plugins/connections/{connection}/accept-update"),
+            &alice,
+            Some(json!({"revision":updated["revision"]})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(accepted["owner_name"], "mandow");
+    assert_eq!(
+        h.json(
+            "GET",
+            "/v1/plugins/connections",
+            &alice,
+            None,
+            StatusCode::OK
+        )
+        .await["items"][0]["owner_name"],
+        "mandow"
+    );
+    h.json(
+        "GET",
+        &format!("/v1/plugins/connections/{connection}"),
+        &named_owner,
+        None,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    let proposal = h.prepare(&alice, connection, Uuid::new_v4()).await;
+    assert_eq!(proposal["owner_name"], "mandow");
+    let id = proposal["id"].as_str().unwrap();
+    assert_eq!(h.confirm(&alice, id).await["status"], "succeeded");
+
+    *h.card_owner.lock().unwrap() = Some(json!({"name":"next publisher"}));
+    let changed = h
+        .json(
+            "POST",
+            &format!("/v1/plugins/connections/{connection}/refresh"),
+            &alice,
+            None,
+            StatusCode::OK,
+        )
+        .await;
+    h.json(
+        "POST",
+        &format!("/v1/plugins/connections/{connection}/accept-update"),
+        &alice,
+        Some(json!({"revision":changed["revision"]})),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(
+        h.json(
+            "GET",
+            &format!("/v1/plugins/invocations/{id}"),
+            &alice,
+            None,
+            StatusCode::OK,
+        )
+        .await["owner_name"],
+        "mandow"
+    );
+    assert!(
+        h.json(
+            "GET",
+            &format!("/v1/plugins/invocations/{legacy_id}"),
+            &alice,
+            None,
+            StatusCode::OK,
+        )
+        .await["owner_name"]
+            .is_null()
+    );
+    *h.card_owner.lock().unwrap() = Some(json!({"name":["invalid optional metadata"]}));
+    let invalid_optional = h
+        .json(
+            "POST",
+            "/v1/plugins/discover",
+            &alice,
+            Some(json!({"entry":format!("{}/card",h.origin),"kind":"auto"})),
+            StatusCode::OK,
+        )
+        .await;
+    assert!(invalid_optional["candidates"][0]["owner_name"].is_null());
+    let resolved: String =
+        sqlx::query_scalar("SELECT entry_kind FROM plugin_discoveries WHERE id=$1")
+            .bind(Uuid::parse_str(invalid_optional["discovery_id"].as_str().unwrap()).unwrap())
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(resolved, "card");
+    h.finish().await;
 }
 
 #[tokio::test]

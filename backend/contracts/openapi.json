@@ -3977,6 +3977,12 @@
           },
           "endpoint_url": {
             "type": "string"
+          },
+          "owner_name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80,
+            "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
           }
         },
         "required": [
@@ -3986,7 +3992,8 @@
           "title",
           "description",
           "version",
-          "endpoint_url"
+          "endpoint_url",
+          "owner_name"
         ],
         "additionalProperties": false
       },
@@ -4000,16 +4007,18 @@
           "kind": {
             "type": "string",
             "enum": [
+              "auto",
               "card",
               "catalog",
               "page",
               "domain"
-            ]
+            ],
+            "default": "auto",
+            "description": "Auto uses well-known discovery only for bare domains; full URLs are classified by their actual response media type, preserving the path and query without whole-domain fallback."
           }
         },
         "required": [
-          "entry",
-          "kind"
+          "entry"
         ],
         "additionalProperties": false
       },
@@ -4169,6 +4178,12 @@
                   },
                   "endpoint_url": {
                     "type": "string"
+                  },
+                  "owner_name": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 80,
+                    "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
                   }
                 },
                 "required": [
@@ -4177,7 +4192,8 @@
                   "title",
                   "description",
                   "version",
-                  "endpoint_url"
+                  "endpoint_url",
+                  "owner_name"
                 ],
                 "additionalProperties": false
               },
@@ -4197,6 +4213,12 @@
             "required": [],
             "additionalProperties": false,
             "nullable": true
+          },
+          "owner_name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80,
+            "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
           }
         },
         "required": [
@@ -4214,7 +4236,8 @@
           "created_at",
           "updated_at",
           "pending_update",
-          "pending_update_details"
+          "pending_update_details",
+          "owner_name"
         ],
         "additionalProperties": false
       },
@@ -4305,6 +4328,12 @@
           },
           "endpoint_url": {
             "type": "string"
+          },
+          "owner_name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80,
+            "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
           }
         },
         "required": [
@@ -4321,7 +4350,8 @@
           "updated_at",
           "expires_at",
           "connection_revision",
-          "endpoint_url"
+          "endpoint_url",
+          "owner_name"
         ],
         "additionalProperties": false
       },

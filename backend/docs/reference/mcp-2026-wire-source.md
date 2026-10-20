@@ -19,6 +19,7 @@
 - 工具 schema 使用锁定在 Cargo.lock 的 `jsonschema` 离线校验器。支持明确的 draft 2020-12、2019-09 和 draft-07；限制大小、深度、节点和组合分支。仅支持无环的文档内 JSON Pointer `$ref`，拒绝外部引用、动态/递归引用。正则使用线性时间引擎，不支持的正则或 schema 会排除相应工具。这是有界兼容子集，并非完整 JSON Schema 或完整 MCP 认证。
 - 保留工具标准结果，校验结构化输出，要求可理解的文本降级；支持经格式、大小和尺寸校验的 PNG/JPEG/WebP 图片。资源 URI 交还原 MCP 端点，不由宿主直接读取任意 URL。当前客户端能力为 `{}`，未宣称 MCP Apps UI 支持。
 - Card 使用官方 v1 字段与 HTTPS Streamable HTTP 端点；Catalog 使用 `specVersion: "1.0"` 与独立 Card URL。页面发现只解析静态链接。Card URL 保留路径、查询参数顺序和重复参数，身份不会按展示名称合并。
+- 2026-10-20 补充：官方 Card v1 没有 `owner`/`publisher` 身份认证字段。Q 的可选所有者展示使用 `_meta["com.kaicloudpay.q/owner"].name`，依据 [官方 JSON schema 的 ServerCard 与 MetaObject](https://raw.githubusercontent.com/modelcontextprotocol/ext-server-card/main/schema.json) 和 [命名空间约定](https://github.com/modelcontextprotocol/ext-server-card#schema-url-conventions)。缺失或无效的可选值忽略；它不是运行时协议扩展、账户绑定或权限依据。自动入口识别仅复用现有 Card/Catalog/静态页面发现，不新增 RPC。
 
 ## 网络与验证证据
 

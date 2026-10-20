@@ -1059,11 +1059,17 @@ export interface components {
             description: string;
             version: string;
             endpoint_url: string;
+            /** @description Publisher-declared display name from Server Card _meta["com.kaicloudpay.q/owner"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null. */
+            owner_name: string | null;
         };
         PluginDiscoveryRequest: {
             entry: string;
-            /** @enum {string} */
-            kind: "card" | "catalog" | "page" | "domain";
+            /**
+             * @description Auto uses well-known discovery only for bare domains; full URLs are classified by their actual response media type, preserving the path and query without whole-domain fallback.
+             * @default auto
+             * @enum {string}
+             */
+            kind: "auto" | "card" | "catalog" | "page" | "domain";
         };
         PluginDiscovery: {
             /** Format: uuid */
@@ -1119,10 +1125,14 @@ export interface components {
                     description: string;
                     version: string;
                     endpoint_url: string;
+                    /** @description Publisher-declared display name from Server Card _meta["com.kaicloudpay.q/owner"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null. */
+                    owner_name: string | null;
                 };
                 tools?: components["schemas"]["PluginTool"][];
                 previous_tools?: components["schemas"]["PluginTool"][];
             } | null;
+            /** @description Publisher-declared display name from Server Card _meta["com.kaicloudpay.q/owner"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null. */
+            owner_name: string | null;
         };
         PluginInvocationRequest: {
             /** Format: uuid */
@@ -1157,6 +1167,8 @@ export interface components {
             expires_at: string;
             connection_revision: number;
             endpoint_url: string;
+            /** @description Publisher-declared display name from Server Card _meta["com.kaicloudpay.q/owner"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null. */
+            owner_name: string | null;
         };
         PluginOAuthStart: {
             /** Format: uuid */

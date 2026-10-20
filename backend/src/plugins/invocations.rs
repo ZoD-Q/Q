@@ -24,6 +24,7 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct Invocation {
+    pub owner_name: Option<String>,
     pub id: Uuid,
     pub connection_id: Uuid,
     pub connection_revision: i64,
@@ -53,7 +54,7 @@ struct StoredInvocation {
     expires_at: DateTime<Utc>,
 }
 const STORED: &str = "id,connection_id,connection_revision,request_fingerprint,tool_name,arguments,tool_snapshot,schema_fingerprint,status,expires_at";
-const VIEW: &str = "i.id,i.connection_id,i.connection_revision,i.tool_name,i.arguments,i.status,i.result,i.error_code,i.created_at,i.updated_at,i.expires_at,i.connection_snapshot->>'title' AS connection_title,i.connection_snapshot->>'card_url' AS card_url,i.connection_snapshot->>'endpoint_url' AS endpoint_url";
+const VIEW: &str = "i.id,i.connection_id,i.connection_revision,i.tool_name,i.arguments,i.status,i.result,i.error_code,i.created_at,i.updated_at,i.expires_at,i.connection_snapshot->>'title' AS connection_title,i.connection_snapshot->>'card_url' AS card_url,i.connection_snapshot->>'endpoint_url' AS endpoint_url,i.connection_snapshot->>'owner_name' AS owner_name";
 
 async fn expire(state: &AppState, user: Uuid) -> ApiResult<()> {
     sqlx::query("UPDATE plugin_invocations SET status=CASE WHEN status='running' THEN 'unknown' ELSE 'expired' END,error_code=CASE WHEN status='running' THEN 'PLUGIN_RESULT_UNKNOWN' ELSE 'PLUGIN_PROPOSAL_EXPIRED' END,updated_at=now() WHERE user_id=$1 AND ((status='running' AND execution_deadline<now()) OR (status='awaiting_confirmation' AND expires_at<now()))")
@@ -139,8 +140,8 @@ pub async fn prepare_invocation(
     let signature = fingerprint(&snapshot)?;
     let id = Uuid::new_v4();
     let card = connection.card()?;
-    let connection_snapshot =
-        json!({"title":card.title,"card_url":card.card_url,"endpoint_url":card.endpoint_url});
+    let owner_name = card.owner_name();
+    let connection_snapshot = json!({"title":card.title,"card_url":card.card_url,"endpoint_url":card.endpoint_url,"owner_name":owner_name});
     let mut tx = state.pool.begin().await?;
     // Serialize this owner's quota and key creation without locking another domain's records.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('q.plugins:' || $1::text,731291))")

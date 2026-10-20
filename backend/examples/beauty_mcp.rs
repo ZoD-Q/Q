@@ -17,6 +17,11 @@ use tokio::sync::Semaphore;
 const VERSION: &str = "2026-07-28";
 const NAME: &str = "com.q/beauty-gallery";
 const RESOURCE_PREFIX: &str = "beauty://photos/";
+const OWNER: &str = "mandow";
+const BUILD_COMMIT: &str = match option_env!("BEAUTY_MCP_BUILD_COMMIT") {
+    Some(value) => value,
+    None => "development",
+};
 #[derive(Clone, Deserialize)]
 struct Photo {
     id: String,
@@ -39,9 +44,39 @@ struct Manifest {
 }
 struct Gallery {
     base: String,
+    origin: String,
     directory: PathBuf,
     photos: Vec<Photo>,
     reads: Arc<Semaphore>,
+}
+
+fn public_base(value: &str) -> Result<(String, String), &'static str> {
+    let parsed = reqwest::Url::parse(value).map_err(|_| "Invalid public base URL")?;
+    let loopback = parsed.host_str().is_some_and(|host| {
+        host.trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+    });
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.host_str().is_none()
+        || !(parsed.scheme() == "https" || (parsed.scheme() == "http" && loopback))
+    {
+        return Err("Public URL requires HTTPS, or HTTP on a loopback address");
+    }
+    let path = parsed.path().trim_end_matches('/');
+    if path.split('/').skip(1).any(|segment| {
+        segment.is_empty()
+            || !segment
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte))
+    }) {
+        return Err("Public URL prefix must contain simple, nonempty path segments");
+    }
+    let origin = parsed.origin().ascii_serialization();
+    Ok((format!("{origin}{path}"), origin))
 }
 
 fn info() -> Value {
@@ -106,16 +141,40 @@ async fn card(State(gallery): State<Arc<Gallery>>) -> Response {
     ([(header::CONTENT_TYPE,"application/mcp-server-card+json")], Json(json!({
         "$schema":"https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
         "name":NAME,"title":"美女 MCP","version":"1.0.0","description":"公开授权的成年女性人像图库，支持浏览、随机选图和查看来源。",
-        "websiteUrl":gallery.base,"remotes":[{"type":"streamable-http","url":format!("{}/mcp",gallery.base),"supportedProtocolVersions":[VERSION]}]
+        "websiteUrl":format!("{}/",gallery.base),"remotes":[{"type":"streamable-http","url":format!("{}/mcp",gallery.base),"supportedProtocolVersions":[VERSION]}],
+        "_meta":{"com.kaicloudpay.q/owner":{"name":OWNER}}
     }))).into_response()
 }
 async fn catalog(State(gallery): State<Arc<Gallery>>) -> Response {
-    ([(header::CONTENT_TYPE,"application/ai-catalog+json")],Json(json!({"specVersion":"1.0","entries":[{"identifier":"urn:air:q.example:mcp:beauty-gallery","type":"application/mcp-server-card+json","url":format!("{}/server-card.json",gallery.base)}]}))).into_response()
+    ([(header::CONTENT_TYPE,"application/ai-catalog+json")],Json(json!({"specVersion":"1.0","entries":[{"identifier":"urn:air:q.kaicloudpay.com:mcp:beauty-gallery","type":"application/mcp-server-card+json","url":format!("{}/server-card.json",gallery.base)}]}))).into_response()
 }
-async fn intro() -> Html<&'static str> {
-    Html(
-        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>美女 MCP</title><link rel=\"ai-catalog\" type=\"application/ai-catalog+json\" href=\"/.well-known/ai-catalog.json\"></head><body><h1>美女 MCP</h1><p>公开授权的成年女性人像图库。通过 MCP 浏览、读取照片并查看来源与许可。</p><p><a href=\"/server-card.json\">Server Card</a></p><p>图片作者及许可随每张资源提供；照片人物不代表与 Q 存在合作关系。</p></body></html>",
-    )
+async fn intro(State(gallery): State<Arc<Gallery>>) -> Html<String> {
+    Html(format!(
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>美女 MCP</title><link rel=\"ai-catalog\" type=\"application/ai-catalog+json\" href=\"{base}/catalog.json\"></head><body><h1>美女 MCP</h1><p>公开授权的成年女性人像图库。通过 MCP 浏览、读取照片并查看来源与许可。</p><p>所有者（发布者声明）：{OWNER}</p><p><a href=\"{base}/server-card.json\">Server Card</a></p><p>图片作者及许可随每张资源提供；照片人物不代表与 Q 存在合作关系。</p></body></html>",
+        base = gallery.base
+    ))
+}
+async fn health(State(gallery): State<Arc<Gallery>>) -> Json<Value> {
+    Json(json!({
+        "status":"ok",
+        "service":"beauty-mcp",
+        "source_commit":BUILD_COMMIT,
+        "photo_count":gallery.photos.len(),
+        "public_base":format!("{}/",gallery.base)
+    }))
+}
+fn routes(gallery: Arc<Gallery>) -> Router {
+    // The reverse proxy strips the configured public prefix. Discovery documents
+    // always retain the complete external base URL.
+    Router::new()
+        .route("/", get(intro))
+        .route("/health", get(health))
+        .route("/server-card.json", get(card))
+        .route("/catalog.json", get(catalog))
+        .route("/.well-known/ai-catalog.json", get(catalog))
+        .route("/mcp", post(rpc))
+        .layer(DefaultBodyLimit::max(128 * 1024))
+        .with_state(gallery)
 }
 
 async fn rpc(
@@ -126,7 +185,7 @@ async fn rpc(
     let id = body.get("id").cloned().unwrap_or(Value::Null);
     if headers
         .get(header::ORIGIN)
-        .is_some_and(|value| value.to_str().ok() != Some(gallery.base.as_str()))
+        .is_some_and(|value| value.to_str().ok() != Some(gallery.origin.as_str()))
     {
         return rpc_error(id, -32600, "Origin is not allowed.", StatusCode::FORBIDDEN);
     }
@@ -350,7 +409,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let directory = env::var_os("BEAUTY_MCP_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/beauty-gallery-data")
+            // Reviewed release builds must not embed a temporary build directory.
+            if option_env!("BEAUTY_MCP_BUILD_COMMIT").is_some() {
+                PathBuf::from("/opt/q-beauty/current/data")
+            } else {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/beauty-gallery-data")
+            }
         });
     let manifest: Manifest =
         serde_json::from_slice(&std::fs::read(directory.join("manifest.json"))?)?;
@@ -380,20 +444,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             return Err("Invalid gallery manifest".into());
         }
     }
-    let base = env::var("BEAUTY_MCP_PUBLIC_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8795".into())
-        .trim_end_matches('/')
-        .to_owned();
-    let parsed = reqwest::Url::parse(&base)?;
-    if !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || parsed.path() != "/"
-        || !["http", "https"].contains(&parsed.scheme())
-    {
-        return Err("Invalid public base URL".into());
-    }
+    let (base, origin) = public_base(
+        &env::var("BEAUTY_MCP_PUBLIC_URL").unwrap_or_else(|_| "http://127.0.0.1:8795".into()),
+    )?;
     let bind: SocketAddr = env::var("BEAUTY_MCP_BIND")
         .unwrap_or_else(|_| "127.0.0.1:8795".into())
         .parse()?;
@@ -404,17 +457,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let gallery = Arc::new(Gallery {
         base: base.clone(),
+        origin,
         directory,
         photos: manifest.photos,
         reads: Arc::new(Semaphore::new(8)),
     });
-    let app = Router::new()
-        .route("/", get(intro))
-        .route("/server-card.json", get(card))
-        .route("/.well-known/ai-catalog.json", get(catalog))
-        .route("/mcp", post(rpc))
-        .layer(DefaultBodyLimit::max(128 * 1024))
-        .with_state(gallery);
+    let app = routes(gallery);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     println!("Beauty MCP: 300 licensed photos; Card: {base}/server-card.json");
     axum::serve(listener, app)
@@ -423,4 +471,138 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         })
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    fn gallery() -> Arc<Gallery> {
+        let (base, origin) =
+            public_base("https://q.kaicloudpay.com/plugins/beauty/").expect("valid base");
+        let directory =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/beauty-gallery-data");
+        let manifest: Manifest = serde_json::from_slice(
+            &std::fs::read(directory.join("manifest.json")).expect("manifest"),
+        )
+        .expect("valid manifest");
+        Arc::new(Gallery {
+            base,
+            origin,
+            directory,
+            photos: manifest.photos,
+            reads: Arc::new(Semaphore::new(8)),
+        })
+    }
+    async fn text(response: Response) -> String {
+        String::from_utf8(
+            axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("body")
+                .to_vec(),
+        )
+        .expect("utf8")
+    }
+    async fn response(path: &str) -> Response {
+        routes(gallery())
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    #[test]
+    fn public_base_accepts_root_and_prefix_but_rejects_credentials_and_unsafe_urls() {
+        assert_eq!(
+            public_base("https://q.kaicloudpay.com/plugins/beauty/").unwrap(),
+            (
+                "https://q.kaicloudpay.com/plugins/beauty".into(),
+                "https://q.kaicloudpay.com".into()
+            )
+        );
+        assert_eq!(
+            public_base("http://127.0.0.1:8795/").unwrap(),
+            (
+                "http://127.0.0.1:8795".into(),
+                "http://127.0.0.1:8795".into()
+            )
+        );
+        for value in [
+            "https://user:secret@q.kaicloudpay.com/plugins/beauty/",
+            "https://q.kaicloudpay.com/plugins/beauty/?token=x",
+            "https://q.kaicloudpay.com/plugins/beauty/#fragment",
+            "https://q.kaicloudpay.com/plugins//beauty",
+            "https://q.kaicloudpay.com/plugins/%22beauty",
+            "http://q.kaicloudpay.com/plugins/beauty/",
+            "file:///plugins/beauty",
+        ] {
+            assert!(public_base(value).is_err(), "accepted {value}");
+        }
+    }
+
+    #[tokio::test]
+    async fn prefixed_discovery_and_owner_stay_consistent() {
+        let card_response = response("/server-card.json").await;
+        assert_eq!(
+            card_response.headers()[header::CONTENT_TYPE],
+            "application/mcp-server-card+json"
+        );
+        let card: Value = serde_json::from_str(&text(card_response).await).unwrap();
+        assert_eq!(card["_meta"]["com.kaicloudpay.q/owner"]["name"], "mandow");
+        assert_eq!(
+            card["remotes"][0]["url"],
+            "https://q.kaicloudpay.com/plugins/beauty/mcp"
+        );
+        assert_eq!(
+            card["websiteUrl"],
+            "https://q.kaicloudpay.com/plugins/beauty/"
+        );
+        let catalog: Value =
+            serde_json::from_str(&text(response("/catalog.json").await).await).unwrap();
+        assert_eq!(
+            catalog["entries"][0]["url"],
+            "https://q.kaicloudpay.com/plugins/beauty/server-card.json"
+        );
+        let page = text(response("/").await).await;
+        assert!(page.contains("href=\"https://q.kaicloudpay.com/plugins/beauty/catalog.json\""));
+        assert!(page.contains("所有者（发布者声明）：mandow"));
+        assert!(!page.contains("href=\"/server-card.json\""));
+        let health: Value = serde_json::from_str(&text(response("/health").await).await).unwrap();
+        assert_eq!(health["photo_count"], 300);
+        assert_eq!(health["source_commit"], BUILD_COMMIT);
+    }
+
+    #[tokio::test]
+    async fn rpc_accepts_origin_without_public_path_and_rejects_other_origins() {
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{
+            "io.modelcontextprotocol/protocolVersion":VERSION,
+            "io.modelcontextprotocol/clientCapabilities":{}
+        }}});
+        for (origin, status) in [
+            ("https://q.kaicloudpay.com", StatusCode::OK),
+            (
+                "https://q.kaicloudpay.com/plugins/beauty",
+                StatusCode::FORBIDDEN,
+            ),
+            ("https://other.example", StatusCode::FORBIDDEN),
+            ("null", StatusCode::FORBIDDEN),
+        ] {
+            let result = routes(gallery())
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/mcp")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .header(header::ORIGIN, origin)
+                        .header("mcp-protocol-version", VERSION)
+                        .header("mcp-method", "server/discover")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(result.status(), status, "origin {origin}");
+        }
+    }
 }

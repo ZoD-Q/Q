@@ -1,15 +1,51 @@
 import { WorkbenchError } from '../api-workbench/core';
+import { normalizeOwnerName, type EntryKind, type PluginEntryIntent } from '../plugin-workbench/materials';
+
+export type PluginEntryIntentOutcome = 'discovered' | 'dismissed';
+type PluginEntryIntentEvent =
+  | { type: 'received'; intent: PluginEntryIntent }
+  | { type: 'settled'; intent: PluginEntryIntent; outcome: PluginEntryIntentOutcome }
+  | { type: 'session'; authenticated: boolean };
+
+/** Session changes never consume a public link; only discovery or explicit dismissal does. */
+export function pluginEntryIntentReducer(current: PluginEntryIntent | null, event: PluginEntryIntentEvent): PluginEntryIntent | null {
+  if (event.type === 'received') return event.intent;
+  if (event.type === 'session') return current;
+  return current?.entry === event.intent.entry && current.kind === event.intent.kind ? null : current;
+}
+
+/** Prefill only: callers must wait for a user action before discovery, adding, or authorization. */
+export function initialPluginEntryState(intent?: PluginEntryIntent | null): { entry: string; kind: EntryKind; adding: boolean; advanced: boolean } {
+  return { entry: intent?.entry ?? '', kind: intent?.kind ?? 'auto', adding: !!intent, advanced: !!intent && intent.kind !== 'auto' };
+}
+
+export function pluginAuthModalReducer(pending: boolean, event: 'requested' | 'shown' | 'dismissed'): boolean {
+  switch (event) {
+    case 'requested':
+    case 'shown': return true;
+    case 'dismissed': return false;
+    default: return pending;
+  }
+}
+
+/** iOS dismissal is asynchronous; a valid session alone does not free the native presenter. */
+export function canPresentPluginConnectionPage(state: {
+  platform?: string; authenticated: boolean; authOpen: boolean; authModalPending: boolean;
+}): boolean {
+  return state.authenticated && !state.authOpen && (state.platform !== 'ios' || !state.authModalPending);
+}
 
 export type JsonObject = Record<string, unknown>;
 export type PluginConnection = {
   id: string; card_url: string; name: string; title: string; description: string; version: string;
   endpoint_url: string; revision: number; status: string; auth_status: string; last_error_code: string | null;
+  owner_name?: string | null;
   created_at: string; updated_at: string; pending_update: boolean; pending_update_details?: unknown;
 };
 export type PluginTool = { name: string; title?: string | null; description: string; inputSchema: JsonObject; outputSchema?: unknown; annotations?: unknown; _meta?: unknown };
-export type Candidate = { candidate_id: string; card_url: string; endpoint_url: string; name: string; title: string; description: string; version: string };
+export type Candidate = { candidate_id: string; card_url: string; endpoint_url: string; name: string; title: string; description: string; version: string; owner_name?: string | null };
 export type Discovery = { discovery_id: string; expires_at: string; candidates: Candidate[] };
-export type PluginInvocation = { id: string; connection_id: string; connection_revision: number; connection_title: string; card_url: string; endpoint_url: string; tool_name: string; arguments: JsonObject; status: string; result: unknown; error_code: string | null; created_at: string; updated_at: string; expires_at: string };
+export type PluginInvocation = { id: string; connection_id: string; connection_revision: number; connection_title: string; card_url: string; endpoint_url: string; owner_name?: string | null; tool_name: string; arguments: JsonObject; status: string; result: unknown; error_code: string | null; created_at: string; updated_at: string; expires_at: string };
 export type ResourceLink = { type: 'resource_link'; uri: string; name: string; title?: string; description?: string; mimeType?: string };
 export type PluginContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string } | ResourceLink;
 export type PluginResult = { content: PluginContent[]; structuredContent?: unknown; isError?: boolean };
@@ -25,7 +61,7 @@ export function decodePluginStatus(value: unknown) {
 }
 export function decodePluginConnection(value: unknown): PluginConnection {
   if (!record(value) || !isUuid(value.id) || !['card_url', 'name', 'title', 'description', 'version', 'endpoint_url', 'status', 'auth_status', 'created_at', 'updated_at'].every(key => str(value[key], 16000)) || !Number.isSafeInteger(value.revision) || typeof value.pending_update !== 'boolean' || !nullable(value.last_error_code)) return fail();
-  return value as PluginConnection;
+  return { ...value, owner_name: normalizeOwnerName(value.owner_name) } as PluginConnection;
 }
 export function decodeTool(value: unknown): PluginTool {
   if (!record(value) || !toolName(value.name) || !str(value.description, 16000) || !record(value.inputSchema) || (value.title !== undefined && value.title !== null && !str(value.title, 1024))) return fail();
@@ -33,13 +69,16 @@ export function decodeTool(value: unknown): PluginTool {
 }
 export function decodeDiscovery(value: unknown): Discovery {
   if (!record(value) || !isUuid(value.discovery_id) || !str(value.expires_at, 64) || !Array.isArray(value.candidates) || value.candidates.length > 100) return fail();
-  for (const item of value.candidates) if (!record(item) || !isUuid(item.candidate_id) || !['card_url', 'endpoint_url', 'name', 'title', 'description', 'version'].every(key => str(item[key], 16000))) return fail();
-  return value as Discovery;
+  const candidates = value.candidates.map((item: unknown) => {
+    if (!record(item) || !isUuid(item.candidate_id) || !['card_url', 'endpoint_url', 'name', 'title', 'description', 'version'].every(key => str(item[key], 16000))) return fail();
+    return { ...item, owner_name: normalizeOwnerName(item.owner_name) } as Candidate;
+  });
+  return { ...value, candidates } as Discovery;
 }
 export function decodeInvocation(value: unknown): PluginInvocation {
   if (!record(value) || !isUuid(value.id) || !isUuid(value.connection_id) || !Number.isSafeInteger(value.connection_revision) || !str(value.connection_title) || !str(value.card_url) || !str(value.endpoint_url) || !str(value.expires_at, 64) || !toolName(value.tool_name) || !record(value.arguments) || !str(value.status, 64) || !nullable(value.error_code) || !str(value.created_at, 64) || !str(value.updated_at, 64)) return fail();
   if (!['awaiting_confirmation', 'running', 'succeeded', 'tool_error', 'failed', 'unknown', 'cancelled', 'expired', 'input_required'].includes(value.status)) return fail();
-  return value as PluginInvocation;
+  return { ...value, owner_name: normalizeOwnerName(value.owner_name) } as PluginInvocation;
 }
 export function decodeResourceLink(value: unknown): ResourceLink {
   if (!record(value) || !str(value.uri) || !value.uri || !str(value.name) || (value.title !== undefined && !str(value.title)) || (value.description !== undefined && !str(value.description, 16000)) || (value.mimeType !== undefined && !str(value.mimeType, 128))) return fail();
@@ -79,6 +118,27 @@ export function publicHttps(value: unknown): string | null {
   try { const url = new URL(value); if (url.protocol === 'https:' && !url.username && !url.password) return url.href; } catch { /* Not a link. */ }
   return null;
 }
+export function pluginOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.origin : null;
+  } catch { return null; }
+}
+export function connectionStatusLabel(status: string, text: (zh: string, en: string) => string): string {
+  const labels: Record<string, [string, string]> = {
+    ready: ['可以使用', 'Ready to use'], auth_required: ['需要授权', 'Authorization needed'],
+    blocked: ['暂不可用', 'Unavailable'], needs_review: ['有更新待确认', 'Update needs review'],
+    revoked: ['已断开', 'Disconnected'],
+  };
+  return labels[status] ? text(...labels[status]) : text('状态待确认', 'Status unavailable');
+}
+export function authorizationLabel(status: string, text: (zh: string, en: string) => string): string {
+  const labels: Record<string, [string, string]> = {
+    none: ['无需单独授权', 'No separate authorization needed'], required: ['等待授权', 'Awaiting authorization'],
+    authorized: ['已授权', 'Authorized'], blocked: ['暂不可授权', 'Authorization unavailable'],
+  };
+  return labels[status] ? text(...labels[status]) : text('授权状态待确认', 'Authorization status unavailable');
+}
 export function pluginError(error: unknown, text: (zh: string, en: string) => string): string {
   const code = error instanceof WorkbenchError ? error.code : typeof error === 'string' ? error : 'REQUEST_FAILED';
   const messages: Record<string, [string, string]> = {
@@ -90,7 +150,18 @@ export function pluginError(error: unknown, text: (zh: string, en: string) => st
     PLUGIN_UNAVAILABLE: ['插件服务暂不可用。', 'Plugin services are unavailable.'],
     MCP_UNSAFE_URL: ['仅支持可公开访问的 HTTPS 插件地址。', 'Use a publicly reachable HTTPS plugin address.'],
     MCP_UNSUPPORTED: ['这个插件要求的协议能力尚未支持。', 'This plugin requires an unsupported capability.'],
+    MCP_DISCOVERY_FAILED: ['这个地址没有找到可添加的插件，请检查链接或展开高级选项。', 'No addable plugin was found at this address. Check the link or open Advanced options.'],
+    MCP_NETWORK_ERROR: ['暂时无法连接插件，请稍后重新读取；已提交的调用请先查询状态。', 'The plugin is temporarily unreachable. Read it again later; check the status of submitted invocations first.'],
+    MCP_TIMEOUT: ['插件响应超时。已提交的调用请查询状态，不要重复执行。', 'The plugin timed out. Check submitted invocations; do not repeat them.'],
+    MCP_HTTP_ERROR: ['插件服务暂未正常响应，请稍后重新读取。', 'The plugin service is not responding normally. Read it again later.'],
+    MCP_LIMIT_EXCEEDED: ['插件内容超出当前支持范围。已提交的调用请先查询状态，不要重复执行。', 'The plugin content exceeds supported limits. Check submitted invocations; do not repeat them.'],
+    MCP_VERSION_UNSUPPORTED: ['此插件暂不支持小Q使用的协议版本。', 'This plugin does not support Q’s protocol version.'],
+    MCP_METHOD_UNSUPPORTED: ['此插件暂不提供这项能力。', 'This plugin does not provide this capability.'],
     MCP_INVALID_RESPONSE: ['插件返回的内容不符合协议。', 'The plugin returned an invalid response.'],
+    INVALID_RESPONSE: ['暂时无法完整读取插件内容，请查询调用状态或稍后重新读取。', 'The plugin content could not be read completely. Check the invocation status or read it again later.'],
+    PLUGIN_DISCOVERY_EXPIRED: ['查找结果已过期，请重新查找这个链接。', 'These discovery results expired. Look up the link again.'],
+    PLUGIN_DISCOVERY_LIMIT: ['近期查找较多，请稍后再试。', 'There have been many recent lookups. Try again later.'],
+    PLUGIN_CONNECTION_LIMIT: ['已达到当前连接数量上限，请联系管理员。', 'The connection limit has been reached. Contact the administrator.'],
     PLUGIN_IMAGE_DECODE: ['这张图片无法显示，说明与来源仍保留。', 'This image could not be displayed. Its description and attribution are preserved.'],
     PLUGIN_STORAGE_LIMIT: ['历史记录保存空间已满。已有调用仍可查询，请联系管理员整理历史。', 'Plugin history storage is full. Existing invocations remain available; contact the administrator to archive history.'],
     PLUGIN_AUTH_CHANGED: ['插件授权身份已变化，这个旧提案已取消。', 'The plugin authorization changed; this previous proposal was cancelled.'],
@@ -100,5 +171,5 @@ export function pluginError(error: unknown, text: (zh: string, en: string) => st
     CANCELLED: ['请求已停止；已发送的调用请查询状态。', 'Stopped waiting. Check the status of any submitted invocation.'],
   };
   const message = messages[code];
-  return message ? text(...message) : text(`操作未完成（${code}）。`, `The action did not complete (${code}).`);
+  return message ? text(...message) : text('操作未完成。已提交的调用请先查询状态。', 'The action did not complete. Check the status of any submitted invocation first.');
 }

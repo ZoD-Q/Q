@@ -4,9 +4,11 @@ import { Action, Choice, Input, Sheet, Type, useDesign } from '../design';
 import type { ChatController } from './use-chat';
 import { chatErrorMessage } from './messages';
 
-export function ChatAuthSheet({ controller, description }: {
+export function ChatAuthSheet({ controller, description, onShow, onDismiss }: {
   controller: Pick<ChatController, 'authOpen' | 'authBusy' | 'authError' | 'authenticate' | 'closeAuth'>;
   description?: string;
+  onShow?: () => void;
+  onDismiss?: () => void;
 }) {
   const { text, colors } = useDesign();
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -31,7 +33,7 @@ export function ChatAuthSheet({ controller, description }: {
     setPassword('');
     void controller.authenticate(mode, fields);
   };
-  return <Sheet visible={controller.authOpen} title={text('登录小Q', 'Sign in to Q')} onClose={() => { setPassword(''); controller.closeAuth(); }}>
+  return <Sheet visible={controller.authOpen} title={text('登录小Q', 'Sign in to Q')} onClose={() => { setPassword(''); controller.closeAuth(); }} onShow={onShow} onDismiss={onDismiss}>
     <Type size={14} muted>{description ?? text('使用已有 Q 账号继续对话。登录后草稿仍在，点击发送即可开始。', 'Use your existing Q account. Your draft stays here; send it when you are signed in.')}</Type>
     <View style={{ flexDirection: 'row', gap: 8 }}>
       <Choice label={text('登录', 'Sign in')} selected={mode === 'login'} disabled={controller.authBusy} onPress={() => { setMode('login'); setPassword(''); }} />

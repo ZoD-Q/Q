@@ -646,6 +646,8 @@ export function Sheet({
   title,
   children,
   onClose,
+  onShow,
+  onDismiss,
   wide = false,
   footer,
   automaticallyAdjustKeyboardInsets = true,
@@ -654,6 +656,8 @@ export function Sheet({
   title: string;
   children: ReactNode;
   onClose: () => void;
+  onShow?: () => void;
+  onDismiss?: () => void;
   wide?: boolean;
   footer?: ReactNode;
   automaticallyAdjustKeyboardInsets?: boolean;
@@ -669,6 +673,8 @@ export function Sheet({
         reduced || process.env.EXPO_OS === "web" ? "none" : "slide"
       }
       onRequestClose={onClose}
+      onShow={onShow}
+      onDismiss={onDismiss}
     >
       <KeyboardAvoidingView
         behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined}

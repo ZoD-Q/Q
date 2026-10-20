@@ -163,9 +163,39 @@ pub struct Candidate {
     pub card_json: Value,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub const OWNER_META_KEY: &str = "com.kaicloudpay.q/owner";
+
+/// Publisher-supplied display metadata, never an authenticated Q account or permission.
+pub fn declared_owner(card: &Value) -> Option<&str> {
+    let raw = card
+        .get("_meta")?
+        .get(OWNER_META_KEY)?
+        .get("name")?
+        .as_str()?;
+    let name = raw.trim();
+    if name.is_empty()
+        || name.chars().count() > 80
+        || raw.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+    {
+        return None;
+    }
+    Some(name)
+}
+
+impl Candidate {
+    pub fn owner_name(&self) -> Option<String> {
+        declared_owner(&self.card_json).map(str::to_owned)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryKind {
+    #[default]
+    Auto,
     Domain,
     Page,
     Catalog,
