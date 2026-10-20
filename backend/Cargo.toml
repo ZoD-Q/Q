@@ -3,6 +3,11 @@ name = "xiaoq-backend"
 version = "0.1.0"
 edition = "2024"
 publish = false
+default-run = "xiaoq-backend"
+
+[[bin]]
+name = "account-admin"
+path = "scripts/account-admin.rs"
 
 [features]
 # Opt-in, loopback-only provider fixture injection for integration tests.

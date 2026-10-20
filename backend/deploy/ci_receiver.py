@@ -18,6 +18,7 @@ import time
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -140,6 +141,14 @@ def authorize(r, fetch=fetch_json):
             branch.get('commit', {}).get('id') == r['source_sha'], 'main_advanced_or_unprotected')
 
 
+def validate_linux_amd64(binary):
+    require(len(binary) >= 64 and binary[:7] == b'\x7fELF\x02\x01\x01'
+            and binary[7] in (0, 3), 'invalid_linux_amd64_binary')
+    elf_type, machine, version = struct.unpack_from('<HHI', binary, 16)
+    require(elf_type in (2, 3) and machine == 62 and version == 1
+            and struct.unpack_from('<H', binary, 52)[0] == 64, 'invalid_linux_amd64_binary')
+
+
 def unpack(archive, component, sha):
     with gzip.GzipFile(fileobj=io.BytesIO(archive)) as compressed:
         expanded = compressed.read(MAX_EXPANDED + 1)
@@ -154,7 +163,8 @@ def unpack(archive, component, sha):
             require(name and not path.is_absolute() and str(path) == name and
                     all(part not in ('.', '..') for part in path.parts) and
                     re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./-]*', name), 'unsafe_archive_path')
-            require(name not in seen and len(seen) < 2000, 'duplicate_or_many_members')
+            require(name not in seen and len(seen) < (7 if component == 'api' else 2000),
+                    'duplicate_or_many_members')
             seen.add(name)
             require(not member.pax_headers and (member.isfile() or member.isdir()), 'unsafe_archive_type')
             if member.isdir():
@@ -166,21 +176,23 @@ def unpack(archive, component, sha):
             files[name] = tar.extractfile(member).read()
     if component == 'api':
         allowed = {'q-release/xiaoq-backend', 'q-release/SOURCE_COMMIT',
-                   'q-release/SHA256SUMS', 'q-release/MIGRATIONS', 'q-release/BUILD_PROVENANCE'}
-        required = allowed - {'q-release/BUILD_PROVENANCE'}
+                   'q-release/SHA256SUMS', 'q-release/MIGRATIONS', 'q-release/BUILD_PROVENANCE',
+                   'q-release/account-admin'}
+        required = allowed - {'q-release/BUILD_PROVENANCE', 'q-release/account-admin'}
         require(required <= set(files) <= allowed, 'unexpected_api_files')
         require(files['q-release/SOURCE_COMMIT'].decode().strip() == sha, 'source_mismatch')
         hashes = {}
         for line in files['q-release/SHA256SUMS'].decode('ascii').splitlines():
-            match = re.fullmatch(r'([0-9a-f]{64}) [ *](xiaoq-backend|SOURCE_COMMIT|MIGRATIONS|BUILD_PROVENANCE)', line)
+            match = re.fullmatch(r'([0-9a-f]{64}) [ *](xiaoq-backend|account-admin|SOURCE_COMMIT|MIGRATIONS|BUILD_PROVENANCE)', line)
             require(match is not None and match[2] not in hashes, 'invalid_inner_manifest')
             hashes[match[2]] = match[1]
         require(set(hashes) == {n.removeprefix('q-release/') for n in files if not n.endswith('/SHA256SUMS')}, 'incomplete_inner_manifest')
         for name, digest in hashes.items():
             require(hashlib.sha256(files['q-release/' + name]).hexdigest() == digest, 'inner_digest_mismatch')
         migration_upgrade(files['q-release/MIGRATIONS'], b'')
-        binary = files['q-release/xiaoq-backend']
-        require(len(binary) >= 64 and binary[:6] == b'\x7fELF\x02\x01' and binary[18:20] == b'\x3e\x00', 'invalid_linux_amd64_binary')
+        validate_linux_amd64(files['q-release/xiaoq-backend'])
+        if 'q-release/account-admin' in files:
+            validate_linux_amd64(files['q-release/account-admin'])
     return files
 
 
@@ -362,11 +374,8 @@ def migration_upgrade(manifest, applied):
     return bool(set(planned) - installed)
 
 
-def perform_api(r, files, receipt, path):
-    old = current_release()
-    original_env = CONFIG.read_bytes()
-    tag = 'ci-' + r['source_sha'] + '-' + r['archive_sha256'][:16]
-    new = RELEASES / ('ci-' + str(r['pipeline_id']) + '-' + r['source_sha'] + '-' + r['archive_sha256'][:16])
+def stage_api_release(old, new, files):
+    """Stage only validated payloads; a fresh artifact directory cannot inherit an old CLI."""
     require(not new.exists(), 'release_already_exists')
     new.mkdir(mode=0o700)
     shutil.copytree(old / 'deploy', new / 'deploy', ignore=lambda directory, names: ['artifact'] if 'artifact' in names else [])
@@ -377,11 +386,23 @@ def perform_api(r, files, receipt, path):
     binary = files['q-release/xiaoq-backend']
     (artifact / 'xiaoq-backend').write_bytes(binary)
     (artifact / 'xiaoq-backend').chmod(0o555)
+    if 'q-release/account-admin' in files:
+        (artifact / 'account-admin').write_bytes(files['q-release/account-admin'])
+        (artifact / 'account-admin').chmod(0o555)
     release_meta = new / 'q-release'
     release_meta.mkdir(mode=0o700)
     for name, content in files.items():
-        if name != 'q-release/xiaoq-backend':
+        if name not in ('q-release/xiaoq-backend', 'q-release/account-admin'):
             (release_meta / name.split('/')[1]).write_bytes(content)
+
+
+def perform_api(r, files, receipt, path):
+    old = current_release()
+    original_env = CONFIG.read_bytes()
+    tag = 'ci-' + r['source_sha'] + '-' + r['archive_sha256'][:16]
+    new = RELEASES / ('ci-' + str(r['pipeline_id']) + '-' + r['source_sha'] + '-' + r['archive_sha256'][:16])
+    stage_api_release(old, new, files)
+    binary = files['q-release/xiaoq-backend']
     candidate = new / 'build.env'
     candidate.write_bytes(set_image(original_env, tag))
     candidate.chmod(0o600)

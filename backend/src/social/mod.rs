@@ -247,16 +247,39 @@ fn pair(a: Uuid, b: Uuid) -> ApiResult<(Uuid, Uuid)> {
 }
 async fn lock_pair(tx: &mut Tx<'_>, a: Uuid, b: Uuid) -> ApiResult<(Uuid, Uuid)> {
     let (low, high) = pair(a, b)?;
-    let ids: Vec<Uuid> =
-        sqlx::query_scalar("SELECT id FROM identities WHERE id=$1 OR id=$2 ORDER BY id FOR UPDATE")
-            .bind(low)
-            .bind(high)
-            .fetch_all(&mut **tx)
-            .await?;
-    if ids.len() != 2 {
+    let identities: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id,status FROM identities WHERE id=$1 OR id=$2 ORDER BY id FOR UPDATE",
+    )
+    .bind(low)
+    .bind(high)
+    .fetch_all(&mut **tx)
+    .await?;
+    if identities.len() != 2 {
         return Err(ApiError::user_not_found());
     }
+    if !identities
+        .iter()
+        .any(|(id, state)| *id == a && state == "active")
+    {
+        return Err(ApiError::unauthorized());
+    }
     Ok((low, high))
+}
+async fn ensure_peer_active(tx: &mut Tx<'_>, peer: Uuid) -> ApiResult<()> {
+    let active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM identities WHERE id=$1 AND status='active')",
+    )
+    .bind(peer)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !active {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "SOCIAL_ACCOUNT_UNAVAILABLE",
+            "This account cannot start or receive new interactions.",
+        ));
+    }
+    Ok(())
 }
 async fn ensure_unblocked(tx: &mut Tx<'_>, a: Uuid, b: Uuid) -> ApiResult<()> {
     let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM social_blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1))")
@@ -301,6 +324,7 @@ async fn locked_conversation(tx: &mut Tx<'_>, id: Uuid, actor: Uuid) -> ApiResul
 }
 async fn active_friend(tx: &mut Tx<'_>, actor: Uuid, peer: Uuid) -> ApiResult<ConversationRow> {
     let (low, high) = pair(actor, peer)?;
+    ensure_peer_active(tx, peer).await?;
     ensure_unblocked(tx, actor, peer).await?;
     sqlx::query_as(
         "SELECT * FROM social_conversations WHERE user_low=$1 AND user_high=$2 AND active",
@@ -318,6 +342,7 @@ async fn active_friend(tx: &mut Tx<'_>, actor: Uuid, peer: Uuid) -> ApiResult<Co
     })
 }
 async fn ensure_active(tx: &mut Tx<'_>, c: &ConversationRow, actor: Uuid) -> ApiResult<()> {
+    ensure_peer_active(tx, c.peer(actor)?).await?;
     ensure_unblocked(tx, actor, c.peer(actor)?).await?;
     if !c.active {
         return Err(ApiError::new(

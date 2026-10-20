@@ -44,6 +44,7 @@ The native viewer displays bounded, signature/dimension-verified JPEG, PNG and W
 - `POST /v1/auth/register` body `{handle,password,display_name}` → 201 `{token,user}`. Handle normalized lowercase ASCII `[a-z0-9_]{3,24}`; `xiaoq` is reserved for the system. Password 10–128 characters; display_name 1–40 chars. Creates profile, wallet and balanced 100000 minor-unit welcome credit atomically. All data is simulated.
 - `POST /v1/auth/login` body `{handle,password}` → `{token,user}`. Generic invalid-credentials errors.
 - `POST /v1/auth/logout` → 204; revoke current session.
+- `POST /v1/account/deletions` → completed deletion receipt after password verification and explicit confirmation; `POST /v1/account/deletions/status` recovers only that receipt with the original secret capability after sessions are revoked. Both are `no-store`. See [account lifecycle and retained records](account-lifecycle.md).
 - `GET /v1/me` → User.
 - `PATCH /v1/me` body partial `{display_name,avatar,bio,theme,locale}` → User. bio ≤160 chars, validated enums below. Cannot change handle/id/balance/roles.
 - `GET /v1/users/lookup?handle=lin` → Recipient, exact normalized handle; 404 if absent. Authenticated. Returns no private preferences or credentials.
@@ -56,6 +57,21 @@ The native viewer displays bounded, signature/dimension-verified JPEG, PNG and W
 Machine-readable shapes are authoritative in repository-relative `backend/contracts/openapi.json`. From `mobile/`, run `npm run api:generate` to update `shared/src/generated.ts`; index.ts exposes named aliases. Do not edit generated types by hand. This document defines behavioral rules alongside that schema. User theme: light/dark/warm (default warm); locale: zh-CN/en (default zh-CN); avatar: orbit/leaf/spark/wave (default orbit). Wallet `{account_id,balance_minor,currency:"QDC",mode:"demo"}`. LedgerTransaction `{id,kind:"welcome"|"transfer",direction:"in"|"out",amount_minor,counterparty_handle,counterparty_name,memo,created_at}`. Welcome counterparty handle `xiaoq`, name `小Q 演示金`.
 
 Expected errors: 400 VALIDATION_ERROR, 401 UNAUTHORIZED / INVALID_CREDENTIALS, 404 USER_NOT_FOUND, 409 HANDLE_TAKEN / INSUFFICIENT_FUNDS / IDEMPOTENCY_CONFLICT / SELF_TRANSFER, 429 RATE_LIMITED, 500 INTERNAL_ERROR. Clients should localize codes and show safe fallback messages.
+
+Account lifecycle additionally defines `ACCOUNT_DELETION_NOT_FOUND`, `ACCOUNT_BUSY`,
+`ACCOUNT_DELETED`, and `ACCOUNT_PROTECTED`; basic local content rules return
+`422 CONTENT_BLOCKED`. Suspended/deleted accounts cannot create or use sessions.
+New social interaction with an unavailable peer returns `SOCIAL_ACCOUNT_UNAVAILABLE`.
+User-initiated deletion retains immutable demo-ledger amounts, entries and memo text;
+the original recipient-handle digest preserves existing transfer replay without
+reassigning an old handle to a new user. New transfers require active identities.
+These retention limits are described in the lifecycle contract and deletion UI.
+
+Register, login and account-deletion endpoints share a per-client-source
+30 requests/minute limit. Forwarded client identity is accepted only from explicitly
+trusted proxies; malformed or untrusted headers fall back to the TCP source.
+See [proxy configuration](../docs/trusted-proxy.md). Account-specific password
+limits and global password-computation concurrency also apply.
 
 ## Local demo bootstrap
 

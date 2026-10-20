@@ -7,8 +7,10 @@ import { readSessionSnapshot, getSessionRevision, invalidateToken, removeToken, 
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
 import { ChatError, decodeAiStatus, streamChat } from './stream';
 import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation, type ChatPlugin } from './state-model';
+import { createAiConsentGate, hasAiConsent, revokeAiConsent, subscribeAiConsent } from './consent';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number };
+type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean };
 const errorCode = (error: unknown) => error instanceof ChatError || error instanceof WorkbenchError ? error.code
   : error instanceof Error && ['EMPTY_MESSAGE', 'MESSAGE_TOO_LONG'].includes(error.message) ? error.message : 'REQUEST_FAILED';
 
@@ -20,6 +22,8 @@ export function useChat(visible: boolean) {
   const [authBusy, setAuthBusy] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [aiConsentOpen, setAiConsentOpen] = useState(false);
+  const [consentGate] = useState(() => createAiConsentGate<ConsentRequest>());
   const [messageError, setMessageError] = useState('');
   const [items, setItems] = useState<Conversation[]>([]);
   const list = useRef<Conversation[]>([]);
@@ -57,6 +61,7 @@ export function useChat(visible: boolean) {
   };
   const invalidate = () => {
     generation.current++;
+    consentGate.cancel(); setAiConsentOpen(false);
     stop();
     for (const controller of shortRequests.current) controller.abort();
     shortRequests.current.clear();
@@ -67,6 +72,7 @@ export function useChat(visible: boolean) {
     updateItems(() => []); select(null); setDraft(''); setMessageError(''); setPlugin(null);
   };
   const applySession = (value: AuthResponse | null) => {
+    if (sessionRef.current?.token !== value?.token) revokeAiConsent();
     if (sessionRef.current && sessionRef.current.user.id !== value?.user.id) clearPrivateState();
     sessionRef.current = value; setSession(value);
   };
@@ -117,11 +123,17 @@ export function useChat(visible: boolean) {
     invalidate(); applySession(null); clearPrivateState(); setAuthBusy(false); setAuthOpen(false); setAuthError('');
     if (visible) void restore();
   });
+  const onAiConsentChanged = useEffectEvent(() => {
+    if (!sessionRef.current || !hasAiConsent(sessionRef.current.token)) {
+      consentGate.cancel(); setAiConsentOpen(false); stop();
+    }
+  });
   const activate = useEffectEvent(() => {
     if (visible) void restore();
     else { invalidate(); setAuthBusy(false); setAuthOpen(false); }
   });
   useEffect(() => subscribeSession(onSessionChanged), []);
+  useEffect(() => subscribeAiConsent(onAiConsentChanged), []);
   useEffect(() => {
     mounted.current = true;
     const requests = shortRequests.current;
@@ -180,7 +192,7 @@ export function useChat(visible: boolean) {
     finally { if (isCurrent(version)) setAuthBusy(false); }
   };
 
-  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = []) => {
+  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false) => {
     const authenticated = sessionRef.current;
     if (inflight.current || authBusy) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
@@ -191,6 +203,10 @@ export function useChat(visible: boolean) {
       context = buildContext(baseMessages.slice(0, lastUser + 1));
     }
     catch (error) { setMessageError(errorCode(error)); return false; }
+    if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft })) {
+      setAiConsentOpen(true);
+      return false;
+    }
     const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: randomUUID(), controller: new AbortController(), generation: generation.current };
     const selectedPlugin = conversation.plugin;
     const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: '', status: 'pending', model, thinking: selectedPlugin ? false : think, contextLimited: context.limited, toolInvocationIds: invocationIds };
@@ -229,15 +245,23 @@ export function useChat(visible: boolean) {
     const trimmed = value.trim();
     if (!trimmed) return false;
     const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
-    return start(current, [...current.messages, { id: randomUUID(), role: 'user', content: trimmed, status: 'complete' }]);
+    return start(current, [...current.messages, { id: randomUUID(), role: 'user', content: trimmed, status: 'complete' }], [], true);
   };
   const retry = () => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
     const base = conversation ? prepareRetry(conversation) : null;
     if (conversation && base) start(conversation, base, conversation.messages.at(-1)?.toolInvocationIds ?? []);
   };
-  const newConversation = () => { stop(); select(null); setDraft(''); setMessageError(''); };
-  const openConversation = (id: string) => { stop(); select(id); setPlugin(list.current.find(item => item.id === id)?.plugin ?? null); setDraft(''); setMessageError(''); };
+  const cancelAiSharing = () => { consentGate.cancel(); setAiConsentOpen(false); };
+  const confirmAiSharing = () => {
+    const pending = consentGate.approve(sessionRef.current?.token ?? '', generation.current);
+    setAiConsentOpen(false);
+    if (!pending || !mounted.current) return;
+    if (start(pending.conversation, pending.messages, pending.invocationIds) && pending.clearDraft
+      && draft.trim() === pending.messages.at(-1)?.content) setDraft('');
+  };
+  const newConversation = () => { cancelAiSharing(); stop(); select(null); setDraft(''); setMessageError(''); };
+  const openConversation = (id: string) => { cancelAiSharing(); stop(); select(id); setPlugin(list.current.find(item => item.id === id)?.plugin ?? null); setDraft(''); setMessageError(''); };
   const selectPlugin = (value: ChatPlugin | null) => { newConversation(); setPlugin(value); if (value) setThink(false); };
   const resumeTool = (messageId: string, invocationId: string) => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
@@ -255,6 +279,7 @@ export function useChat(visible: boolean) {
     draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError,
     send, stop, retry, newConversation, openConversation,
     plugin, selectPlugin, resumeTool,
+    aiConsentOpen, confirmAiSharing, cancelAiSharing,
   };
 }
 export type ChatController = ReturnType<typeof useChat>;

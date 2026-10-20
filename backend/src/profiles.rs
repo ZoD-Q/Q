@@ -27,7 +27,7 @@ pub struct User {
     pub created_at: DateTime<Utc>,
 }
 
-const USER_SELECT: &str = "SELECT i.id, i.handle, p.display_name, p.avatar, p.bio, p.theme, p.locale, i.created_at FROM identities i JOIN profiles p ON p.user_id = i.id WHERE i.id = $1";
+const USER_SELECT: &str = "SELECT i.id, i.handle, p.display_name, p.avatar, p.bio, p.theme, p.locale, i.created_at FROM identities i JOIN profiles p ON p.user_id = i.id WHERE i.id = $1 AND i.status='active'";
 
 pub async fn read(pool: &PgPool, user_id: Uuid) -> ApiResult<User> {
     sqlx::query_as(USER_SELECT)
@@ -76,9 +76,11 @@ impl ProfilePatch {
                 40,
                 "Display name must contain 1–40 characters.",
             )?;
+            crate::content_policy::validate_content(name)?;
         }
         if let Some(bio) = &self.bio {
             validation::text(bio, 0, 160, "Bio must not exceed 160 characters.")?;
+            crate::content_policy::validate_content(bio)?;
         }
         for (value, allowed) in [
             (&self.avatar, &["orbit", "leaf", "spark", "wave"][..]),
@@ -102,10 +104,17 @@ pub async fn patch(
     ApiJson(patch): ApiJson<ProfilePatch>,
 ) -> ApiResult<Json<User>> {
     patch.validate()?;
+    let mut tx = state.pool.begin().await?;
+    crate::account_lifecycle::lock_active(&mut tx, auth.user_id).await?;
     sqlx::query("UPDATE profiles SET display_name = coalesce($2, display_name), avatar = coalesce($3, avatar), bio = coalesce($4, bio), theme = coalesce($5, theme), locale = coalesce($6, locale) WHERE user_id = $1")
         .bind(auth.user_id).bind(patch.display_name.as_deref().map(str::trim)).bind(patch.avatar)
-        .bind(patch.bio).bind(patch.theme).bind(patch.locale).execute(&state.pool).await?;
-    Ok(Json(read(&state.pool, auth.user_id).await?))
+        .bind(patch.bio).bind(patch.theme).bind(patch.locale).execute(&mut *tx).await?;
+    let user = sqlx::query_as(USER_SELECT)
+        .bind(auth.user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Json(user))
 }
 
 #[derive(Deserialize)]
@@ -129,7 +138,7 @@ pub async fn lookup(
 ) -> ApiResult<Json<Recipient>> {
     let Query(query) = query.map_err(|_| ApiError::validation("Provide one valid handle."))?;
     let handle = validation::handle(&query.handle)?;
-    let recipient = sqlx::query_as("SELECT i.id, i.handle, p.display_name, p.avatar FROM identities i JOIN profiles p ON p.user_id = i.id WHERE i.handle = $1")
+    let recipient = sqlx::query_as("SELECT i.id, i.handle, p.display_name, p.avatar FROM identities i JOIN profiles p ON p.user_id = i.id WHERE i.handle = $1 AND i.status='active'")
         .bind(handle).fetch_optional(&state.pool).await?.ok_or_else(ApiError::user_not_found)?;
     Ok(Json(recipient))
 }

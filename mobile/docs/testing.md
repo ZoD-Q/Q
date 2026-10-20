@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-`npm run dev` 只启动 Expo 浏览器预览；`npm run dev:native` 启动原生 Expo 开发。它们不加载后端 `.env`，不检查 API 健康，也不启动 PostgreSQL。网页预览是移动界面，根目录 `web/` 仍为未来独立 Web 产品的位置。
+`npm run dev` 只启动 Expo 浏览器预览；`npm run dev:native` 启动原生 Expo 开发。它们不加载后端 `.env`，不检查 API 健康，也不启动 PostgreSQL。网页预览是移动界面；根目录 `web/` 已有独立管理工作台静态演示，普通用户 Web 产品尚未实现。
 
 前端检查从 `mobile/` 执行：
 
@@ -20,6 +20,12 @@ npm run dev
 npm run typecheck
 npm run lint
 npm run test:utils
+npm run test:video
+npm run test:plugins
+npm run test:api-workbench
+npm run test:chat
+npm run test:account
+npm run test:social
 npm run export:web
 npm run api:generate
 ```
@@ -72,7 +78,7 @@ npm run db:start
 
 `Q_SEED_DEMO=true` 首次创建 `kai`、`lin`，密码 `Qdemo12345!`，首次各发一次 1000.00 Q。重复启动不会重置资料、余额或补发欢迎金。当前演示余额以已有账本为准。
 
-iOS 模拟器和浏览器的原有 API 客户端默认连接 `127.0.0.1`，Android 模拟器使用 `10.0.2.2`。使用真机或自定义 API 地址时显式设置 `EXPO_PUBLIC_API_URL`，后台也需要绑定设备可达接口。数据库仍只绑定本机回环地址。
+开发模式下，iOS 模拟器和浏览器的原有 API 客户端默认连接 `127.0.0.1`，Android 模拟器使用 `10.0.2.2`。Release 不使用回环默认值。使用真机或发布构建时显式设置手机可达的 HTTPS `EXPO_PUBLIC_API_URL`；数据库仍只绑定本机回环地址。发布配置门禁与剩余准备见 [移动端说明](../README.md#testflight-发布准备)。
 
 ## API 验收与只读迁移检查
 
@@ -182,3 +188,33 @@ TEST_DATABASE_URL=postgresql://xiaoq:xiaoq_demo_local@127.0.0.1:55432/xiaoq_demo
 回归测试均先复现失败再修复：移动端专项 11/11；Rust 单元 9/9；真实 PostgreSQL 既有 3/3、视频 5/5。typecheck、lint、export:web、fmt、Clippy 通过，独立复审无阻塞项。
 
 模拟器实际操作：恢复已有登录；未知受理和慢响应任务显示待确认，查询原任务后进入生成中；离开工作台再进入仍能恢复任务；数据库确认两条场景各只有一条任务；令测试会话失效后显示重新登录，换用 lin 后连接、任务和草稿均不带入 kai 的数据。原生表单保存与撤销通过，数据库确认撤销后加密凭据已清空。临时 URL 更新及并发顺序由可控供应商/数据库回归验证，未宣称真实生成媒体已播放。Android 和完整字体/无障碍矩阵仍未覆盖。
+
+## TestFlight 配置与仓库对齐（2026-10-19）
+
+在 `0b99f90ef5f78293041bde8ae6b93758c0695933` 基线上恢复本次发布配置，保留已合入的账号、社交、二维码依赖和 GitLab 检查流程。版本为 `0.1.0 (1)`，Bundle ID 为 `com.kaicloud.xiaoq`；新增气泡 Q 图标和显式发布 API 配置检查，Release 不再回落到设备回环地址。
+
+- `npm --prefix mobile ci` 成功，锁文件保持不变。安装审计报告 27 项上游告警（8 moderate、19 high）；未使用会改变依赖基线的自动修复或强制升级。
+- `npm --prefix mobile run typecheck`、`lint` 通过。
+- 七组测试共 146 项通过、0 失败、0 跳过：`test:utils` 13、`test:video` 10、`test:plugins` 29、`test:api-workbench` 11、`test:chat` 48、`test:account` 16、`test:social` 19。
+- `npm --prefix mobile run api:generate` 完成后，`shared/src/generated.ts` 与当前基线无差异。
+- 使用 `EXPO_NO_DOTENV=1 EXPO_PUBLIC_API_URL=https://q.kaicloudpay.com Q_STORE_BUILD=1 npm --prefix mobile run export:web` 导出成功，包含首页及四个社交路由。该地址的 HTTPS、登录、真实 DeepSeek 流式和 MCP 公开元数据验收见 [部署状态](../../backend/deploy/STATUS.md)。
+- 本轮检查没有操作原生 `ios/` 生成目录、业务数据库或第三方插件；差异检查通过。以上结果不等于签名 IPA、TestFlight 上传或安装成功，Android/真机与完整无障碍矩阵仍未覆盖。
+
+### 原生归档与 Apple 上传（2026-10-20）
+
+- `0.1.0 (1)` 固定使用上述 `0b99f90` 基线加本次发布配置；冻结后新合入的修复不自动包含在该构建中。原生预构建及 115 个 Pods 安装完成；Release 模拟器编译和 App Store 签名归档均成功，归档启用 `Q_STORE_BUILD=1` 与 `EXPO_PUBLIC_API_URL=https://q.kaicloudpay.com`。
+- 主应用及四个嵌入框架的签名验证通过。App Store 描述文件与 `com.kaicloud.xiaoq`、团队一致；1024px 图标不透明，iPhone/iPad 方向与启动配置齐全，11 个隐私清单可解析，非豁免加密声明为 false。
+- 初次模拟器构建跳过应用签名，导致安全凭据存储初始化失败。恢复模拟器 ad-hoc 签名后，干净安装启动不再出现该错误；真机 Distribution 签名使用独立配置。完整登录、重启恢复及流式对话的原生交互验收因共用窗口未完成，不能将其他聊天替换的安装包当作本构建证据。
+- 12:17:21（北京时间）上传返回 `Upload succeeded`、`EXPORT SUCCEEDED`；12:29:39 查询 App Store Connect 确认构建 `a22b6658-c0fc-4a8c-a5b4-19ffdd8ed106` 为 `VALID`、`READY_FOR_BETA_TESTING`，非豁免加密为 false，未过期。外部测试为 `READY_FOR_BETA_SUBMISSION`；未提交 Beta 审核、未邀请测试者，TestFlight 真机安装仍待验收。本地记录位于忽略目录 `.local/testflight/archive/`。
+- 上传提示 React、ReactNativeDependencies、hermesvm 三个预编译框架缺少 dSYM；其本地上游包也未提供符号。上传本身成功，但这些框架的崩溃日志符号化不完整。
+
+## 公开测试构建 2 准备（2026-10-20）
+
+在 `160508a` 基线上集成本轮账号生命周期、AI 许可及发布配置，版本为 `0.1.0 (2)`；保留上游社交、插件、图库与应用资料变更。
+
+- 七组 199 项通过且无跳过：utils 13、video 10、plugins 39、api-workbench 11、chat 52、account 42、social 32。typecheck、lint、公开 HTTPS 配置下 export:web、配置正负门禁及差异检查通过；api:generate 前后内容一致，152 个受检输入与 HEAD 前后未变。
+- 独立 iPhone iOS 26.5 Release 验收：登录、重启恢复、退出清理、注册规则勾选开关；AI 拒绝时请求计数为 0 且草稿保留，同意后计数为 1，撤回后再次请求需确认。使用独立数据库和明确标记的本机 AI 替身，不等于真实供应商验收。
+- 已进入隔离测试账号删除页面并核对内容，最终删除动作尚待授权；iPad、Android、物理设备 TestFlight 及完整无障碍矩阵未覆盖。
+- 构建 2 正式签名归档通过，内含公开 HTTPS API，未含本机测试地址或凭据。上传因 Mac 锁定无法读取 Xcode 账号而失败，未取得 Apple 构建 2 处理结果；构建 1 的 VALID 状态不能替代它。
+
+本机证据在忽略目录 `.local/public-beta/validation/` 和 `.local/public-beta/archive/`。后端、隐私页、远端 CI、人工合并与外部 Beta 审核仍须按[公测发布记录](../../backend/deploy/PUBLIC-BETA.md)完成。

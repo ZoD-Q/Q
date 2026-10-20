@@ -5,7 +5,10 @@ import { Check, ChevronRight, Leaf, Orbit, Sparkles, Waves } from 'lucide-react-
 import type { AvatarName, ThemeName } from '@xiaoq/shared';
 import { Action, Divider, Input, Page, Row, Sheet, Type, useDesign } from '../design';
 import { chatErrorMessage } from '../ai-chat/messages';
+import { revokeAiConsent } from '../ai-chat/consent';
+import { openPrivacyPolicy, openSupportEmail, SUPPORT_EMAIL } from '../privacy';
 import { useQAccount } from './account-state';
+import { DeletionSettings } from './deletion-settings';
 
 const avatars = [
   { id: 'orbit', icon: Orbit, zh: '星环', en: 'Orbit' },
@@ -83,7 +86,14 @@ function ProfileEditor() {
           <Row title={text('我的 Q 号与邀请', 'My Q handle and invitation')} right={arrow(user ? `@${user.handle}` : text('登录', 'Sign in'))}
             onPress={() => user ? router.push('/social/add') : account.requestAuth()} />
           <Row title={text('外观', 'Appearance')} right={arrow(text(selectedTheme[1], selectedTheme[2]))} onPress={() => setSheet('theme')} />
-          <Row title={text('语言', 'Language')} right={arrow(locale === 'zh' ? '中文' : 'English')} onPress={() => setSheet('language')} last />
+          <Row title={text('语言', 'Language')} right={arrow(locale === 'zh' ? '中文' : 'English')} onPress={() => setSheet('language')} />
+          <Row title={text('隐私政策', 'Privacy policy')} onPress={() => { void openPrivacyPolicy().catch(() => notify(text('暂时无法打开隐私政策，请稍后重试。', 'Unable to open the privacy policy. Try again later.'))); }} />
+          <Row title={text('反馈与支持', 'Feedback and support')} subtitle={SUPPORT_EMAIL}
+            onPress={() => { void openSupportEmail().catch(() => notify(text(`请发送邮件至 ${SUPPORT_EMAIL}`, `Email ${SUPPORT_EMAIL}`))); }} />
+          <Row title={text('撤回 AI 数据发送许可', 'Revoke AI data-sharing permission')}
+            subtitle={text('下次向 DeepSeek 发送消息前会再次征求同意', 'Ask again before sending another message to DeepSeek')}
+            onPress={() => { revokeAiConsent(); notify(text('已撤回 AI 数据发送许可', 'AI data-sharing permission revoked')); }} />
+          <DeletionSettings />
         </View>
         {user ? <Action kind="ghost" label={text('退出账号', 'Sign out')} disabled={account.authBusy || account.logoutBusy} onPress={() => { close(); void account.logout(); }} /> : null}
       </View>

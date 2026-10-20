@@ -4,6 +4,8 @@ export function chatErrorMessage(code: string, text: Translate) {
     case 'UNAUTHORIZED': return text('登录已过期，请重新登录后继续。', 'Your session expired. Sign in again to continue.');
     case 'INVALID_CREDENTIALS': return text('账号或密码不正确。', 'The handle or password is incorrect.');
     case 'HANDLE_TAKEN': return text('这个账号已被使用，请换一个。', 'This handle is already in use.');
+    case 'CONTENT_BLOCKED': return text('这段内容未通过基础安全检查，请修改后重试。', 'This content did not pass the basic safety check. Edit it and try again.');
+    case 'ACCOUNT_SUSPENDED': return text('此账号已暂停使用，请通过设置中的反馈邮箱联系处理。', 'This account is suspended. Contact the feedback address in Settings.');
     case 'AI_NOT_CONFIGURED': return text('服务端还没有配置 DeepSeek，暂时无法开始对话。', 'DeepSeek is not configured on the server yet.');
     case 'AI_AUTH_ERROR': return text('DeepSeek 服务凭据当前不可用，请联系管理员。', 'The DeepSeek service credentials are unavailable. Contact the administrator.');
     case 'AI_QUOTA_EXCEEDED': return text('DeepSeek 账户额度不足，请联系管理员后重试。', 'The DeepSeek account has insufficient credit. Contact the administrator.');

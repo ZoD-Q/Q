@@ -836,6 +836,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Verify current password and explicit confirmation, delete online private account data, revoke sessions and return a secret-recoverable receipt. Immutable demo ledger and documented minimal records remain. */
+        post: operations["deleteAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/deletions/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Recover only a completed deletion receipt using the original identifier and secret after its Q session has been revoked. Unknown identifiers and wrong secrets return the same 404. */
+        post: operations["getAccountDeletionStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1393,6 +1427,29 @@ export interface components {
             expires_at: string;
             /** Format: date-time */
             server_time: string;
+        };
+        AccountDeletionRequest: {
+            /** Format: uuid */
+            request_id: string;
+            /** @description Exactly 32 random bytes encoded as canonical unpadded base64url. Secret capability, never put in URLs or logs. */
+            recovery_token: string;
+            password: string;
+            /** @enum {string} */
+            confirmation: "DELETE";
+        };
+        AccountDeletionStatusRequest: {
+            /** Format: uuid */
+            request_id: string;
+            /** @description Exactly 32 random bytes encoded as canonical unpadded base64url. Secret capability, never put in URLs or logs. */
+            recovery_token: string;
+        };
+        AccountDeletionReceipt: {
+            /** Format: uuid */
+            request_id: string;
+            /** @enum {string} */
+            status: "deleted";
+            /** Format: date-time */
+            completed_at: string;
         };
     };
     responses: never;
@@ -3341,6 +3398,80 @@ export interface operations {
             /** @description Structured social error; see contracts/social.md. */
             default: {
                 headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Verified completed deletion receipt. */
+            200: {
+                headers: {
+                    /** @description Recovery responses must never be cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionReceipt"];
+                };
+            };
+            /** @description Structured error. A timeout, 401, 404 or ACCOUNT_BUSY is not proof of completed deletion; query the original receipt and retain the original recovery capability. See contracts/account-lifecycle.md. */
+            default: {
+                headers: {
+                    /** @description Recovery responses must never be cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getAccountDeletionStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeletionStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Verified completed deletion receipt. */
+            200: {
+                headers: {
+                    /** @description Recovery responses must never be cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionReceipt"];
+                };
+            };
+            /** @description Structured error. A timeout, 401, 404 or ACCOUNT_BUSY is not proof of completed deletion; query the original receipt and retain the original recovery capability. See contracts/account-lifecycle.md. */
+            default: {
+                headers: {
+                    /** @description Recovery responses must never be cached. */
                     "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };

@@ -1,5 +1,5 @@
 import type { SocialReportReceipt, SocialReportRequest } from '@xiaoq/shared';
-import { bool, id, integer, nullable, record, SocialError, string } from './core';
+import { bool, createChunkRegistry, id, integer, nullable, record, SocialError, string } from './core';
 
 export type ReportMeta = { ownerId: string; clientReportId: string; userId: string; messageId: string | null; includeEvidence: boolean; reasonHash: string };
 export type PendingReport = ReportMeta & { reason: string | null };
@@ -42,9 +42,13 @@ export function isFinalReportRejection(error: unknown): boolean {
 /** One unresolved report per owner. Native stores reason encrypted; web stores only its digest. */
 export function createReportStore(storage: Storage, hash: Hash, persistReason: boolean) {
   let tail: Promise<unknown> = Promise.resolve();
+  const blocked = new Set<string>();
+  const registry = createChunkRegistry(storage, 'q.social.report.index.v1');
   const listeners = new Set<() => void>();
   const run = <T,>(action: () => Promise<T>): Promise<T> => { const next = tail.then(action); tail = next.catch(() => undefined); return next; };
   const base = (owner: string) => `q.social.report.v1.${id(owner)}`;
+  const retiredKey = (owner: string) => `q.social.report.deleted.${id(owner)}`;
+  const retired = async (owner: string) => blocked.has(owner) || await storage.get(retiredKey(owner)) !== null;
   const readManifest = async (owner: string): Promise<(ReportMeta & { chunks: number }) | null> => {
     const raw = await storage.get(base(owner)); if (!raw) return null;
     const value = record(JSON.parse(raw)), meta = decodeReportMeta(value), chunks = integer(value.chunks, 4);
@@ -53,11 +57,19 @@ export function createReportStore(storage: Storage, hash: Hash, persistReason: b
   };
   const announce = () => { for (const listener of listeners) { try { listener(); } catch { /* A subscriber cannot break committed storage. */ } } };
   const removeChunks = async (owner: string, client: string, count: number) => { for (let i = 0; i < count; i++) await storage.remove(`${base(owner)}.${client}.${i}`); };
+  const track = async (owner: string, value: Awaited<ReturnType<typeof readManifest>>) => {
+    if (value) await registry.add(owner, { id: value.clientReportId, version: value.clientReportId, count: value.chunks });
+  };
   return {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    meta: (owner: string) => run(async () => { const value = await readManifest(owner); return value ? decodeReportMeta(value) : null; }),
+    meta: (owner: string) => run(async () => {
+      if (await retired(owner)) return null;
+      const value = await readManifest(owner); await track(owner, value); return value ? decodeReportMeta(value) : null;
+    }),
     read: (owner: string) => run(async (): Promise<PendingReport | null> => {
+      if (await retired(owner)) return null;
       const value = await readManifest(owner); if (!value) return null;
+      await track(owner, value);
       let reason: string | null = null;
       if (value.chunks > 0) {
         reason = '';
@@ -67,20 +79,29 @@ export function createReportStore(storage: Storage, hash: Hash, persistReason: b
       return { ...decodeReportMeta(value), reason };
     }),
     save: (owner: string, request: SocialReportRequest) => run(async (): Promise<PendingReport> => {
+      if (await retired(owner)) throw new SocialError('ACCOUNT_DELETED');
       const reason = reportReason(request.reason), reasonHash = await hash(reason);
       const meta = decodeReportMeta({ ownerId: owner, clientReportId: request.client_report_id, userId: request.user_id, messageId: request.message_id, includeEvidence: request.include_evidence, reasonHash });
       const old = await readManifest(owner);
       if (old) {
+        await track(owner, old);
         if (JSON.stringify(decodeReportMeta(old)) !== JSON.stringify(meta)) throw new SocialError('PENDING_REPORT_EXISTS');
         return { ...meta, reason };
       }
       const characters = persistReason ? Array.from(reason) : [], chunks: string[] = [];
       for (let i = 0; i < characters.length; i += 400) chunks.push(characters.slice(i, i + 400).join(''));
+      const entry = { id: meta.clientReportId, version: meta.clientReportId, count: chunks.length };
+      await registry.add(owner, entry);
       try {
         for (let i = 0; i < chunks.length; i++) await storage.set(`${base(owner)}.${meta.clientReportId}.${i}`, chunks[i]);
         await storage.set(base(owner), JSON.stringify({ ...meta, chunks: chunks.length }));
       } catch (failure) {
-        try { const installed = await readManifest(owner); if (installed?.clientReportId !== meta.clientReportId) await removeChunks(owner, meta.clientReportId, chunks.length); } catch { /* Preserve uncertain manifest commits for lookup recovery. */ }
+        try {
+          const installed = await readManifest(owner);
+          if (installed?.clientReportId !== meta.clientReportId) {
+            await removeChunks(owner, meta.clientReportId, chunks.length); await registry.remove(owner, entry);
+          }
+        } catch { /* Preserve uncertain manifest commits for lookup recovery. */ }
         throw failure;
       }
       announce(); return { ...meta, reason };
@@ -88,7 +109,29 @@ export function createReportStore(storage: Storage, hash: Hash, persistReason: b
     remove: (owner: string, expectedId: string) => run(async () => {
       const value = await readManifest(owner);
       if (!value || value.clientReportId !== expectedId) return;
-      await storage.remove(base(owner)); await removeChunks(owner, value.clientReportId, value.chunks); announce();
+      await track(owner, value);
+      await storage.remove(base(owner)); await removeChunks(owner, value.clientReportId, value.chunks);
+      await registry.remove(owner, { id: value.clientReportId, version: value.clientReportId, count: value.chunks }); announce();
     }),
+    purgeOwner: (owner: string) => {
+      id(owner); blocked.add(owner);
+      return run(async () => {
+        await storage.set(retiredKey(owner), 'deleted');
+        // Unlike conversation outboxes, this legacy manifest has one known key per owner.
+        const legacy = await readManifest(owner);
+        if (legacy) {
+          // Keep the manifest until its chunks are gone, so a failed purge remains retryable
+          // even when a full directory cannot accept an older unindexed record.
+          await removeChunks(owner, legacy.clientReportId, legacy.chunks);
+          await storage.remove(base(owner));
+        }
+        for (const entry of await registry.entries(owner)) {
+          await removeChunks(owner, entry.id, entry.count);
+          await storage.remove(base(owner));
+          await registry.remove(owner, entry);
+        }
+        announce();
+      });
+    },
   };
 }

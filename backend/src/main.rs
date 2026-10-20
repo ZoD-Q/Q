@@ -33,6 +33,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut state = AppState::new(pool.clone())
         .await
         .map_err(|e| format!("Initialization failed: {}", e.code))?;
+    state.trusted_client_ips = xiaoq_backend::client_ip::TrustedClientIpPolicy::parse(
+        &env::var("Q_TRUSTED_PROXY_IPS").unwrap_or_default(),
+    )?;
     state.video = VideoRuntime::from_env()?.map(Arc::new);
     // Environment-backed provider configuration is deliberately limited to executable startup.
     state.ai = AiRuntime::from_env()?.map(Arc::new);

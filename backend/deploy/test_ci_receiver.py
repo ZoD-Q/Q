@@ -13,6 +13,7 @@ import stat
 import sys
 from unittest.mock import patch
 import ci_receiver as receiver
+from test_package_release import elf_fixture
 
 SHA = 'a' * 40
 
@@ -45,12 +46,13 @@ def archive(entries):
     return out.getvalue()
 
 
-def api_entries():
-    elf = bytearray(64)
-    elf[:6] = b'\x7fELF\x02\x01'
-    elf[18:20] = b'\x3e\x00'
-    contents = {'xiaoq-backend': bytes(elf), 'SOURCE_COMMIT': (SHA + '\n').encode(),
+def api_entries(companion=None, provenance=None):
+    contents = {'xiaoq-backend': elf_fixture(), 'SOURCE_COMMIT': (SHA + '\n').encode(),
                 'MIGRATIONS': ('1 ' + 'b' * 96 + '\n').encode()}
+    if companion is not None:
+        contents['account-admin'] = companion
+    if provenance is not None:
+        contents['BUILD_PROVENANCE'] = provenance
     manifest = ''.join(hashlib.sha256(content).hexdigest() + '  ' + name + '\n'
                        for name, content in contents.items()).encode()
     contents['SHA256SUMS'] = manifest
@@ -124,6 +126,43 @@ class ArtifactTests(unittest.TestCase):
     def test_valid_api(self):
         files = receiver.unpack(archive(api_entries()), 'api', SHA)
         self.assertEqual(files['q-release/SOURCE_COMMIT'].decode().strip(), SHA)
+
+    def test_optional_admin_and_existing_provenance_are_exactly_manifested(self):
+        companion = elf_fixture(with_sections=True)
+        files = receiver.unpack(archive(api_entries(companion, b'{"source":"reviewed"}\n')), 'api', SHA)
+        self.assertEqual(files['q-release/account-admin'], companion)
+        self.assertIn('q-release/BUILD_PROVENANCE', files)
+        self.assertEqual(len(files), 6)
+
+    def test_admin_missing_checksum_tamper_or_missing_payload_is_rejected(self):
+        entries = api_entries(elf_fixture())
+        for mode in ('missing-hash', 'tampered', 'missing-payload'):
+            modified = []
+            for name, data, kind in entries:
+                if mode == 'missing-payload' and name == 'q-release/account-admin':
+                    continue
+                if mode == 'tampered' and name == 'q-release/account-admin':
+                    data += b'tampered'
+                if mode == 'missing-hash' and name == 'q-release/SHA256SUMS':
+                    data = b''.join(line + b'\n' for line in data.splitlines() if not line.endswith(b'  account-admin'))
+                modified.append((name, data, kind))
+            with self.subTest(mode=mode), self.assertRaises(receiver.Refused):
+                receiver.unpack(archive(modified), 'api', SHA)
+
+    def test_admin_wrong_architecture_or_format_is_rejected_even_with_valid_hash(self):
+        for payload in (elf_fixture(machine=183), b'\x7fELF', b'#!/bin/sh\nexit 0\n'):
+            with self.subTest(size=len(payload)), self.assertRaisesRegex(receiver.Refused, 'invalid_linux_amd64_binary'):
+                receiver.unpack(archive(api_entries(payload)), 'api', SHA)
+
+    def test_admin_does_not_allow_additional_helpers_links_or_duplicates(self):
+        entries = api_entries(elf_fixture())
+        for entry in (
+                ('q-release/account-admin-helper', b'bad', tarfile.REGTYPE),
+                ('q-release/account-admin', b'', tarfile.SYMTYPE),
+                ('q-release/account-admin', elf_fixture(), tarfile.REGTYPE),
+        ):
+            with self.subTest(name=entry[0], kind=entry[2]), self.assertRaises(receiver.Refused):
+                receiver.unpack(archive(entries + [entry]), 'api', SHA)
 
     def test_executable_payload_not_allowed(self):
         entries = api_entries() + [('q-release/install.sh', b'root-code', tarfile.REGTYPE)]
@@ -219,6 +258,40 @@ class LifecycleTests(unittest.TestCase):
             self.assertFalse(result['deployment_performed'])
             self.assertTrue(result['readiness_verified'])
             mutate.assert_not_called()
+
+
+class StagingTests(unittest.TestCase):
+    def test_companion_is_only_staged_readonly_and_never_inherited_from_old_release(self):
+        for companion in (None, elf_fixture(with_sections=True)):
+            with self.subTest(companion=companion is not None), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                old, new, runtime = root / 'old', root / 'new', root / 'runtime'
+                (old / 'deploy/artifact').mkdir(parents=True)
+                (old / 'deploy/artifact/account-admin').write_bytes(b'stale companion')
+                (old / 'deploy/artifact/xiaoq-backend').write_bytes(b'stale API')
+                (old / 'deploy/Dockerfile').write_text('trusted unchanged Dockerfile\n')
+                (old / 'deploy/compose.yaml').write_text('trusted unchanged compose\n')
+                runtime.mkdir()
+                for name in ('backup.sh', 'backup-policy.sh', 'health-check.sh'):
+                    (runtime / name).write_text('#!/bin/sh\n# trusted helper\n')
+                files = receiver.unpack(archive(api_entries(companion)), 'api', SHA)
+                with patch.object(receiver, 'RUNTIME', runtime), patch.object(receiver, 'run') as run:
+                    receiver.stage_api_release(old, new, files)
+                    run.assert_not_called()
+                artifact = new / 'deploy/artifact'
+                expected = {'xiaoq-backend'} | ({'account-admin'} if companion is not None else set())
+                self.assertEqual({path.name for path in artifact.iterdir()}, expected)
+                self.assertEqual((artifact / 'xiaoq-backend').read_bytes(), elf_fixture())
+                self.assertEqual(stat.S_IMODE((artifact / 'xiaoq-backend').stat().st_mode), 0o555)
+                if companion is not None:
+                    self.assertEqual((artifact / 'account-admin').read_bytes(), companion)
+                    self.assertEqual(stat.S_IMODE((artifact / 'account-admin').stat().st_mode), 0o555)
+                self.assertEqual((old / 'deploy/artifact/account-admin').read_bytes(), b'stale companion')
+                self.assertEqual((new / 'deploy/Dockerfile').read_bytes(), (old / 'deploy/Dockerfile').read_bytes())
+                self.assertFalse((new / 'q-release/account-admin').exists())
+                self.assertEqual((new / 'q-release/SHA256SUMS').read_bytes(), files['q-release/SHA256SUMS'])
+                with self.assertRaisesRegex(receiver.Refused, 'release_already_exists'):
+                    receiver.stage_api_release(old, new, files)
 
 
 class ActivationTests(unittest.TestCase):
