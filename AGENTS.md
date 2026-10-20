@@ -164,7 +164,7 @@ GitLab 流水线须覆盖上述适用的自动化检查：每次推送 `Mandow` 
 
 **CI 配置：根目录 `.gitlab-ci.yml`。** 推送 `Mandow` / `hera` / 默认分支、MR 更新及这些分支的手动触发均运行检查；已有 MR 时使用 MR 流水线避免重复运行。每次运行五类自动验证（后端 17/18 矩阵，共六个自动作业）：`source-check` 检查提交差异，`web-check` 检查管理原型类型、规范、纯逻辑与浏览器交互、发布工具并保存同提交静态制品；`mobile-check` 检查类型、规范、功能测试、接口生成一致性与 Web 导出；`backend-check` 检查 Rust 格式、静态分析、单元测试及独立 PostgreSQL 服务中的身份/账本、社交、备份恢复、视频、AI、插件和 AI 插件替身集成测试。备份恢复测试使用与 17/18 矩阵匹配的官方 PostgreSQL 客户端。`deploy-check` 检查发布打包、部署客户端、服务端接收器和管理网页发布工具。CI 不代表 iOS/Android 真机或供应商实账验收。
 
-`package-release` 在受保护 main 检查通过后自动构建当前流水线的 Linux amd64 发布包，包含源码提交、SQLx 迁移 SHA384 清单和文件校验和；main 不允许覆盖源码版本。其他允许分支仍可手动打包已合入 main 的历史版本。打包不会部署。
+`package-release` 在受保护 main 检查通过后自动构建当前流水线的 Linux amd64 发布包，包含源码提交、SQLx 迁移 SHA384 清单和文件校验和；main 不允许覆盖源码版本。构建不依赖 Runner 的宿主架构或 `amd64` 标签：固定 cargo-zigbuild/Zig 工具版本及官方 Linux wheel 校验和，显式交叉构建 `x86_64-unknown-linux-gnu.2.36`，打包前校验 ELF64、小端、x86_64 与加载器。其他允许分支仍可手动打包已合入 main 的历史版本。打包不会部署。
 
 `deploy-staging-api` / `deploy-staging-admin` 仅出现在受保护 main，所有检查与打包通过后由有权限的人手动点击。两个任务串行发布至现有内部联调环境，执行健康与实际版本校验，GitLab 分别记录 `staging/api` 和 `staging/admin`。未点击时 main 流水线显示等待手动任务；MR 不含部署任务，合并继续人工处理。设置、受限账号、迁移失败处理与验收边界见 [GitLab 部署流程](backend/deploy/gitlab-cd.md)。
 

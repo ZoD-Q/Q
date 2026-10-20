@@ -24,6 +24,8 @@
 
 先检查现有系统服务、端口、磁盘与 Docker 状态；不修改现有公网 Nginx，不覆盖未知目录。发布包由 `package-release.sh` 在构建环境生成，业务服务器不编译 Rust。解压后核对 `SOURCE_COMMIT`，在包目录执行 `sha256sum -c SHA256SUMS`，然后复制二进制到部署目录的 `artifact/`。
 
+`package-release.sh` 使用 `cargo zigbuild` 显式构建 `x86_64-unknown-linux-gnu.2.36`，需要该 Rust target 和 cargo-zigbuild/Zig。CI 在独立 Python 环境安装 [固定版本及 wheel 哈希](release-tools.requirements.txt)，支持 Linux ARM64 与 x86_64 构建宿主；它们只服务于发布构建，不随业务镜像安装。脚本验证输出为 Linux x86_64 ELF 程序，再生成原有源码、迁移与文件摘要。不能通过去掉架构检查来打包宿主 ARM 程序。
+
 确认目录、配置和当前链接准备完成后，以 root 执行：
 
 ```sh
