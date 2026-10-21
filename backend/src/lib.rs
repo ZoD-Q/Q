@@ -20,6 +20,7 @@ use tower_http::cors::CorsLayer;
 
 pub mod account_lifecycle;
 pub mod ai;
+pub mod ai_history;
 pub mod client_ip;
 pub mod content_policy;
 pub mod error;
@@ -184,6 +185,16 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
                 .route("/v1/ai/status", get(ai::status))
                 .route("/v1/ai/chat", post(ai::chat))
                 .layer(DefaultBodyLimit::max(128 * 1024)),
+        )
+        .merge(
+            Router::new()
+                .route("/v1/ai/conversations", get(ai_history::list))
+                .route(
+                    "/v1/ai/conversations/{id}",
+                    get(ai_history::detail).post(ai_history::save),
+                )
+                .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
+                .layer(middleware::from_fn(private_response)),
         )
         .merge(plugins::routes())
         .layer(cors)

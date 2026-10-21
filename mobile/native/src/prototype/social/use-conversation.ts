@@ -4,6 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import { decodeEphemeralState, decodeMessage, decodeMessagePage, decodeMutation, decodeOpened, type SocialMessage } from './api';
 import { createDeadline, createPrivacyGate, id, isFinalSendRejection, remainingMs, restoreRejectedDraft, samePendingSend, sendPayload, SocialError, validateText, type Deadline, type EphemeralSeconds, type PendingSend, type RequestStamp } from './core';
+import { mergeHistory, validateForwardPage } from './history';
 import { outboxStore } from './outbox-store';
 import { socialErrorCode, useSocial } from './state';
 
@@ -18,6 +19,7 @@ export function useConversation(conversationId: string) {
   const [error, setError] = useState(''), [hasMore, setHasMore] = useState(false), [loading, setLoading] = useState(true);
   const [clock, setClock] = useState(() => ({ mono: performance.now(), wall: Date.now() }));
   const gate = useRef(createPrivacyGate()), controllers = useRef(new Set<AbortController>());
+  const initialized = useRef(false), olderLoading = useRef(false);
   const after = useRef(0), list = useRef<SocialMessage[]>([]), pendingRef = useRef<PendingSend | null>(null);
   const loadingRef = useRef(false), sending = useRef(false), reading = useRef(false), readThrough = useRef(0);
   const desiredRead = useRef(0), lastReadAt = useRef(-Infinity);
@@ -31,7 +33,7 @@ export function useConversation(conversationId: string) {
     gate.current.invalidate();
     for (const controller of controllers.current) controller.abort();
     controllers.current.clear(); opening.current.clear();
-    list.current = []; after.current = 0; loadingRef.current = false; sending.current = false; reading.current = false; restoring.current = false; readThrough.current = 0; desiredRead.current = 0; lastReadAt.current = -Infinity;
+    list.current = []; after.current = 0; initialized.current = false; olderLoading.current = false; loadingRef.current = false; sending.current = false; reading.current = false; restoring.current = false; readThrough.current = 0; desiredRead.current = 0; lastReadAt.current = -Infinity;
     pendingRef.current = null; visibleBodies.current = {}; setPending(null); setMessages([]); setOpened({}); setDraft(''); setSeconds(null); setError(''); setBusy(false); setLoading(false); setHasMore(false);
   }, []);
   const call = useCallback(async <T,>(path: string, decode: (value: unknown) => T, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
@@ -44,15 +46,20 @@ export function useConversation(conversationId: string) {
     if (!current(stamp) || loadingRef.current) return;
     try { id(conversationId); } catch { setError('INVALID_CONVERSATION'); setLoading(false); return; }
     loadingRef.current = true; setLoading(true);
-    const cursor = after.current;
     try {
-      const page = await call(`/v1/social/conversations/${conversationId}/messages?after_seq=${cursor}&limit=100`, decodeMessagePage);
-      if (!current(stamp)) return;
-      if (page.items.some(item => item.conversation_id !== conversationId || item.seq <= cursor) || page.next_after_seq < cursor || (!page.items.length && page.next_after_seq !== cursor) || (page.has_more && page.next_after_seq <= cursor)) throw new SocialError('INVALID_RESPONSE');
-      const known = new Map(list.current.map(item => [item.id, item]));
-      for (const item of page.items) known.set(item.id, item);
-      list.current = [...known.values()].sort((a, b) => a.seq - b.seq);
-      setMessages(list.current); after.current = page.next_after_seq; setHasMore(page.has_more); setError('');
+      // Poll from the last fetched cursor, never from snapshot.last_seq or a send result.
+      // Bound each catch-up pass; the next poll resumes exactly where this pass ends.
+      for (let pass = 0; pass < 5; pass++) {
+        const initial = !initialized.current, cursor = after.current;
+        const page = await call(`/v1/social/conversations/${conversationId}/messages?${initial ? 'latest=true' : `after_seq=${cursor}`}&limit=100`, decodeMessagePage);
+        if (!current(stamp)) return;
+        if (!initial) validateForwardPage(page.items, cursor, page.next_after_seq, page.has_more);
+        list.current = mergeHistory(list.current, page.items, conversationId);
+        setMessages(list.current); after.current = page.next_after_seq;
+        if (initial) { initialized.current = true; setHasMore(page.has_older); }
+        setError('');
+        if (initial || !page.has_more) break;
+      }
       const envelopes = list.current.filter(item => item.kind === 'ephemeral' && !item.expired);
       const visibleIds = Object.keys(visibleBodies.current);
       const candidates = envelopes.filter(item => !visibleIds.includes(item.id));
@@ -80,7 +87,21 @@ export function useConversation(conversationId: string) {
         visibleBodies.current = bodies; setOpened(bodies);
       }
     } catch (failure) { if (current(stamp)) setError(socialErrorCode(failure)); }
-    finally { if (current(stamp)) { loadingRef.current = false; setLoading(false); } }
+    finally { if (current(stamp)) { loadingRef.current = false; setLoading(olderLoading.current); } }
+  }, [call, conversationId, current, ticket]);
+
+  const loadOlder = useCallback(async () => {
+    const stamp = ticket(), before = list.current[0]?.seq;
+    if (!current(stamp) || !initialized.current || !before || olderLoading.current) return;
+    olderLoading.current = true; setLoading(true);
+    try {
+      const page = await call(`/v1/social/conversations/${conversationId}/messages?before_seq=${before}&limit=100`, decodeMessagePage);
+      if (!current(stamp)) return;
+      if (page.items.some(item => item.seq >= before) || (page.has_older && !page.items.length)) throw new SocialError('INVALID_RESPONSE');
+      list.current = mergeHistory(list.current, page.items, conversationId);
+      setMessages(list.current); setHasMore(page.has_older); setError('');
+    } catch (failure) { if (current(stamp)) setError(socialErrorCode(failure)); }
+    finally { if (current(stamp)) { olderLoading.current = false; setLoading(loadingRef.current); } }
   }, [call, conversationId, current, ticket]);
 
   const recover = useCallback(async () => {
@@ -239,5 +260,5 @@ export function useConversation(conversationId: string) {
     }, 250);
     return () => clearInterval(timer);
   }, []);
-  return { messages, opened, draft, setDraft, seconds, setSeconds, pending, busy, error, hasMore, loading, clock, sync, recover, send, open, markRead, discardUnsent };
+  return { messages, opened, draft, setDraft, seconds, setSeconds, pending, busy, error, hasMore, loading, clock, sync, loadOlder, recover, send, open, markRead, discardUnsent };
 }

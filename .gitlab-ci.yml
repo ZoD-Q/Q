@@ -161,6 +161,7 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --example beauty_mcp
     - cargo test --locked --manifest-path backend/Cargo.toml --test postgres -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --test account_lifecycle -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --test ai_history -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --test social -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --test social_backup -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored

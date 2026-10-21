@@ -217,6 +217,8 @@ export function ChatPage({ controller, onOpenPlugins }: {
           </View>
         </View>
       </View>
+      {controller.historyBusy ? <Type size={12} muted>{text("正在读取历史…", "Loading history…")}</Type> : null}
+      {controller.historyError ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}><Type size={13} color={colors.danger}>{text("聊天记录尚未同步，请重试；版本冲突时请重新登录加载服务器记录。", "History is not synced. Retry; for a version conflict, sign in again to load server history.")} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /><Action kind="ghost" label={text("重载云端版本（替换本机未保存内容）", "Reload cloud version (replace unsaved changes)")} disabled={controller.busy || controller.historyBusy} onPress={controller.reloadCloud} /></View> : null}
       {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
       {controller.authBusy || !controller.status?.configured ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
@@ -457,7 +459,9 @@ export function HistoryPage({
   items,
   onOpen,
   onNew,
+  controller,
 }: {
+  controller: ChatController;
   items: Conversation[];
   onOpen: (id: string) => void;
   onNew: () => void;
@@ -478,6 +482,8 @@ export function HistoryPage({
         />
       }
     >
+      {controller.historyError ? <><Type color={colors.danger}>{text("历史加载或保存失败", "History load or save failed")} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /></> : null}
+      <Action kind="ghost" label={controller.historyBusy ? text("正在加载…", "Loading…") : text("刷新历史", "Refresh history")} disabled={controller.historyBusy} onPress={() => { void controller.loadHistory(); }} />
       <Input
         label={text("搜索对话", "Search conversations")}
         placeholder={text("搜索关键词", "Search a thought")}
@@ -491,8 +497,8 @@ export function HistoryPage({
             icon={SquarePen}
             title={item.title}
             subtitle={text(
-              `${item.messages.length} 条消息`,
-              `${item.messages.length} messages`,
+              item.messages.length ? `${item.messages.length} 条消息` : "点击加载记录",
+              item.messages.length ? `${item.messages.length} messages` : "Open to load messages",
             )}
             onPress={() => onOpen(item.id)}
             last={index === filtered.length - 1}
@@ -517,6 +523,7 @@ export function HistoryPage({
           </View>
         ) : null}
       </View>
+      {controller.historyCursor ? <Action kind="ghost" label={text("加载更多历史", "Load more history")} disabled={controller.historyBusy} onPress={() => { void controller.loadHistory(true); }} /> : null}
     </Page>
   );
 }

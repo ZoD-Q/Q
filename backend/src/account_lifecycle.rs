@@ -282,6 +282,7 @@ async fn purge_private_data(
         "INSERT INTO account_erased_operations(user_id,kind,idempotency_key,operation_id) SELECT user_id,'video',idempotency_key,id FROM video_jobs WHERE user_id=$1 ON CONFLICT DO NOTHING",
         "INSERT INTO account_erased_operations(user_id,kind,idempotency_key,operation_id) SELECT user_id,'plugin',idempotency_key,id FROM plugin_invocations WHERE user_id=$1 ON CONFLICT DO NOTHING",
         "DELETE FROM sessions WHERE user_id=$1",
+        "DELETE FROM ai_conversations WHERE user_id=$1",
         "DELETE FROM plugin_oauth_tokens WHERE user_id=$1",
         "DELETE FROM plugin_oauth_attempts WHERE user_id=$1",
         "DELETE FROM plugin_invocations WHERE user_id=$1",

@@ -870,6 +870,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ai/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Account-owned durable history, stable creation-time/UUID descending pagination; up to 100 conversations. */
+        get: operations["listAiConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/conversations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getAiConversation"];
+        put?: never;
+        /** @description Full display snapshot max 4 MiB. CAS revision, zero creates. Replay latest request_id with identical payload returns same revision; older or stale saves conflict. Tool metadata never authorizes execution. Account deletion erases history. */
+        post: operations["saveAiConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1383,6 +1419,9 @@ export interface components {
             has_more: boolean;
             /** Format: date-time */
             server_time: string;
+            /** Format: int64 */
+            next_before_seq: number;
+            has_older: boolean;
         };
         SocialSendRequest: {
             /** Format: uuid */
@@ -1450,6 +1489,65 @@ export interface components {
             status: "deleted";
             /** Format: date-time */
             completed_at: string;
+        };
+        AiConversationMessage: {
+            id: string;
+            /** @enum {string} */
+            role: "user" | "assistant";
+            /** @description At most 1 MiB UTF-8. */
+            content: string;
+            /** @enum {string} */
+            status: "pending" | "streaming" | "complete" | "incomplete" | "cancelled" | "error" | "tool";
+            errorCode?: string;
+            /** @enum {string} */
+            model?: "deepseek-flash" | "deepseek-v4-pro";
+            thinking?: boolean;
+            finishReason?: components["schemas"]["AiFinishReason"];
+            usage?: components["schemas"]["AiUsage"];
+            contextLimited?: boolean;
+            /** Format: uuid */
+            toolProposalId?: string;
+            toolInvocationIds?: string[];
+        };
+        AiConversationPlugin: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            endpoint_url: string;
+        };
+        AiConversationSave: {
+            /** Format: uuid */
+            request_id: string;
+            /** Format: int64 */
+            expected_revision: number;
+            title: string;
+            messages: components["schemas"]["AiConversationMessage"][];
+            plugin?: components["schemas"]["AiConversationPlugin"];
+        };
+        AiConversationSummary: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AiConversation: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            messages: components["schemas"]["AiConversationMessage"][];
+            plugin?: components["schemas"]["AiConversationPlugin"];
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AiConversationPage: {
+            items: components["schemas"]["AiConversationSummary"][];
+            /** Format: uuid */
+            next_cursor: string | null;
         };
     };
     responses: never;
@@ -3081,6 +3179,10 @@ export interface operations {
             query?: {
                 after_seq?: number;
                 limit?: number;
+                /** @description Latest page; mutually exclusive with after_seq and before_seq. */
+                latest?: boolean;
+                /** @description Exclusive older page; mutually exclusive with after_seq and latest=true. */
+                before_seq?: number;
             };
             header?: never;
             path: {
@@ -3473,6 +3575,104 @@ export interface operations {
                 headers: {
                     /** @description Recovery responses must never be cached. */
                     "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listAiConversations: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConversationPage"];
+                };
+            };
+            /** @description Safe structured local error, before opening a stream. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getAiConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConversation"];
+                };
+            };
+            /** @description Safe structured local error, before opening a stream. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    saveAiConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiConversationSave"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConversation"];
+                };
+            };
+            /** @description Safe structured local error, before opening a stream. See contracts/api.md. */
+            default: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
