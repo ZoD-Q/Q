@@ -439,3 +439,7 @@ async fn database_rejects_mutations_unbalanced_posts_and_seed_recredits() {
     h.assert_balanced().await;
     h.finish().await;
 }
+
+// Bank simulations obey the same ledger invariants and run in the existing PG CI job.
+#[path = "bank_plugins.rs"]
+mod bank_plugins;

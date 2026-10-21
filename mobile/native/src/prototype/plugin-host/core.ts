@@ -1,5 +1,6 @@
 import { WorkbenchError } from '../api-workbench/core';
 import { normalizeOwnerName, type EntryKind, type PluginEntryIntent } from '../plugin-workbench/materials';
+import { BANKS } from '../banking/catalog';
 
 export type PluginEntryIntentOutcome = 'discovered' | 'dismissed';
 type PluginEntryIntentEvent =
@@ -40,12 +41,13 @@ export type PluginConnection = {
   id: string; card_url: string; name: string; title: string; description: string; version: string;
   endpoint_url: string; revision: number; status: string; auth_status: string; last_error_code: string | null;
   owner_name?: string | null;
+  connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null;
   created_at: string; updated_at: string; pending_update: boolean; pending_update_details?: unknown;
 };
 export type PluginTool = { name: string; title?: string | null; description: string; inputSchema: JsonObject; outputSchema?: unknown; annotations?: unknown; _meta?: unknown };
 export type Candidate = { candidate_id: string; card_url: string; endpoint_url: string; name: string; title: string; description: string; version: string; owner_name?: string | null };
 export type Discovery = { discovery_id: string; expires_at: string; candidates: Candidate[] };
-export type PluginInvocation = { id: string; connection_id: string; connection_revision: number; connection_title: string; card_url: string; endpoint_url: string; owner_name?: string | null; tool_name: string; arguments: JsonObject; status: string; result: unknown; error_code: string | null; created_at: string; updated_at: string; expires_at: string };
+export type PluginInvocation = { id: string; connection_id: string; connection_revision: number; connection_title: string; card_url: string; endpoint_url: string; owner_name?: string | null; connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null; tool_name: string; arguments: JsonObject; status: string; result: unknown; error_code: string | null; created_at: string; updated_at: string; expires_at: string };
 export type ResourceLink = { type: 'resource_link'; uri: string; name: string; title?: string; description?: string; mimeType?: string };
 export type PluginContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string } | ResourceLink;
 export type PluginResult = { content: PluginContent[]; structuredContent?: unknown; isError?: boolean };
@@ -55,13 +57,47 @@ const str = (value: unknown, max = 4096): value is string => typeof value === 's
 const toolName = (value: unknown): value is string => str(value, 512) && value.length > 0 && Array.from(value).length <= 128;
 const fail = (): never => { throw new WorkbenchError('INVALID_RESPONSE'); };
 const nullable = (value: unknown): value is string | null => value === null || str(value);
+
+type PluginIdentity = { endpoint_url: string; card_url?: string; connection_kind?: string; builtin_service_id?: string | null };
+/** Only a service identity returned by Q can select the native bank renderer. */
+export function bankIdForPlugin(value: PluginIdentity | null | undefined): string | null {
+  if (!value || value.connection_kind !== 'bank_demo' || typeof value.builtin_service_id !== 'string') return null;
+  const bank = BANKS.find(item => value.builtin_service_id === `q.bank-demo.${item.id}`);
+  if (!bank || value.endpoint_url !== `urn:q:bank-demo:${bank.id}` || (value.card_url !== undefined && value.card_url !== value.endpoint_url)) return null;
+  return bank.id;
+}
+
+export function decodePluginIdentity(value: JsonObject): { connection_kind: 'remote_mcp' | 'bank_demo'; builtin_service_id: string | null } {
+  const kind = value.connection_kind ?? 'remote_mcp';
+  if (kind === 'bank_demo') {
+    if (!bankIdForPlugin(value as PluginIdentity)) return fail();
+    return { connection_kind: kind, builtin_service_id: value.builtin_service_id as string };
+  }
+  if (kind !== 'remote_mcp' || value.builtin_service_id != null
+    || (typeof value.endpoint_url === 'string' && /^urn:/i.test(value.endpoint_url))
+    || (typeof value.card_url === 'string' && /^urn:/i.test(value.card_url))) return fail();
+  return { connection_kind: 'remote_mcp', builtin_service_id: null };
+}
+
+export type BankTransferArguments = { sourceBankId: string; destinationBankId: string; recipient: 'self' | 'demo_chen'; amountMinor: number; memo: string };
+export function bankTransferArguments(invocation: PluginInvocation): BankTransferArguments | null {
+  const sourceBankId = bankIdForPlugin(invocation), args = invocation.arguments;
+  if (!sourceBankId || invocation.tool_name !== 'bank_transfer' || !record(args)
+    || !BANKS.some(item => item.id === args.to_bank_id) || !['self', 'demo_chen'].includes(String(args.recipient))
+    || typeof args.amount_minor !== 'number' || !Number.isSafeInteger(args.amount_minor) || args.amount_minor <= 0
+    || (args.memo !== undefined && (typeof args.memo !== 'string' || Array.from(args.memo).length > 120 || /[\u0000-\u001f\u007f]/.test(args.memo)))
+    || Object.keys(args).some(key => !['to_bank_id', 'recipient', 'amount_minor', 'memo'].includes(key))) return null;
+  return { sourceBankId, destinationBankId: args.to_bank_id as string, recipient: args.recipient as 'self' | 'demo_chen', amountMinor: args.amount_minor, memo: typeof args.memo === 'string' ? args.memo : '' };
+}
 export function decodePluginStatus(value: unknown) {
   if (!record(value) || typeof value.available !== 'boolean' || typeof value.oauth_configured !== 'boolean' || !str(value.protocol_version, 30)) return fail();
   return { available: value.available, oauth_configured: value.oauth_configured, protocol_version: value.protocol_version };
 }
 export function decodePluginConnection(value: unknown): PluginConnection {
   if (!record(value) || !isUuid(value.id) || !['card_url', 'name', 'title', 'description', 'version', 'endpoint_url', 'status', 'auth_status', 'created_at', 'updated_at'].every(key => str(value[key], 16000)) || !Number.isSafeInteger(value.revision) || typeof value.pending_update !== 'boolean' || !nullable(value.last_error_code)) return fail();
-  return { ...value, owner_name: normalizeOwnerName(value.owner_name) } as PluginConnection;
+  const identity = decodePluginIdentity(value);
+  if (identity.connection_kind === 'bank_demo' && value.auth_status !== 'anonymous') return fail();
+  return { ...value, ...identity, owner_name: normalizeOwnerName(value.owner_name) } as PluginConnection;
 }
 export function decodeTool(value: unknown): PluginTool {
   if (!record(value) || !toolName(value.name) || !str(value.description, 16000) || !record(value.inputSchema) || (value.title !== undefined && value.title !== null && !str(value.title, 1024))) return fail();
@@ -78,7 +114,7 @@ export function decodeDiscovery(value: unknown): Discovery {
 export function decodeInvocation(value: unknown): PluginInvocation {
   if (!record(value) || !isUuid(value.id) || !isUuid(value.connection_id) || !Number.isSafeInteger(value.connection_revision) || !str(value.connection_title) || !str(value.card_url) || !str(value.endpoint_url) || !str(value.expires_at, 64) || !toolName(value.tool_name) || !record(value.arguments) || !str(value.status, 64) || !nullable(value.error_code) || !str(value.created_at, 64) || !str(value.updated_at, 64)) return fail();
   if (!['awaiting_confirmation', 'running', 'succeeded', 'tool_error', 'failed', 'unknown', 'cancelled', 'expired', 'input_required'].includes(value.status)) return fail();
-  return { ...value, owner_name: normalizeOwnerName(value.owner_name) } as PluginInvocation;
+  return { ...value, ...decodePluginIdentity(value), owner_name: normalizeOwnerName(value.owner_name) } as PluginInvocation;
 }
 export function decodeResourceLink(value: unknown): ResourceLink {
   if (!record(value) || !str(value.uri) || !value.uri || !str(value.name) || (value.title !== undefined && !str(value.title)) || (value.description !== undefined && !str(value.description, 16000)) || (value.mimeType !== undefined && !str(value.mimeType, 128))) return fail();
@@ -135,6 +171,7 @@ export function connectionStatusLabel(status: string, text: (zh: string, en: str
 export function authorizationLabel(status: string, text: (zh: string, en: string) => string): string {
   const labels: Record<string, [string, string]> = {
     none: ['无需单独授权', 'No separate authorization needed'], required: ['等待授权', 'Awaiting authorization'],
+    anonymous: ['仅小Q模拟账户', 'Q simulated account only'],
     authorized: ['已授权', 'Authorized'], blocked: ['暂不可授权', 'Authorization unavailable'],
   };
   return labels[status] ? text(...labels[status]) : text('授权状态待确认', 'Authorization status unavailable');
@@ -147,6 +184,10 @@ export function pluginError(error: unknown, text: (zh: string, en: string) => st
     PLUGIN_OAUTH_NOT_CONFIGURED: ['服务端尚未配置插件授权回调，请联系管理员。', 'Plugin OAuth hosting is not configured on this server.'],
     PLUGIN_RECONFIRM_REQUIRED: ['插件连接或工具发生变化，请检查并确认更新。', 'The plugin changed. Review and confirm its update.'],
     PLUGIN_ARGUMENTS_INVALID: ['参数必须是有效的 JSON 对象。', 'Arguments must be a valid JSON object.'],
+    BANKING_NOT_CONNECTED: ['请先在钱包或银行插件页添加这家银行。', 'Add this bank in Wallet or Bank plugins first.'],
+    BANKING_SOURCE_MISMATCH: ['这条对话绑定了另一家银行，请选择付款银行后开始新对话。', 'This chat uses another bank. Select the source bank and start a new chat.'],
+    BANKING_INSUFFICIENT_FUNDS: ['模拟账户余额不足，请修改金额后重新提出转账。', 'The simulated account has insufficient funds. Submit a new transfer with another amount.'],
+    INSUFFICIENT_FUNDS: ['模拟账户余额不足，请修改金额后重新提出转账。', 'The simulated account has insufficient funds. Submit a new transfer with another amount.'],
     PLUGIN_UNAVAILABLE: ['插件服务暂不可用。', 'Plugin services are unavailable.'],
     MCP_UNSAFE_URL: ['仅支持可公开访问的 HTTPS 插件地址。', 'Use a publicly reachable HTTPS plugin address.'],
     MCP_UNSUPPORTED: ['这个插件要求的协议能力尚未支持。', 'This plugin requires an unsupported capability.'],

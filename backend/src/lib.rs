@@ -21,6 +21,7 @@ use tower_http::cors::CorsLayer;
 pub mod account_lifecycle;
 pub mod ai;
 pub mod ai_history;
+pub mod banking;
 pub mod client_ip;
 pub mod content_policy;
 pub mod error;
@@ -197,6 +198,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
                 .layer(middleware::from_fn(private_response)),
         )
         .merge(plugins::routes())
+        .merge(banking::router().layer(middleware::from_fn(private_response)))
         .layer(cors)
         .with_state(state)
 }

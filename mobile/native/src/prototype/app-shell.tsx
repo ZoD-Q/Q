@@ -570,9 +570,14 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "plugin-workbench" ? (
             <PluginWorkbenchPage onBack={() => navigate("plugins")} onConnect={intent => { updatePluginIntent({ type: "received", intent }); navigate("plugins"); }} />
           ) : page === "plugins" ? (
-            <PluginHostPage chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onSelect={connection => { chat.selectPlugin({ id: connection.id, title: connection.title || connection.name, endpoint_url: connection.endpoint_url }); navigate("chat"); }} />
+            <PluginHostPage chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
           ) : (
-            <ServicePage page={page} onOpenWorkbench={() => navigate("plugin-workbench")} />
+            <ServicePage page={page} onOpenWorkbench={() => navigate("plugin-workbench")} onBankTransfer={account => {
+              if (!account.connection_id) return;
+              chat.selectPlugin({ id: account.connection_id, title: text(account.bank_name, account.bank_name_en), endpoint_url: `urn:q:bank-demo:${account.bank_id}`, connection_kind: "bank_demo", builtin_service_id: `q.bank-demo.${account.bank_id}` });
+              chat.setDraft(text(`从${account.bank_name}转500港币到陈小明的${account.bank_id === "bochk" ? "汇丰" : "中银"}账户`, `Transfer HKD 500 from ${account.bank_name_en} to Chen at ${account.bank_id === "bochk" ? "HSBC" : "BOCHK"}`));
+              navigate("chat");
+            }} />
           )}
         </Reveal>
       </View>

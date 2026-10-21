@@ -59,6 +59,7 @@ impl SaveRequest {
                 "contextLimited",
                 "toolProposalId",
                 "toolInvocationIds",
+                "bankCommand",
             ];
             let id = m["id"].as_str().filter(|s| !s.is_empty() && s.len() <= 200);
             if o.keys().any(|k| !allowed.contains(&k.as_str()))
@@ -112,7 +113,7 @@ impl SaveRequest {
                     "Invalid history model, finish reason or proposal ID.",
                 ));
             }
-            for field in ["thinking", "contextLimited"] {
+            for field in ["thinking", "contextLimited", "bankCommand"] {
                 if o.get(field).is_some_and(|v| !v.is_boolean()) {
                     return Err(ApiError::validation("Invalid history metadata."));
                 }
@@ -139,7 +140,18 @@ impl SaveRequest {
         }
         if let Some(p) = &self.plugin
             && (p["id"].as_str().is_none_or(|s| Uuid::parse_str(s).is_err())
-                || p.as_object().is_none_or(|o| o.len() != 3)
+                || p.as_object().is_none_or(|o| {
+                    o.keys().any(|k| {
+                        ![
+                            "id",
+                            "title",
+                            "endpoint_url",
+                            "connection_kind",
+                            "builtin_service_id",
+                        ]
+                        .contains(&k.as_str())
+                    })
+                })
                 || ["id", "title", "endpoint_url"]
                     .iter()
                     .any(|k| p[k].as_str().is_none_or(|s| s.is_empty() || s.len() > 4096)))
@@ -147,6 +159,28 @@ impl SaveRequest {
             return Err(ApiError::validation(
                 "Invalid history plugin display metadata.",
             ));
+        }
+        if let Some(p) = &self.plugin {
+            match p["connection_kind"].as_str() {
+                None | Some("remote_mcp")
+                    if p["builtin_service_id"].is_null()
+                        && p.get("connection_kind").is_none_or(|v| v == "remote_mcp") => {}
+                Some("bank_demo") => {
+                    let service = p["builtin_service_id"]
+                        .as_str()
+                        .ok_or_else(|| ApiError::validation("Invalid bank plugin metadata."))?;
+                    let bank = service
+                        .strip_prefix("q.bank-demo.")
+                        .ok_or_else(|| ApiError::validation("Invalid bank plugin metadata."))?;
+                    if crate::banking::tools(service).is_err()
+                        || p["endpoint_url"].as_str()
+                            != Some(format!("urn:q:bank-demo:{bank}").as_str())
+                    {
+                        return Err(ApiError::validation("Invalid bank plugin metadata."));
+                    }
+                }
+                _ => return Err(ApiError::validation("Invalid plugin kind.")),
+            }
         }
         let mut value = json!({"title":self.title,"messages":self.messages});
         if let Some(plugin) = &self.plugin {

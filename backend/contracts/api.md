@@ -1,7 +1,15 @@
 # 小Q API v1 — implementation contract
 
 Local API: http://127.0.0.1:8787. JSON UTF-8, snake_case fields. ISO 8601 UTC timestamps, UUID IDs. Error responses: `{ "error": { "code": "...", "message": "..." } }`.
-Authenticated endpoints require `Authorization: Bearer <opaque token>`; sessions expire and can be revoked. No token in URLs or logs. Only identity owns sessions; profiles owns preferences; ledger owns wallet writes. Financial amounts are integer minor units: 100 = 1.00 Q, currency QDC, always demo.
+Authenticated endpoints require `Authorization: Bearer <opaque token>`; sessions expire and can be revoked. No token in URLs or logs. Only identity owns sessions; profiles owns preferences; ledger owns wallet writes. Financial amounts are integer minor units: 100 = 1.00 Q for QDC or HK$1.00 for the separate bank simulation ledger; both are always demo.
+
+## Built-in bank plugins and HKD wallet
+
+See [banking contract](banking.md). `GET /v1/banking/wallet`, `POST /v1/banking/connect`, and paginated `GET /v1/banking/transactions` / `entries` reuse Q identity and return `no-store`. The first explicit addition issues HKD 100,000 to each new simulated account; retries never refill balances. Existing QDC routes are unchanged.
+
+Connections and invocations now return server-controlled `connection_kind: remote_mcp | bank_demo` and nullable `builtin_service_id`. Only bank_demo uses exact `urn:q:bank-demo:<bank_id>` identities and `auth_status: anonymous`; this is a Q first-party runtime, not bank OAuth or a remote MCP server. Remote discovery/addition cannot request this kind or accept a URN. The three built-in tools use the existing proposal/confirm/result endpoints. Confirmation, balanced HKD posting and its invocation result commit in one PostgreSQL transaction. A lost response is recovered by reading the original invocation; the model never confirms.
+
+AI display history accepts optional bank plugin identity fields and boolean `bankCommand` message metadata for recovery. These display fields do not select the server execution runtime or authorize a transfer.
 
 ## MCP plugins (0.4)
 

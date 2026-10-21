@@ -1442,3 +1442,7 @@ async fn oauth_binds_cimd_pkce_resource_owner_and_single_use_state_and_encrypts_
     .await;
     h.finish().await;
 }
+
+// First-party execution shares the plugin confirmation gate; include it in the existing CI suite.
+#[path = "bank_plugin_runtime.rs"]
+mod bank_plugin_runtime;

@@ -1,6 +1,6 @@
 # 小Q demo backend
 
-Rust modular monolith: Axum, Tokio, SQLx and PostgreSQL. Its ledger only handles simulated QDC. Configured DeepSeek chat and the opt-in video workbench make real provider requests. Kling uses user-owned API credentials. There is no real payment provider, bank account, lending, insurance or investment connection.
+Rust modular monolith: Axum, Tokio, SQLx and PostgreSQL. Its ledgers handle simulated QDC and separate first-party bank-plugin HKD. Configured DeepSeek chat and the opt-in video workbench make real provider requests. Kling uses user-owned API credentials. There is no real payment provider, bank account, lending, insurance or investment connection. The 20 bank plugins and wallet account imagery are simulations; see [bank plugin behavior](../mobile/docs/bank-plugins.md).
 
 Start with the [repository development rules](../AGENTS.md) and [backend rules](AGENTS.md). The [Q plugin integration specification](docs/plugin-integration.md) defines the host contract; personal MCP connections and explicit tool calls are implemented, while Apps sandboxing and a public index remain future work.
 

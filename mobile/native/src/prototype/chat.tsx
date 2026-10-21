@@ -41,6 +41,8 @@ import { ChatAuthSheet } from "./ai-chat/auth-sheet";
 import { chatErrorMessage, chatStatusErrorMessage } from "./ai-chat/messages";
 import type { AiModel } from "@xiaoq/shared";
 import { ChatProposal } from './plugin-host/chat-proposal';
+import { bankIdForPlugin } from './plugin-host/core';
+import { BankTransferComposer } from './banking/transfer-composer';
 import { openPrivacyPolicy } from './privacy';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
@@ -75,6 +77,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
   const { colors, text, phone } = useDesign();
   const [models, setModels] = useState(false);
   const [tools, setTools] = useState(false);
+  const [bankForm, setBankForm] = useState(false);
   const [focused, setFocused] = useState(false);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
@@ -82,6 +85,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
   const followEnd = useRef(true);
   useEffect(() => { followEnd.current = true; }, [conversation?.id]);
   const hasMessages = !!conversation?.messages.length;
+  const bankPlugin = bankIdForPlugin(controller.plugin);
   const send = () => {
     if (!draft.trim() || controller.busy || controller.authBusy) return;
     selectionFeedback();
@@ -95,7 +99,8 @@ export function ChatPage({ controller, onOpenPlugins }: {
     <View
       style={{ width: "100%", maxWidth: 690, alignSelf: "center", gap: 10 }}
     >
-      {controller.plugin && <View style={{ gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><Action kind="ghost" label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View><Type size={11} muted>{text('插件对话关闭深度思考；执行工具前会请你确认。', 'Plugin chat uses standard mode and asks before executing tools.')}</Type></View>}
+      {bankPlugin ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}><Action kind="ghost" label={text("填写转账", "Fill transfer")} disabled={controller.busy} onPress={() => setBankForm(true)} /><Action kind="ghost" label={text("查询余额", "Check balance")} disabled={controller.busy} onPress={() => suggestion(text("查询余额", "Show balance"))} /></View> : null}
+      {controller.plugin && <View style={{ gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><Action kind="ghost" label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View><Type size={11} muted>{bankPlugin ? text('银行插件 · 模拟港币。明确的转账指令直接准备工具提案，确认后才记账。', 'Bank plugin · Simulated HKD. Transfer commands prepare a tool proposal; only confirmation posts it.') : text('插件对话关闭深度思考；执行工具前会请你确认。', 'Plugin chat uses standard mode and asks before executing tools.')}</Type></View>}
       <View
         style={{
           backgroundColor: colors.bg,
@@ -222,7 +227,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
       {controller.historyError ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}><Type size={13} color={colors.danger}>{text("聊天记录尚未同步，请重试；版本冲突时请重新登录加载服务器记录。", "History is not synced. Retry; for a version conflict, sign in again to load server history.")} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /><Action kind="ghost" label={text("重载云端版本（替换本机未保存内容）", "Reload cloud version (replace unsaved changes)")} disabled={controller.busy || controller.historyBusy} onPress={controller.reloadCloud} /></View> : null}
       {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
       {controller.authBusy ? <Type size={11} muted style={{ textAlign: "center" }}>{text("正在恢复登录…", "Restoring session…")}</Type> : null}
-      {controller.statusPhase !== "ready" ? (
+      {!bankPlugin && controller.statusPhase !== "ready" ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
           <Type size={11} muted>{controller.statusBusy
             ? text("正在检查 Q 对话配置…", "Checking Q chat configuration…")
@@ -345,14 +350,14 @@ export function ChatPage({ controller, onOpenPlugins }: {
                   >
                     <QGlyph size={23} />
                     <Type size={13} weight="500">
-                      {message.model ? MODEL_NAMES[message.model] : "小Q"}
+                      {message.bankCommand ? text("小Q · 银行插件", "Q · Bank plugin") : message.model ? MODEL_NAMES[message.model] : "小Q"}
                     </Type>
                   </View>
                 ) : null}
                 {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
                 {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => controller.resumeTool(message.id, message.toolProposalId!) : undefined} />}
                 {message.role === "assistant" && ["pending", "streaming"].includes(message.status) ? <View accessibilityLiveRegion="polite"><Type size={13} muted>
-                  {controller.phase === "thinking" ? text("正在思考…", "Thinking…") : controller.phase === "waiting" ? text("正在连接 DeepSeek…", "Connecting to DeepSeek…") : text("正在回答…", "Answering…")}
+                  {controller.phase === "thinking" ? text("正在思考…", "Thinking…") : controller.phase === "waiting" ? message.bankCommand ? text("正在准备银行插件提案…", "Preparing the bank plugin proposal…") : text("正在连接 DeepSeek…", "Connecting to DeepSeek…") : text("正在回答…", "Answering…")}
                 </Type></View> : null}
                 {message.status === "cancelled" ? <Type size={13} muted>{text("已停止接收，已收到的内容保留。", "Stopped receiving. The text received so far is preserved.")}</Type> : null}
                 {message.status === "error" ? <Type selectable size={13} color={colors.danger}>{chatErrorMessage(message.errorCode ?? "AI_UPSTREAM_ERROR", text)}</Type> : null}
@@ -400,6 +405,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
           </View>
         </ScrollView>
       )}
+      {bankForm && bankPlugin ? <BankTransferComposer bankId={bankPlugin} onClose={() => setBankForm(false)} onDraft={suggestion} /> : null}
       <Sheet
         visible={models}
         title={text("选择模型", "Choose model")}

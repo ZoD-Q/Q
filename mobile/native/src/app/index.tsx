@@ -3,6 +3,7 @@ import { PrototypeApp } from "@/prototype/app-shell";
 export default function Index() {
   const { view } = useLocalSearchParams<{ view?: string }>();
   const page =
+    view === "wallet" ? "wallet" :
     view === "video" ? "video" :
     view === "creators" ? "creators" :
     view === "keys" ? "keys" :

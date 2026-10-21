@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { registerHooks } from 'node:module';
 import { buildContext, finishStatus, prepareRetry } from './state-model.ts';
+const resolver = registerHooks({ resolve(specifier, context, next) {
+  if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
+  return next(specifier, context);
+} });
+test.after(() => resolver.deregister());
 const message = (id,role,content,status='complete') => ({id,role,content,status});
 test('failed tool continuation retains its saved invocation IDs and preceding tool card', () => {
   const ids=['11111111-1111-4111-8111-111111111111'];
