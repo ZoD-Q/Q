@@ -47,6 +47,9 @@ services:
       Q_BIND: 0.0.0.0:8787
       Q_SEED_DEMO: 'false'
       Q_VIDEO_ENCRYPTION_KEY: ${Q_VIDEO_ENCRYPTION_KEY:?set Q_VIDEO_ENCRYPTION_KEY}
+      Q_MCP_ENCRYPTION_KEY: ${Q_MCP_ENCRYPTION_KEY:?set Q_MCP_ENCRYPTION_KEY}
+      Q_MCP_PUBLIC_BASE_URL: ${Q_MCP_PUBLIC_BASE_URL:-}
+      Q_TRUSTED_PROXY_IPS: ${Q_GATEWAY_APPLICATION_IP:?set the verified fixed gateway IP}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       Q_CORS_ORIGINS: ${Q_CORS_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081}
       RUST_LOG: xiaoq_backend=info
@@ -76,9 +79,17 @@ services:
     security_opt: [no-new-privileges:true]
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - type: bind
+        source: ${Q_TRUSTED_HOST_PROXIES_DIR:-/etc/q/trusted-host-proxies}
+        target: /etc/nginx/trusted-host-proxies
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - 127.0.0.1:18787:8080
-    networks: [application]
+    networks:
+      application:
+        ipv4_address: ${Q_GATEWAY_APPLICATION_IP:?set the verified fixed gateway IP}
     depends_on:
       api:
         condition: service_healthy
@@ -90,7 +101,35 @@ services:
       interval: 30s
       timeout: 7s
       retries: 3
+  account-admin:
+    profiles: [maintenance]
+    image: q-api:${Q_RELEASE:?set Q_RELEASE}
+    entrypoint: [/usr/local/bin/account-admin]
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DATABASE_URL: postgresql://q_app:${Q_DB_PASSWORD:?set Q_DB_PASSWORD}@db:5432/q
+      Q_ACCOUNT_ADMIN_MUTATIONS: '0'
+    volumes:
+      - type: bind
+        source: ./artifact/account-admin
+        target: /usr/local/bin/account-admin
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [database]
+    depends_on:
+      db:
+        condition: service_healthy
+    cpus: 0.25
+    mem_limit: 128m
+    logging:
+      driver: none
 networks:
   database:
     internal: true
-  application: {}
+  application:
+    external: true
+    name: ${Q_APPLICATION_NETWORK:-q_application}

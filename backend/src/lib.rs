@@ -18,7 +18,10 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 
+pub mod account_lifecycle;
 pub mod ai;
+pub mod client_ip;
+pub mod content_policy;
 pub mod error;
 pub mod identity;
 pub mod ledger;
@@ -36,6 +39,7 @@ pub struct AppState {
     password_slots: Arc<Semaphore>,
     dummy_hash: Arc<String>,
     limiter: Arc<Mutex<AuthLimiter>>,
+    pub trusted_client_ips: client_ip::TrustedClientIpPolicy,
     pub video: Option<Arc<video::VideoRuntime>>,
     pub ai: Option<Arc<ai::AiRuntime>>,
     pub plugins: Option<Arc<plugins::PluginRuntime>>,
@@ -53,6 +57,7 @@ impl AppState {
             password_slots,
             dummy_hash,
             limiter: Arc::new(Mutex::new(AuthLimiter::default())),
+            trusted_client_ips: client_ip::TrustedClientIpPolicy::default(),
             video: None,
             ai: None,
             plugins: None,
@@ -92,11 +97,16 @@ async fn throttle_auth(
     req: Request,
     next: Next,
 ) -> ApiResult<Response> {
-    // Do not trust X-Forwarded-For supplied by arbitrary clients.
+    // Forwarded addresses are accepted only from explicitly configured proxies.
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|info| info.0.ip().to_string())
+        .map(|info| {
+            state
+                .trusted_client_ips
+                .resolve(info.0.ip(), req.headers())
+                .to_string()
+        })
         .unwrap_or_else(|| "local-test".into());
     state.limit_auth(format!("ip:{peer}"), 30)?;
     Ok(next.run(req).await)
@@ -113,6 +123,14 @@ async fn health(State(state): State<AppState>) -> ApiResult<Json<Health>> {
         status: "ok",
         mode: "demo",
     }))
+}
+
+async fn private_response(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
@@ -135,6 +153,16 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .merge(social::router())
         .route("/health", get(health))
         .route("/v1/auth/logout", post(identity::logout))
+        .merge(
+            Router::new()
+                .route("/v1/account/deletions", post(account_lifecycle::delete))
+                .route(
+                    "/v1/account/deletions/status",
+                    post(account_lifecycle::status),
+                )
+                .route_layer(middleware::from_fn_with_state(state.clone(), throttle_auth))
+                .layer(middleware::from_fn(private_response)),
+        )
         .route("/v1/me", get(profiles::me).patch(profiles::patch))
         .route("/v1/users/lookup", get(profiles::lookup))
         .route("/v1/wallet", get(ledger::wallet))

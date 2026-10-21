@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import struct
 import subprocess
 import sys
 import tarfile
@@ -74,22 +75,33 @@ def regular_bytes(path, limit):
     return data
 
 
+def validate_linux_amd64(binary):
+    require(len(binary) >= 64 and binary[:7] == b'\x7fELF\x02\x01\x01'
+            and binary[7] in (0, 3), 'Release must be ELF64 little-endian for Linux')
+    elf_type, machine, version = struct.unpack_from('<HHI', binary, 16)
+    require(elf_type in (2, 3) and machine == 62 and version == 1
+            and struct.unpack_from('<H', binary, 52)[0] == 64,
+            'Release must be a Linux x86-64 executable or PIE')
+
+
 def validate_api(path, sha):
     regular_bytes(path, MAX_ARCHIVE)
     files = {}
     total = 0
-    allowed = {'q-release/xiaoq-backend', 'q-release/SOURCE_COMMIT', 'q-release/SHA256SUMS',
-               'q-release/MIGRATIONS'}
+    required = {'q-release/xiaoq-backend', 'q-release/SOURCE_COMMIT', 'q-release/SHA256SUMS',
+                'q-release/MIGRATIONS'}
+    allowed = required | {'q-release/account-admin'}
     seen = set()
     try:
         with tarfile.open(path, 'r:gz') as archive:
             for member in archive:
-                require(member.name not in seen and len(seen) < 5, 'Invalid release members')
+                require(member.name not in seen and len(seen) < len(allowed) + 1, 'Invalid release members')
                 seen.add(member.name)
                 if member.name == 'q-release' and member.isdir():
                     continue
-                require(member.name in allowed and member.type in (tarfile.REGTYPE, tarfile.AREGTYPE), 'Unsafe release member')
-                limit = (MAX_ARCHIVE if member.name.endswith('/xiaoq-backend') else
+                require(member.name in allowed and not member.pax_headers
+                        and member.type in (tarfile.REGTYPE, tarfile.AREGTYPE), 'Unsafe release member')
+                limit = (MAX_ARCHIVE if member.name in ('q-release/xiaoq-backend', 'q-release/account-admin') else
                          1024 * 1024 if member.name.endswith('/MIGRATIONS') else 4096)
                 require(0 <= member.size <= limit, 'Release member exceeds size budget')
                 total += member.size
@@ -101,17 +113,22 @@ def validate_api(path, sha):
                 files[member.name] = data
     except (tarfile.TarError, EOFError, OSError):
         raise ClientError('Invalid release archive') from None
-    require(set(files) == allowed, 'Incomplete release archive')
+    require(required <= set(files) <= allowed, 'Incomplete release archive')
     require(files['q-release/SOURCE_COMMIT'] == (sha + '\n').encode(), 'Release source SHA mismatch')
-    require(files['q-release/xiaoq-backend'].startswith(b'\x7fELF'), 'Release is not an ELF executable')
+    validate_linux_amd64(files['q-release/xiaoq-backend'])
+    if 'q-release/account-admin' in files:
+        validate_linux_amd64(files['q-release/account-admin'])
     migrations = files['q-release/MIGRATIONS']
     require(re.fullmatch(rb'(?:[1-9][0-9]{0,18} [0-9a-f]{96}\n)+', migrations) is not None,
             'Invalid migration manifest')
     versions = [int(line.split(b' ', 1)[0]) for line in migrations.splitlines()]
     require(versions == sorted(set(versions)) and all(version < 2 ** 63 for version in versions),
             'Migration versions must be unique, ordered and within signed 64-bit range')
+    names = ['xiaoq-backend', 'SOURCE_COMMIT', 'MIGRATIONS']
+    if 'q-release/account-admin' in files:
+        names.append('account-admin')
     expected = ''.join(hashlib.sha256(files['q-release/' + name]).hexdigest() + '  ' + name + '\n'
-                       for name in ('xiaoq-backend', 'SOURCE_COMMIT', 'MIGRATIONS')).encode()
+                       for name in names).encode()
     require(files['q-release/SHA256SUMS'] == expected, 'Release checksum mismatch')
 
 

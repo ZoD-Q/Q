@@ -158,7 +158,9 @@ backend-check:
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets -- -D warnings
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features video-test-fixtures -- -D warnings
     - cargo test --locked --manifest-path backend/Cargo.toml
+    - cargo test --locked --manifest-path backend/Cargo.toml --example beauty_mcp
     - cargo test --locked --manifest-path backend/Cargo.toml --test postgres -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --test account_lifecycle -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --test social -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --test social_backup -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
@@ -172,8 +174,11 @@ deploy-check:
   stage: verify
   image: python:3.13-bookworm
   script:
-    - bash -n backend/deploy/package-release.sh backend/deploy/backup.sh backend/deploy/health-check.sh web/deploy/remote.sh
+    - apt-get update && apt-get install -y --no-install-recommends nginx openssl
+    - bash -n backend/deploy/package-release.sh backend/deploy/backup.sh backend/deploy/health-check.sh backend/deploy/test-nginx-config.sh web/deploy/remote.sh
+    - bash backend/deploy/test-nginx-config.sh
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy -p 'test_*.py'
+    - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/beauty-gallery -p 'test_*.py'
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
 
 # Automatic only for protected main; other permitted branches retain optional packaging.

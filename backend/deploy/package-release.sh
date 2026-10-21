@@ -66,18 +66,36 @@ if len(manifest.encode('ascii')) > 1024 * 1024:
     raise SystemExit('Release refused: migration manifest exceeds size budget.')
 output.write_text(manifest, encoding='ascii')
 PYTHON
-CARGO_TARGET_DIR="$build_dir/target" cargo zigbuild \
-  --manifest-path "$build_dir/source/backend/Cargo.toml" \
-  --locked --release --target x86_64-unknown-linux-gnu.2.36 --bin xiaoq-backend
-compiled_binary="$build_dir/target/x86_64-unknown-linux-gnu/release/xiaoq-backend"
-if [[ ! -f "$compiled_binary" || -L "$compiled_binary" ]]; then
-  printf 'Release refused: compiler did not produce a regular Linux target binary.\n' >&2
-  exit 1
-fi
-cp "$compiled_binary" "$build_dir/q-release/xiaoq-backend"
-# Verify the copied artifact, not uname or the runner/image architecture. This
-# parser is host-independent and never executes the candidate executable.
-python3 - "$build_dir/q-release/xiaoq-backend" <<'PYTHON'
+release_binaries=(xiaoq-backend)
+# Detect the companion only in the immutable reviewed archive, never the checkout.
+# An archive containing its source must build it successfully; failure is not optional.
+for admin_source in scripts/account-admin.rs src/bin/account-admin.rs src/bin/account-admin/main.rs; do
+  source_path="$build_dir/source/backend/$admin_source"
+  if [[ -e "$source_path" || -L "$source_path" ]]; then
+    if [[ ! -f "$source_path" || -L "$source_path" ]]; then
+      printf 'Release refused: account-admin source must be a regular file.\n' >&2
+      exit 1
+    fi
+    release_binaries+=(account-admin)
+    break
+  fi
+done
+build_args=(--manifest-path "$build_dir/source/backend/Cargo.toml"
+  --locked --release --target x86_64-unknown-linux-gnu.2.36)
+for binary_name in "${release_binaries[@]}"; do
+  build_args+=(--bin "$binary_name")
+done
+CARGO_TARGET_DIR="$build_dir/target" cargo zigbuild "${build_args[@]}"
+for binary_name in "${release_binaries[@]}"; do
+  compiled_binary="$build_dir/target/x86_64-unknown-linux-gnu/release/$binary_name"
+  if [[ ! -f "$compiled_binary" || -L "$compiled_binary" ]]; then
+    printf 'Release refused: compiler did not produce a regular Linux target binary.\n' >&2
+    exit 1
+  fi
+  cp "$compiled_binary" "$build_dir/q-release/$binary_name"
+  # Verify the copied artifact, not uname or the runner/image architecture. This
+  # parser is host-independent and never executes the candidate executable.
+  python3 - "$build_dir/q-release/$binary_name" <<'PYTHON'
 from pathlib import Path
 import stat
 import struct
@@ -153,12 +171,17 @@ with path.open('rb') as binary:
             if kind != 8:  # SHT_NOBITS occupies memory, not file bytes.
                 require(offset <= size and length <= size - offset,
                         'truncated ELF section data.')
-print('Verified Linux x86-64 GNU/glibc executable.')
+print('Verified Linux x86-64 GNU/glibc executable: ' + path.name)
 PYTHON
+done
 printf '%s\n' "$source_commit" > "$build_dir/q-release/SOURCE_COMMIT"
+checksum_files=(xiaoq-backend SOURCE_COMMIT MIGRATIONS)
+if [[ "${#release_binaries[@]}" -eq 2 ]]; then
+  checksum_files+=(account-admin)
+fi
 (
   cd "$build_dir/q-release"
-  sha256sum xiaoq-backend SOURCE_COMMIT MIGRATIONS > SHA256SUMS
+  sha256sum "${checksum_files[@]}" > SHA256SUMS
 )
 archive_name="q-release-${source_commit}.tar.gz"
 # macOS cross-builds must not add AppleDouble metadata rejected by the receiver.

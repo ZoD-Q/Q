@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "小Q API",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "QDC ledger is simulated. Configured DeepSeek chat and personal Kling connections make real supplier requests. Local development, not production certified."
   },
   "servers": [
@@ -3135,6 +3135,138 @@
         ],
         "description": "Owner-only minimal acceptance receipt; unknown/foreign IDs return 404, expired or unavailable report/evidence returns 410. Never returns report target, reason, message ID or evidence."
       }
+    },
+    "/v1/account/deletions": {
+      "post": {
+        "operationId": "deleteAccount",
+        "tags": [
+          "identity"
+        ],
+        "description": "Verify current password and explicit confirmation, delete online private account data, revoke sessions and return a secret-recoverable receipt. Immutable demo ledger and documented minimal records remain.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified completed deletion receipt.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Recovery responses must never be cached."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeletionReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. A timeout, 401, 404 or ACCOUNT_BUSY is not proof of completed deletion; query the original receipt and retain the original recovery capability. See contracts/account-lifecycle.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Recovery responses must never be cached."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account/deletions/status": {
+      "post": {
+        "operationId": "getAccountDeletionStatus",
+        "tags": [
+          "identity"
+        ],
+        "description": "Recover only a completed deletion receipt using the original identifier and secret after its Q session has been revoked. Unknown identifiers and wrong secrets return the same 404.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletionStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified completed deletion receipt.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Recovery responses must never be cached."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeletionReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. A timeout, 401, 404 or ACCOUNT_BUSY is not proof of completed deletion; query the original receipt and retain the original recovery capability. See contracts/account-lifecycle.md.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Recovery responses must never be cached."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3977,6 +4109,12 @@
           },
           "endpoint_url": {
             "type": "string"
+          },
+          "owner_name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80,
+            "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
           }
         },
         "required": [
@@ -3986,7 +4124,8 @@
           "title",
           "description",
           "version",
-          "endpoint_url"
+          "endpoint_url",
+          "owner_name"
         ],
         "additionalProperties": false
       },
@@ -4000,16 +4139,18 @@
           "kind": {
             "type": "string",
             "enum": [
+              "auto",
               "card",
               "catalog",
               "page",
               "domain"
-            ]
+            ],
+            "default": "auto",
+            "description": "Auto uses well-known discovery only for bare domains; full URLs are classified by their actual response media type, preserving the path and query without whole-domain fallback."
           }
         },
         "required": [
-          "entry",
-          "kind"
+          "entry"
         ],
         "additionalProperties": false
       },
@@ -4169,6 +4310,12 @@
                   },
                   "endpoint_url": {
                     "type": "string"
+                  },
+                  "owner_name": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 80,
+                    "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
                   }
                 },
                 "required": [
@@ -4177,7 +4324,8 @@
                   "title",
                   "description",
                   "version",
-                  "endpoint_url"
+                  "endpoint_url",
+                  "owner_name"
                 ],
                 "additionalProperties": false
               },
@@ -4197,6 +4345,12 @@
             "required": [],
             "additionalProperties": false,
             "nullable": true
+          },
+          "owner_name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80,
+            "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
           }
         },
         "required": [
@@ -4214,7 +4368,8 @@
           "created_at",
           "updated_at",
           "pending_update",
-          "pending_update_details"
+          "pending_update_details",
+          "owner_name"
         ],
         "additionalProperties": false
       },
@@ -4305,6 +4460,12 @@
           },
           "endpoint_url": {
             "type": "string"
+          },
+          "owner_name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80,
+            "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
           }
         },
         "required": [
@@ -4321,7 +4482,8 @@
           "updated_at",
           "expires_at",
           "connection_revision",
-          "endpoint_url"
+          "endpoint_url",
+          "owner_name"
         ],
         "additionalProperties": false
       },
@@ -5141,6 +5303,86 @@
           "expires_at",
           "server_time"
         ]
+      },
+      "AccountDeletionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "recovery_token",
+          "password",
+          "confirmation"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recovery_token": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "Exactly 32 random bytes encoded as canonical unpadded base64url. Secret capability, never put in URLs or logs."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "confirmation": {
+            "type": "string",
+            "enum": [
+              "DELETE"
+            ]
+          }
+        }
+      },
+      "AccountDeletionStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "recovery_token"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recovery_token": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "Exactly 32 random bytes encoded as canonical unpadded base64url. Secret capability, never put in URLs or logs."
+          }
+        }
+      },
+      "AccountDeletionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "status",
+          "completed_at"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "deleted"
+            ]
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }

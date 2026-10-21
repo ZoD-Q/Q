@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+from test_package_release import elf_fixture
 
 spec = importlib.util.spec_from_file_location('ci_client', Path(__file__).with_name('ci_client.py'))
 client = importlib.util.module_from_spec(spec)
@@ -38,11 +39,15 @@ def response(identity, check=False):
     return json.dumps(public).encode()
 
 
-def archive(path, sha=SHA, override=None):
-    files = {'xiaoq-backend': b'\x7fELFtest binary', 'SOURCE_COMMIT': (sha + '\n').encode(),
+def archive(path, sha=SHA, override=None, companion=None):
+    files = {'xiaoq-backend': elf_fixture(), 'SOURCE_COMMIT': (sha + '\n').encode(),
              'MIGRATIONS': b'1 ' + b'a' * 96 + b'\n'}
+    names = ['xiaoq-backend', 'SOURCE_COMMIT', 'MIGRATIONS']
+    if companion is not None:
+        files['account-admin'] = companion
+        names.append('account-admin')
     files['SHA256SUMS'] = ''.join(hashlib.sha256(files[name]).hexdigest() + '  ' + name + '\n'
-                                for name in ('xiaoq-backend', 'SOURCE_COMMIT', 'MIGRATIONS')).encode()
+                                for name in names).encode()
     if override:
         files.update(override)
     with tarfile.open(path, 'w:gz') as stream:
@@ -79,6 +84,53 @@ class ClientTests(unittest.TestCase):
                         {'override': {'../../outside': b'bad'}}):
             archive(self.release, **changes)
             with self.subTest(changes=changes), self.assertRaises(client.ClientError):
+                client.validate_api(self.release, SHA)
+
+    def test_api_accepts_optional_admin_only_with_its_matching_checksum(self):
+        archive(self.release, companion=elf_fixture(with_sections=True))
+        client.validate_api(self.release, SHA)
+        with tarfile.open(self.release) as stream:
+            checked = stream.extractfile('q-release/SHA256SUMS').read()
+        missing = b''.join(line + b'\n' for line in checked.splitlines() if not line.endswith(b'  account-admin'))
+        for override in (
+                {'SHA256SUMS': missing},
+                {'account-admin': elf_fixture(with_sections=True) + b'tampered'},
+                {'account-admin-helper': b'unexpected'},
+        ):
+            with self.subTest(override=tuple(override)):
+                archive(self.release, companion=elf_fixture(with_sections=True), override=override)
+                with self.assertRaises(client.ClientError):
+                    client.validate_api(self.release, SHA)
+        # A manifest entry without the actual companion is equally invalid.
+        archive(self.release, override={'SHA256SUMS': checked})
+        with self.assertRaises(client.ClientError):
+            client.validate_api(self.release, SHA)
+
+    def test_api_rejects_wrong_architecture_or_format_for_each_executable(self):
+        for payload in (elf_fixture(machine=183), b'\x7fELF', b'#!/bin/sh\nexit 0\n'):
+            for name in ('xiaoq-backend', 'account-admin'):
+                with self.subTest(name=name, size=len(payload)):
+                    if name == 'account-admin':
+                        archive(self.release, companion=payload)
+                    else:
+                        archive(self.release, override={name: payload})
+                    with self.assertRaises(client.ClientError):
+                        client.validate_api(self.release, SHA)
+
+    def test_api_rejects_companion_symlink_or_duplicate(self):
+        for kind in (tarfile.SYMTYPE, tarfile.REGTYPE):
+            archive(self.release, companion=elf_fixture())
+            with tarfile.open(self.release) as stream:
+                entries = [(item, stream.extractfile(item).read()) for item in stream if item.isfile()]
+            with tarfile.open(self.release, 'w:gz') as stream:
+                for item, data in entries:
+                    stream.addfile(item, io.BytesIO(data))
+                member = tarfile.TarInfo('q-release/account-admin')
+                member.type = kind
+                if kind == tarfile.SYMTYPE:
+                    member.linkname = '/bin/sh'
+                stream.addfile(member)
+            with self.subTest(kind=kind), self.assertRaises(client.ClientError):
                 client.validate_api(self.release, SHA)
 
     def test_api_rejects_links_duplicates_and_oversized_members(self):

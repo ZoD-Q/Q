@@ -58,3 +58,7 @@ export type SocialOpenedMessage = components['schemas']['SocialOpenedMessage'];
 export type SocialReportRequest = components['schemas']['SocialReportRequest'];
 export type SocialEphemeralState = components['schemas']['SocialEphemeralState'];
 export type SocialReportReceipt = components['schemas']['SocialReportReceipt'];
+
+export type AccountDeletionRequest = components['schemas']['AccountDeletionRequest'];
+export type AccountDeletionStatusRequest = components['schemas']['AccountDeletionStatusRequest'];
+export type AccountDeletionReceipt = components['schemas']['AccountDeletionReceipt'];

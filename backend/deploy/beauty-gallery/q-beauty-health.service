@@ -1,0 +1,19 @@
+[Unit]
+Description=Check Q Beauty MCP gallery and recover an unresponsive process
+After=q-beauty.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/q-beauty/current/deploy/health-check.py --recover
+TimeoutStartSec=75s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+LogNamespace=q-beauty
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=20

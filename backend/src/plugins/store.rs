@@ -64,6 +64,7 @@ impl StoredConnection {
                     .transpose()
                     .map_err(|_| ApiError::internal())?
                     .map(|candidate| CandidateSummary {
+                        owner_name: candidate.owner_name(),
                         card_url: candidate.card_url,
                         name: candidate.name,
                         title: candidate.title,
@@ -88,6 +89,7 @@ impl StoredConnection {
             None
         };
         Ok(Connection {
+            owner_name: card.owner_name(),
             id: self.id,
             card_url: card.card_url,
             name: card.name,
@@ -108,6 +110,7 @@ impl StoredConnection {
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct Connection {
+    pub owner_name: Option<String>,
     pub id: Uuid,
     pub card_url: String,
     pub name: String,
@@ -126,6 +129,7 @@ pub struct Connection {
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct CandidateSummary {
+    owner_name: Option<String>,
     card_url: String,
     name: String,
     title: String,
@@ -150,6 +154,7 @@ pub struct Items<T> {
 #[serde(deny_unknown_fields)]
 pub struct DiscoverRequest {
     entry: String,
+    #[serde(default)]
     kind: EntryKind,
 }
 #[derive(Serialize, Deserialize)]
@@ -159,6 +164,7 @@ struct SavedCandidate {
 }
 #[derive(Serialize)]
 pub struct CandidateView {
+    owner_name: Option<String>,
     candidate_id: Uuid,
     card_url: String,
     name: String,
@@ -184,9 +190,10 @@ pub async fn discover(
     if request.entry.len() > 4096 {
         return Err(ApiError::validation("Plugin entry is too long."));
     }
-    let cards = discovery::discover_entry(&runtime.http, &request.entry, request.kind)
-        .await
-        .map_err(mcp_error)?;
+    let (resolved_kind, cards) =
+        discovery::discover_entry(&runtime.http, &request.entry, request.kind)
+            .await
+            .map_err(mcp_error)?;
     let saved: Vec<_> = cards
         .into_iter()
         .map(|card| SavedCandidate {
@@ -196,7 +203,8 @@ pub async fn discover(
         .collect();
     let id = Uuid::new_v4();
     let expires_at = Utc::now() + Duration::minutes(10);
-    let kind = match request.kind {
+    let kind = match resolved_kind {
+        EntryKind::Auto => return Err(ApiError::internal()),
         EntryKind::Card => "card",
         EntryKind::Catalog => "catalog",
         EntryKind::Page => "page",
@@ -237,6 +245,7 @@ pub async fn discover(
     let candidates = saved
         .into_iter()
         .map(|item| CandidateView {
+            owner_name: item.card.owner_name(),
             candidate_id: item.id,
             card_url: item.card.card_url,
             name: item.card.name,

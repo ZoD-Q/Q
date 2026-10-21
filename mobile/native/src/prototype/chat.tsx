@@ -41,6 +41,7 @@ import { ChatAuthSheet } from "./ai-chat/auth-sheet";
 import { chatErrorMessage } from "./ai-chat/messages";
 import type { AiModel } from "@xiaoq/shared";
 import { ChatProposal } from './plugin-host/chat-proposal';
+import { openPrivacyPolicy } from './privacy';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
 export function QGlyph({ size = 48 }: { size?: number }) {
@@ -436,6 +437,19 @@ export function ChatPage({ controller, onOpenPlugins }: {
         <Type size={13} muted>{text("当前 Q 尚未接入联网搜索。深度思考可能需要更长时间。", "Web search is not connected in Q yet. Thinking mode may take longer.")}</Type>
       </Sheet>
       {controller.authOpen ? <ChatAuthSheet controller={controller} /> : null}
+      <Sheet visible={controller.aiConsentOpen} title={text('使用 DeepSeek 对话', 'Chat with DeepSeek')} onClose={controller.cancelAiSharing}>
+        <Type>{text(
+          '为了生成回答，小Q会将你发送的文字和本次对话所需的上下文，通过小Q服务器交给第三方 DeepSeek 处理。使用插件续答时，还会发送所选插件的工具说明、参数及相关文字结果。',
+          'To generate a reply, Q sends your text and the relevant conversation context through its server to the third-party provider DeepSeek. Plugin conversations also share the selected tool descriptions, arguments, and relevant text results.',
+        )}</Type>
+        <Type muted size={13}>{text(
+          '同意仅对本次登录会话有效。你可以在设置中撤回，停止当前响应；已经发送给服务方的内容无法撤回。不必同意也能使用账号和好友功能。',
+          'Permission lasts for this signed-in session. Revoke it in Settings to stop the current response; data already sent cannot be recalled. Account and friend features remain available without AI sharing permission.',
+        )}</Type>
+        <Action kind="ghost" label={text('阅读隐私政策', 'Read the privacy policy')} onPress={() => { void openPrivacyPolicy(); }} />
+        <Action label={text('同意并发送', 'Agree and send')} onPress={controller.confirmAiSharing} />
+        <Action kind="ghost" label={text('暂不使用 AI 对话', 'Not now')} onPress={controller.cancelAiSharing} />
+      </Sheet>
     </KeyboardAvoidingView>
   );
 }

@@ -3,11 +3,12 @@ import type { ApiErrorBody } from '@xiaoq/shared';
 import type { CopyKey } from '@/i18n';
 
 const localHost = process.env.EXPO_OS === 'android' ? '10.0.2.2' : '127.0.0.1';
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL || `http://${localHost}:8787`).replace(/\/$/, '');
+export const API_URL = (process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? `http://${localHost}:8787` : '')).replace(/\/$/, '');
 export class ApiError extends Error {
   constructor(public code: string, public status = 0) { super(code); this.name = 'ApiError'; }
 }
 export async function request<T>(path: string, token?: string | null, method = 'GET', body?: unknown): Promise<T> {
+  if (!API_URL) throw new ApiError('NETWORK_ERROR');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
   try {

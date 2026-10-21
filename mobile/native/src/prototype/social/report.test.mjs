@@ -112,3 +112,48 @@ test('expired or forbidden evidence is a definitive POST rejection; cleanup neve
   }
   for (const error of [new SocialError('NETWORK_ERROR'), new SocialError('RATE_LIMITED', 429), new SocialError('UNAUTHORIZED', 401), new SocialError('IDEMPOTENCY_CONFLICT', 409), new SocialError('SOCIAL_MESSAGE_EXPIRED', 500), new SocialError('SOCIAL_BLOCKED', 403)]) assert.equal(isFinalReportRejection(error), false);
 });
+
+test('deletion purges a legacy report manifest and preserves another owner report', async () => {
+  const memoryStore = memory();
+  memoryStore.values.set(`q.social.report.v1.${owner}`,JSON.stringify({
+    ownerId:owner,clientReportId:reportId,userId:other,messageId,includeEvidence:true,reasonHash:await hash(request.reason),chunks:1,
+  }));
+  memoryStore.values.set(`q.social.report.v1.${owner}.${reportId}.0`,request.reason);
+  const store = createReportStore(memoryStore.adapter,hash,true);
+  await store.save(other,{ ...request,user_id:owner,reason:'other owner report' });
+  await store.purgeOwner(owner);
+  assert.equal(await store.read(owner),null);
+  assert.equal(memoryStore.values.has(`q.social.report.v1.${owner}.${reportId}.0`),false);
+  assert.equal((await store.read(other)).reason,'other owner report');
+  await assert.rejects(createReportStore(memoryStore.adapter,hash,true).save(owner,request),{ code:'ACCOUNT_DELETED' });
+});
+
+test('deletion can finish failed manifest-first report removal using its write-ahead chunk directory', async () => {
+  const memoryStore = memory(),store = createReportStore(memoryStore.adapter,hash,true);
+  await store.save(owner,request);
+  const remove = memoryStore.adapter.remove;
+  memoryStore.adapter.remove = async key => {
+    if (key === `q.social.report.v1.${owner}.${reportId}.0`) throw Error('chunk removal unavailable');
+    await remove(key);
+  };
+  await assert.rejects(store.remove(owner,reportId));
+  assert.equal(memoryStore.values.has(`q.social.report.v1.${owner}`),false);
+  memoryStore.adapter.remove = remove;
+  await store.purgeOwner(owner);
+  assert.ok(![...memoryStore.values.values()].join('').includes(request.reason));
+});
+
+test('a report hash completing after deletion begins cannot resurrect content after the serialized purge', async () => {
+  const memoryStore = memory();
+  let release,entered;
+  const waiting = new Promise(resolve=>{release=resolve;}),began = new Promise(resolve=>{entered=resolve;});
+  const store = createReportStore(memoryStore.adapter,async value=>{entered();await waiting;return hash(value);},true);
+  const saving = store.save(owner,request);
+  await began;
+  const purging = store.purgeOwner(owner);
+  const late = assert.rejects(store.save(owner,{ ...request,client_report_id:messageId }),{ code:'ACCOUNT_DELETED' });
+  release();
+  await saving;await purging;await late;
+  assert.equal(await store.read(owner),null);
+  assert.ok(![...memoryStore.values.values()].join('').includes(request.reason));
+});

@@ -3,13 +3,21 @@
     "name": "小Q",
     "slug": "xiaoq",
     "version": "0.1.0",
+    "icon": "./assets/brand/q-bubble-icon.png",
     "orientation": "default",
     "scheme": "xiaoq",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.kaicloud.xiaoq",
+      "appleTeamId": "3996RYYTPW",
+      "supportsTablet": true,
+      "buildNumber": "2",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.kaicloud.xiaoq",
       "predictiveBackGestureEnabled": true
     },
     "web": {

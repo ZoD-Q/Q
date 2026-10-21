@@ -10,7 +10,7 @@ All plugin routes except status, CIMD and the browser OAuth callback require Q B
 | Route | Behavior |
 | --- | --- |
 | `GET /v1/plugins/status` | Availability, OAuth configuration and protocol version only |
-| `POST /v1/plugins/discover` | `{entry,kind}` with card/catalog/page/domain; candidates expire after 10 minutes |
+| `POST /v1/plugins/discover` | `{entry,kind?}`; default `auto`, or explicit card/catalog/page/domain; candidates expire after 10 minutes |
 | `GET/POST /v1/plugins/connections` | List personal connections / add `{discovery_id,candidate_id}` |
 | `GET/DELETE /v1/plugins/connections/{id}` | Inspect / disconnect and erase the connection's tokens |
 | `POST …/{id}/refresh`, `POST …/{id}/accept-update` | Detect changes; inspect pending details before accepting `{revision}` |
@@ -24,7 +24,11 @@ All plugin routes except status, CIMD and the browser OAuth callback require Q B
 | `POST …/invocations/{id}/confirm` | `{confirmed:true}`; atomically claims once before sending |
 | `POST …/invocations/{id}/cancel` | Cancels a proposal that has not started; never promises rollback |
 
-Invocation states: `awaiting_confirmation / running / succeeded / tool_error / unknown / cancelled / expired / input_required / failed`. Tool `isError:true` remains a tool error. Input-request interaction is unsupported. Reusing an owner/idempotency key with identical payload returns the original proposal; a different payload conflicts. `running / unknown` cannot trigger another upstream execution, including after disconnection or restart. Lists contain summaries with `result:null`; get one record to read its full result. Immutable connection snapshots supply the title, Card, endpoint and revision shown during confirmation.
+Automatic discovery selects well-known Catalog discovery only for a bare domain. A full URL is fetched at that exact path and query, then classified by the actual Card/Catalog media type or static page discovery links. Card and Catalog responses already fetched for classification are reused; an unrecognized specific URL never falls back to a guessed whole-domain address. Stored discovery records retain the resolved card/catalog/page/domain kind, so this extension needs no database migration. Explicit kinds retain their previous behavior.
+
+Candidates, connections, pending candidate details and invocations include nullable `owner_name`, derived from the Card's optional `_meta["com.kaicloudpay.q/owner"].name`. This is a publisher-supplied display label, not verified ownership, a Q user identity or an authorization grant. Valid labels contain 1–80 Unicode characters after trimming, with no control or bidi direction/override/isolate characters. Missing or malformed optional owner metadata yields `null`; it does not block an otherwise valid standard Card. Other metadata is preserved. Adding a connection cannot override the publisher's owner through the add request. Changes to the Card still follow the existing explicit update-review flow.
+
+Invocation states: `awaiting_confirmation / running / succeeded / tool_error / unknown / cancelled / expired / input_required / failed`. Tool `isError:true` remains a tool error. Input-request interaction is unsupported. Reusing an owner/idempotency key with identical payload returns the original proposal; a different payload conflicts. `running / unknown` cannot trigger another upstream execution, including after disconnection or restart. Lists contain summaries with `result:null`; get one record to read its full result. Immutable connection snapshots supply the title, declared owner, Card, endpoint and revision shown during confirmation. Legacy snapshots without declared-owner metadata return `owner_name:null` and are not rewritten.
 
 Explicit OAuth reauthorization increments the connection revision and cancels older awaiting proposals. Model continuation refuses previous-revision results. Owner storage limits: 100 saved connections, 5,000 invocation records and 64 MiB JSON budget including reservations for unfinished/unknown results. New proposals return `409 PLUGIN_STORAGE_LIMIT` at the limit, while existing-key recovery, reads and confirmation remain available. Unknown records and idempotency tombstones are not deleted. Discoveries are capped at 20 unexpired records/owner with 512 KiB candidate data each, and expired discoveries are cleaned on the next discovery; OAuth caps each connection at 20 unexpired attempts and clears expired attempts on a new start. There is no user-facing history-archiving flow yet.
 
@@ -40,6 +44,7 @@ The native viewer displays bounded, signature/dimension-verified JPEG, PNG and W
 - `POST /v1/auth/register` body `{handle,password,display_name}` → 201 `{token,user}`. Handle normalized lowercase ASCII `[a-z0-9_]{3,24}`; `xiaoq` is reserved for the system. Password 10–128 characters; display_name 1–40 chars. Creates profile, wallet and balanced 100000 minor-unit welcome credit atomically. All data is simulated.
 - `POST /v1/auth/login` body `{handle,password}` → `{token,user}`. Generic invalid-credentials errors.
 - `POST /v1/auth/logout` → 204; revoke current session.
+- `POST /v1/account/deletions` → completed deletion receipt after password verification and explicit confirmation; `POST /v1/account/deletions/status` recovers only that receipt with the original secret capability after sessions are revoked. Both are `no-store`. See [account lifecycle and retained records](account-lifecycle.md).
 - `GET /v1/me` → User.
 - `PATCH /v1/me` body partial `{display_name,avatar,bio,theme,locale}` → User. bio ≤160 chars, validated enums below. Cannot change handle/id/balance/roles.
 - `GET /v1/users/lookup?handle=lin` → Recipient, exact normalized handle; 404 if absent. Authenticated. Returns no private preferences or credentials.
@@ -52,6 +57,21 @@ The native viewer displays bounded, signature/dimension-verified JPEG, PNG and W
 Machine-readable shapes are authoritative in repository-relative `backend/contracts/openapi.json`. From `mobile/`, run `npm run api:generate` to update `shared/src/generated.ts`; index.ts exposes named aliases. Do not edit generated types by hand. This document defines behavioral rules alongside that schema. User theme: light/dark/warm (default warm); locale: zh-CN/en (default zh-CN); avatar: orbit/leaf/spark/wave (default orbit). Wallet `{account_id,balance_minor,currency:"QDC",mode:"demo"}`. LedgerTransaction `{id,kind:"welcome"|"transfer",direction:"in"|"out",amount_minor,counterparty_handle,counterparty_name,memo,created_at}`. Welcome counterparty handle `xiaoq`, name `小Q 演示金`.
 
 Expected errors: 400 VALIDATION_ERROR, 401 UNAUTHORIZED / INVALID_CREDENTIALS, 404 USER_NOT_FOUND, 409 HANDLE_TAKEN / INSUFFICIENT_FUNDS / IDEMPOTENCY_CONFLICT / SELF_TRANSFER, 429 RATE_LIMITED, 500 INTERNAL_ERROR. Clients should localize codes and show safe fallback messages.
+
+Account lifecycle additionally defines `ACCOUNT_DELETION_NOT_FOUND`, `ACCOUNT_BUSY`,
+`ACCOUNT_DELETED`, and `ACCOUNT_PROTECTED`; basic local content rules return
+`422 CONTENT_BLOCKED`. Suspended/deleted accounts cannot create or use sessions.
+New social interaction with an unavailable peer returns `SOCIAL_ACCOUNT_UNAVAILABLE`.
+User-initiated deletion retains immutable demo-ledger amounts, entries and memo text;
+the original recipient-handle digest preserves existing transfer replay without
+reassigning an old handle to a new user. New transfers require active identities.
+These retention limits are described in the lifecycle contract and deletion UI.
+
+Register, login and account-deletion endpoints share a per-client-source
+30 requests/minute limit. Forwarded client identity is accepted only from explicitly
+trusted proxies; malformed or untrusted headers fall back to the TCP source.
+See [proxy configuration](../docs/trusted-proxy.md). Account-specific password
+limits and global password-computation concurrency also apply.
 
 ## Local demo bootstrap
 

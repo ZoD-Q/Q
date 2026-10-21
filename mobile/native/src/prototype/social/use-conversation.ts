@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import { decodeEphemeralState, decodeMessage, decodeMessagePage, decodeMutation, decodeOpened, type SocialMessage } from './api';
-import { createDeadline, createPrivacyGate, id, remainingMs, sendPayload, SocialError, validateText, type Deadline, type EphemeralSeconds, type PendingSend, type RequestStamp } from './core';
+import { createDeadline, createPrivacyGate, id, isFinalSendRejection, remainingMs, restoreRejectedDraft, samePendingSend, sendPayload, SocialError, validateText, type Deadline, type EphemeralSeconds, type PendingSend, type RequestStamp } from './core';
 import { outboxStore } from './outbox-store';
 import { socialErrorCode, useSocial } from './state';
 
@@ -132,6 +132,19 @@ export function useConversation(conversationId: string) {
       updatePending(null); setSeconds(null); void sync(); void service.current.refresh();
     } catch (failure) {
       if (!current(stamp)) return;
+      if (intent && isFinalSendRejection(failure) && samePendingSend(pendingRef.current, intent)) {
+        const rejected = intent;
+        try {
+          await outboxStore.remove(rejected.ownerId, rejected.conversationId, rejected.clientMessageId);
+          if (!current(stamp) || !samePendingSend(pendingRef.current, rejected)) return;
+          updatePending(null);
+          setDraft(value => current(stamp) ? restoreRejectedDraft(value, rejected) : value);
+          setError('CONTENT_BLOCKED');
+        } catch (storageFailure) {
+          if (current(stamp)) setError(socialErrorCode(storageFailure));
+        }
+        return;
+      }
       if (failure instanceof SocialError && failure.status === 410 && failure.code === 'SOCIAL_MESSAGE_EXPIRED' && intent) {
         await outboxStore.remove(intent.ownerId, intent.conversationId, intent.clientMessageId);
         if (!current(stamp)) return;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { registerHooks } from 'node:module';
-import { canReportEvidence, createDeadline, createOutboxStore, createPrivacyGate, decodePending, messageReceipt, normalizeHandle, persistedPending, remainingMs, sameStamp, sendPayload, validateText } from './core.ts';
+import { canReportEvidence, createDeadline, createOutboxStore, createPrivacyGate, decodePending, isFinalSendRejection, messageReceipt, normalizeHandle, persistedPending, remainingMs, restoreRejectedDraft, samePendingSend, sameStamp, sendPayload, SocialError, validateText } from './core.ts';
 
 // Production uses Metro's extension resolution; keep this local to these direct-TS tests.
 const resolver = registerHooks({ resolve(specifier, context, next) {
@@ -235,4 +235,82 @@ test('cancellation and timeout take precedence over a late bodyless HTTP error',
   await assert.rejects(socialRequest({ ...options, timeoutMs: 1, transport: async () => {
     await new Promise(resolve => setTimeout(resolve, 10)); return new Response(null, { status: 404 });
   } }), { code: 'REQUEST_TIMEOUT', status: 0 });
+});
+
+test('owner purge removes journaled orphan chunks, preserves other owners and fences new writes across restart', async () => {
+  const storage = memory(), store = createOutboxStore(storage.adapter);
+  const second = { ...intent,ownerId:peer,text:'other owner pending text' };
+  await store.write(intent,version); await store.write(second,message);
+  const remove = storage.adapter.remove;
+  storage.adapter.remove = async key => {
+    if (key === `q.social.pending.${owner}.${conversation}.${version}.0`) throw Error('chunk removal failed');
+    await remove(key);
+  };
+  await assert.rejects(store.remove(owner,conversation,client));
+  assert.equal(storage.values.has(`q.social.pending.${owner}.${conversation}`),false,'manifest was removed before the failed chunk cleanup');
+  storage.adapter.remove = remove;
+  await store.purgeOwner(owner);
+  assert.ok(![...storage.values.values()].join('').includes(intent.text));
+  assert.deepEqual(await store.read(peer,conversation),second);
+  assert.equal(await store.read(owner,conversation),null);
+  await assert.rejects(store.write(intent,version),{ code:'ACCOUNT_DELETED' });
+  const restarted = createOutboxStore(storage.adapter);
+  assert.equal(await restarted.read(owner,conversation),null);
+  await assert.rejects(restarted.write(intent,version),{ code:'ACCOUNT_DELETED' });
+});
+
+test('purge waits for an already writing outbox then rejects queued writes without resurrecting owner content', async () => {
+  const storage = memory();
+  let release, entered;
+  const wait = new Promise(resolve=>{release=resolve;}), began = new Promise(resolve=>{entered=resolve;});
+  const set = storage.adapter.set;
+  storage.adapter.set = async (key,value) => {
+    await set(key,value);
+    if (key === `q.social.pending.${owner}.${conversation}.${version}.0`) { entered(); await wait; }
+  };
+  const store = createOutboxStore(storage.adapter);
+  const writing = store.write(intent,version);
+  await began;
+  const purging = store.purgeOwner(owner);
+  const queued = assert.rejects(store.write({ ...intent,clientMessageId:message },message),{ code:'ACCOUNT_DELETED' });
+  release();
+  await writing; await purging; await queued;
+  assert.equal(await store.read(owner,conversation),null);
+  assert.ok(![...storage.values.values()].join('').includes(intent.text));
+});
+
+test('known legacy outboxes are indexed on read but unindexed orphan chunks are not falsely claimed as erased', async () => {
+  const storage = memory();
+  const base = `q.social.pending.${owner}.${conversation}`;
+  storage.values.set(base,JSON.stringify({ version,count:1 }));
+  storage.values.set(`${base}.${version}.0`,JSON.stringify(intent));
+  const unindexed = `q.social.pending.${owner}.${peer}.${message}.0`;
+  storage.values.set(unindexed,'legacy fragment without a manifest or index');
+  const store = createOutboxStore(storage.adapter);
+  assert.deepEqual(await store.read(owner,conversation),intent);
+  await store.purgeOwner(owner);
+  assert.equal(storage.values.has(base),false);
+  assert.equal(storage.values.has(`${base}.${version}.0`),false);
+  assert.equal(storage.values.get(unindexed),'legacy fragment without a manifest or index',
+    'SecureStore provides no key enumeration; the documented legacy-fragment limitation is real');
+});
+
+test('CONTENT_BLOCKED is final only for its exact status and editable draft restoration cannot clobber newer text or another pending send', async () => {
+  assert.equal(isFinalSendRejection(new SocialError('CONTENT_BLOCKED',422)),true);
+  for (const failure of [
+    new SocialError('CONTENT_BLOCKED',500),new SocialError('NETWORK_ERROR'),
+    new SocialError('UNAUTHORIZED',401),new SocialError('RATE_LIMITED',429),
+    new SocialError('IDEMPOTENCY_CONFLICT',409),Object.assign(new Error('unstructured'),{ code:'CONTENT_BLOCKED',status:422 }),
+  ]) assert.equal(isFinalSendRejection(failure),false);
+  assert.equal(restoreRejectedDraft('',intent),intent.text);
+  assert.equal(restoreRejectedDraft('new typed message',intent),'new typed message');
+  assert.equal(restoreRejectedDraft(' ',intent),' ');
+  for (const altered of [null,{ ...intent,ownerId:peer },{ ...intent,conversationId:peer },{ ...intent,clientMessageId:message }]) {
+    assert.equal(samePendingSend(altered,intent),false);
+  }
+  const storage = memory(),store = createOutboxStore(storage.adapter);
+  const newer = { ...intent,clientMessageId:message,text:'new unresolved text' };
+  await store.write(newer,version);
+  await store.remove(intent.ownerId,intent.conversationId,intent.clientMessageId);
+  assert.deepEqual(await store.read(owner,conversation),newer);
 });

@@ -2,15 +2,16 @@ import { useEffect, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Linking, Pressable, ScrollView, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import {
-  ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Circle, Code2, Copy,
-  FileJson2, Globe2, Info, Link2, ListChecks, Server, ShieldCheck,
+  ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Code2, Copy,
+  FileJson2, Globe2, Link2, ListChecks, Server, ShieldCheck,
   type LucideIcon,
 } from "lucide-react-native";
 import { Action, Choice, Divider, Input, Page, Sheet, Tabs, Tag, Type, useDesign } from "../design";
 import { usePluginWorkbench } from "./state";
-import { type EntryKind, type Issue, type PluginDraft } from "./materials";
+import { inspectEntry, type EntryKind, type Issue, type PluginDraft, type PluginEntryIntent } from "./materials";
 
 const entryChoices: { id: EntryKind; zh: string; en: string; placeholder: string; hintZh: string; hintEn: string }[] = [
+  { id: "auto", zh: "自动识别", en: "Automatic", placeholder: "https://example.com/plugin", hintZh: "填写完整 HTTPS 链接或纯域名。实际类型将在「我的连接」中按服务响应识别。", hintEn: "Use a complete HTTPS link or a domain. My connections identifies the entry from the service response." },
   { id: "card", zh: "Server Card", en: "Server Card", placeholder: "https://your-domain.com/server-card.json", hintZh: "推荐。一个插件对应一个稳定地址，返回描述身份与连接方式的 JSON。", hintEn: "Recommended. One stable URL per plugin, returning identity and connection metadata as JSON." },
   { id: "domain", zh: "域名", en: "Domain", placeholder: "your-domain.com", hintZh: "只填域名。服务器需在 /.well-known/ai-catalog.json 提供目录。", hintEn: "Enter a domain only. Host a catalog at /.well-known/ai-catalog.json." },
   { id: "page", zh: "介绍页", en: "Intro page", placeholder: "https://your-domain.com/plugins/calendar", hintZh: "页面需用静态 rel=ai-catalog 或 HTTP Link 声明目录；普通网页链接还不够。", hintEn: "Declare a catalog with a static rel=ai-catalog link or HTTP Link header. A regular web page alone is not enough." },
@@ -87,15 +88,21 @@ function PreparationGuide() {
   </View>;
 }
 
-function ConnectionChecks() {
+function ConnectionChecks({ onConnect }: { onConnect: (intent: PluginEntryIntent) => void }) {
   const { colors, text, locale } = useDesign();
   const state = usePluginWorkbench();
   const [showJson, setShowJson] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
   const { copy, copyError, copiedValue, resetCopy } = useCopy();
   const selected = entryChoices.find(choice => choice.id === state.entryKind)!;
   const passed = state.entryReport && noErrors(state.entryReport.issues);
   const cardPassed = state.cardReport && noErrors(state.cardReport.issues);
+  const continueConnection = () => {
+    const report = inspectEntry(state.entry, state.entryKind);
+    state.checkEntry();
+    if (noErrors(report.issues)) onConnect({ entry: state.entry.trim(), kind: state.entryKind });
+  };
   const summary = locale === "zh" ? [
     "Q 插件接入清单（本地准备，尚未提交或接通）",
     `交给 Q 的入口：${state.entryReport?.normalizedUrl ?? ""}`,
@@ -119,20 +126,23 @@ function ConnectionChecks() {
     "Public indexing separately needs publisher consent, origin and robots/noindex checks; it is not required for a personal connection.",
   ].join("\n");
   return <View style={{ gap: 22 }}>
-    <SectionHeading title={text("提供你的插件入口", "Your plugin entry")} detail={text("已有服务可以直接从这里开始。链接和材料只在本次会话中检查，不会发送到服务器。", "Start here if your service is ready. Links and materials are checked only in this session and are not sent to a server.")} icon={Link2} />
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
-      {entryChoices.map(choice => <Choice key={choice.id} label={text(choice.zh, choice.en)} selected={choice.id === state.entryKind} onPress={() => state.setEntryKind(choice.id)} />)}
-    </View>
-    <Input label={text("入口地址", "Entry address")} value={state.entry} onChangeText={state.setEntry} placeholder={selected.placeholder}
-      autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={4096} hint={text(selected.hintZh, selected.hintEn)} />
-    <Type size={12} muted>{text("只填写公开连接信息，请勿粘贴 API Key、访问令牌或带凭据的链接。", "Use public connection information only. Do not paste API keys, tokens, or links containing credentials.")}</Type>
-    <Action label={text("检查链接格式", "Check link format")} icon={Link2} onPress={state.checkEntry} style={{ alignSelf: "flex-start" }} />
-    {state.entryReport ? <View accessibilityLiveRegion="polite" style={{ gap: 10, padding: 18, backgroundColor: passed ? colors.accentBg : colors.soft, borderRadius: 12 }}>
-      <Type size={15} weight="500" color={passed ? colors.accent : colors.danger}>{text(passed ? "链接格式符合要求" : "请先修改入口地址", passed ? "Link format checks passed" : "Update the entry address")}</Type>
-      <Issues issues={state.entryReport.issues} />
-      {passed ? <Type size={13} muted selectable>{text("这不是连接成功：还没有访问该地址，也没有确认它返回的内容。", "This is not a successful connection. The URL has not been accessed and its response has not been verified.")}</Type> : null}
-    </View> : null}
-    <Divider />
+    <SectionHeading title={text("添加已有插件", "Add an existing plugin")} detail={text("粘贴服务方给你的链接，下一步查看名称、所有者和来源后确认添加。", "Paste the publisher’s link. Review the name, owner, and source before adding it.")} icon={Link2} />
+    <Input label={text("插件链接", "Plugin link")} value={state.entry} onChangeText={state.setEntry} placeholder={selected.placeholder}
+      autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={4096} hint={text("完整 HTTPS 链接或域名，不含密钥和令牌。", "A complete HTTPS link or domain, without keys or tokens.")} />
+    <Issues issues={state.entryReport?.issues.filter(item => item.level === "error") ?? []} />
+    <Action label={text("继续添加", "Continue to add")} icon={ArrowRight} disabled={!state.entry.trim()} onPress={continueConnection} style={{ alignSelf: "flex-start" }} />
+    <Disclosure title={text("高级格式检查（可选）", "Advanced format checks (optional)")} open={showAdvanced} onToggle={() => setShowAdvanced(value => !value)}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+        {entryChoices.map(choice => <Choice key={choice.id} label={text(choice.zh, choice.en)} selected={choice.id === state.entryKind} onPress={() => state.setEntryKind(choice.id)} />)}
+      </View>
+      <Type size={13} muted>{text(selected.hintZh, selected.hintEn)}</Type>
+      <Action kind="secondary" label={text("只检查链接格式", "Check format only")} icon={Link2} onPress={state.checkEntry} style={{ alignSelf: "flex-start" }} />
+      {state.entryReport ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}>
+        <Type size={14} weight="500" color={passed ? colors.accent : colors.danger}>{text(passed ? "格式检查通过" : "请修改链接", passed ? "Format checks passed" : "Update the link")}</Type>
+        <Issues issues={state.entryReport.issues.filter(item => item.level !== "error")} />
+        <Type size={12} muted>{text("这里只检查格式，尚未访问服务或建立连接。", "These checks do not contact the service or create a connection.")}</Type>
+      </View> : null}
+    </Disclosure>
     <Disclosure title={text("检查 Server Card 内容（可选）", "Check Server Card content (optional)")} open={showJson} onToggle={() => setShowJson(value => !value)}>
       <Type size={13} muted>{text("粘贴 JSON，检查关键字段、端点与协议版本。不执行内容，也不代替完整 schema 校验。", "Paste JSON to inspect key fields, endpoints, and protocol versions. Content is not executed; this is not complete schema validation.")}</Type>
       <Input label="Server Card JSON" multiline value={state.cardInput} onChangeText={state.setCardInput} autoCapitalize="none" autoCorrect={false}
@@ -144,19 +154,7 @@ function ConnectionChecks() {
         <Type size={12} muted>{text("尚未核对这份 JSON 是否为入口实际返回的内容。", "The pasted JSON has not been matched to the URL’s actual response.")}</Type>
       </View> : null}
     </Disclosure>
-    {passed ? <View style={{ gap: 14 }}>
-      <SectionHeading title={text("前往我的连接继续", "Continue in My connections")} detail={text("到「我的连接」完成以下步骤。本页仅准备材料和检查格式。", "Complete these steps in My connections. This page only prepares materials and checks their format.")} />
-      {[
-        [text("确认添加", "Confirm addition"), text("读取 Card，确认来源和服务，保存用户连接。", "Read the Card, confirm the source and service, and save the user connection.")],
-        [text("按需授权", "Authorize if needed"), text("需要账户身份时，跳转服务方授权。添加不等于授权。", "Authorize with the service when account access is needed. Adding is not authorizing.")],
-        [text("首次调用", "First call"), text("完成实时发现，按权限调用工具并验证实际结果。", "Discover live capabilities, call permitted tools, and verify the result.")],
-      ].map(([title, detail]) => <View key={title} style={{ flexDirection: "row", gap: 12, paddingVertical: 9 }}>
-        <Circle size={17} color={colors.faint} style={{ marginTop: 3 }} />
-        <View style={{ flex: 1, gap: 3 }}><Type size={14} weight="500">{title}</Type><Type size={13} muted>{detail}</Type></View>
-        <Type size={12} muted>{text("未验证", "Unverified")}</Type>
-      </View>)}
-      <Action kind="secondary" label={text("查看接入清单", "View handoff checklist")} icon={ListChecks} onPress={() => { resetCopy(); setShowChecklist(true); }} style={{ alignSelf: "flex-start" }} />
-    </View> : null}
+    {passed ? <Action kind="ghost" label={text("查看接入清单", "View handoff checklist")} icon={ListChecks} onPress={() => { resetCopy(); setShowChecklist(true); }} style={{ alignSelf: "flex-start" }} /> : null}
     <Sheet visible={showChecklist} title={text("交付给 Q 的接入清单", "Your Q handoff checklist")} onClose={() => setShowChecklist(false)}
       footer={<View accessibilityLiveRegion="polite" style={{ gap: 8 }}><Action icon={copiedValue === summary ? Check : Copy} label={copiedValue === summary ? text("已复制清单", "Checklist copied") : text("复制接入清单", "Copy checklist")} onPress={() => { void copy(summary); }} />{copyError ? <Type size={12} color={colors.danger}>{copyError}</Type> : null}</View>}>
       <Type selectable size={14}>{summary}</Type>
@@ -203,18 +201,22 @@ function MaterialGenerator() {
   const state = usePluginWorkbench();
   const [file, setFile] = useState("card");
   const [outputOpen, setOutputOpen] = useState(false);
+  const [technicalOpen, setTechnicalOpen] = useState(false);
   const { copy, copyError, copiedValue, resetCopy } = useCopy();
-  const fields = ["title", "description", "name", "version"];
+  const fields = ["title", "description", "ownerName", "name", "version"];
   const stepErrors = state.issues?.filter(issue => issue.level === "error" && (state.step === 0 ? fields.includes(issue.field) : state.step === 1 ? ["cardUrl", "endpointUrl"].includes(issue.field) : true)) ?? [];
-  const field = (key: keyof Pick<PluginDraft, "title" | "description" | "name" | "version" | "cardUrl" | "endpointUrl">, label: string, placeholder: string, hint?: string) => <View style={{ gap: 6 }}>
-    <Input label={label} value={state.draft[key]} onChangeText={value => state.updateDraft(key, value)} placeholder={placeholder}
-      autoCapitalize="none" autoCorrect={false} keyboardType={key.endsWith("Url") ? "url" : "default"} maxLength={key === "description" || key === "title" ? 100 : key.endsWith("Url") ? 4096 : 200} hint={hint} />
+  const field = (key: keyof Pick<PluginDraft, "title" | "description" | "ownerName" | "name" | "version" | "cardUrl" | "endpointUrl">, label: string, placeholder: string, hint?: string) => <View style={{ gap: 6 }}>
+    <Input label={label} value={state.draft[key] ?? ""} onChangeText={value => state.updateDraft(key, value)} placeholder={placeholder}
+      autoCapitalize="none" autoCorrect={false} keyboardType={key.endsWith("Url") ? "url" : "default"} maxLength={key === "ownerName" ? 160 : key === "description" || key === "title" ? 100 : key.endsWith("Url") ? 4096 : 255} hint={hint} />
     <Issues issues={stepErrors.filter(issue => issue.field === key)} />
   </View>;
   const advance = () => {
     const issues = state.validateDraft();
     const relevant = state.step === 0 ? fields : ["cardUrl", "endpointUrl"];
-    if (issues.some(issue => issue.level === "error" && relevant.includes(issue.field))) return;
+    if (issues.some(issue => issue.level === "error" && relevant.includes(issue.field))) {
+      if (state.step === 0 && issues.some(issue => issue.level === "error" && ["name", "version"].includes(issue.field))) setTechnicalOpen(true);
+      return;
+    }
     state.setStep(state.step + 1);
   };
   const generate = () => {
@@ -237,10 +239,13 @@ function MaterialGenerator() {
       </View>)}
     </View>
     {state.step === 0 ? <>
-      {field("title", text("插件展示名", "Display name"), text("例如：日程助手", "e.g. Calendar assistant"))}
-      {field("description", text("一句话说明能做什么", "What can it do?"), text("查询日程并创建日历事件", "Find availability and create calendar events"), text("100 字符以内，不填写用户数据或密钥。", "Up to 100 characters. No user data or secrets."))}
-      {field("name", text("服务标识", "Server name"), "com.example/calendar", text("使用你控制的域名命名空间 / 服务名。它不代替 Card URL 作为连接身份。", "Use your domain namespace / server name. Connection identity still comes from the Card URL."))}
-      {field("version", text("服务版本", "Service version"), "1.0.0")}
+      {field("title", text("插件名称 *", "Plugin name *"), text("例如：日程助手", "e.g. Calendar assistant"))}
+      {field("description", text("能帮用户做什么 *", "What does it do? *"), text("查询日程并创建日历事件", "Find availability and create calendar events"), text("100 字符以内，不填写用户数据或密钥。", "Up to 100 characters. No user data or secrets."))}
+      {field("ownerName", text("所有者（可选）", "Owner (optional)"), text("个人、团队或品牌名称", "Person, team, or brand"), text("最多 80 个字符。会向用户展示为发布者自声明，不代表小Q认证或账号权限。", "Up to 80 characters. Shown as a publisher declaration, not Q verification or account authorization."))}
+      <Disclosure title={text("服务标识与版本", "Server identity and version")} open={technicalOpen} onToggle={() => setTechnicalOpen(value => !value)}>
+        {field("name", text("服务标识 *", "Server name *"), "com.example/calendar", text("使用你控制的域名命名空间 / 服务名。它不代替 Card URL 作为连接身份。", "Use your domain namespace / server name. Connection identity still comes from the Card URL."))}
+        {field("version", text("服务版本 *", "Service version *"), "1.0.0")}
+      </Disclosure>
       <Action kind="ghost" label={text("填入日程插件示例", "Fill calendar example")} onPress={state.useExample} style={{ alignSelf: "flex-start" }} />
     </> : state.step === 1 ? <>
       {field("cardUrl", text("Server Card 发布地址", "Server Card URL"), "https://your-domain.com/server-card.json", text("在该地址发布生成的 Card JSON，每个插件保持独立稳定。", "Publish the generated Card JSON here. Keep this URL stable and unique to the plugin."))}
@@ -268,9 +273,9 @@ function MaterialGenerator() {
     {generated ? <View style={{ gap: 12 }}><Divider /><Action kind="secondary" label={text("查看已生成材料", "View generated files")} icon={FileJson2} onPress={() => { resetCopy(); setOutputOpen(true); }} /></View> : null}
     <Type size={12} muted>{text("草稿仅在本次会话保留，刷新后清空。生成结果不代表已经部署、授权或接入。", "Drafts last for this session and reset on refresh. Generated files are not proof of deployment, authorization, or connection.")}</Type>
     <Sheet visible={outputOpen && !!generated} title={text("接入材料已生成", "Your files are ready")} onClose={() => setOutputOpen(false)} wide
-      footer={<View accessibilityLiveRegion="polite" style={{ gap: 8 }}><View style={{ flexDirection: phone ? "column" : "row", gap: 10 }}>
-        <Action icon={copiedValue === fileValue ? Check : Copy} label={copiedValue === fileValue ? text("已复制内容", "Content copied") : text("复制当前内容", "Copy current file")} onPress={() => { void copy(fileValue); }} style={{ flex: 1 }} />
-        <Action kind="secondary" label={text("带入本地检查", "Use in local checks")} onPress={() => { state.useGeneratedCard(); setOutputOpen(false); }} style={{ flex: 1 }} />
+      footer={<View accessibilityLiveRegion="polite" style={{ gap: 8, flexShrink: 0 }}><View style={{ flexDirection: phone ? "column" : "row", gap: 10, flexShrink: 0, minHeight: phone ? 102 : 46 }}>
+        <Action icon={copiedValue === fileValue ? Check : Copy} label={copiedValue === fileValue ? text("已复制内容", "Content copied") : text("复制当前内容", "Copy current file")} onPress={() => { void copy(fileValue); }} style={phone ? { width: "100%", minHeight: 46, flexShrink: 0 } : { flex: 1, minHeight: 46 }} />
+        <Action kind="secondary" label={text("用此链接继续", "Continue with this link")} onPress={() => { state.useGeneratedCard(); setOutputOpen(false); }} style={phone ? { width: "100%", minHeight: 46, flexShrink: 0 } : { flex: 1, minHeight: 46 }} />
       </View>{copyError ? <Type size={12} color={colors.danger}>{copyError}</Type> : null}</View>}>
       <Tag>{text("本地生成 · 尚未部署", "Generated locally · not deployed")}</Tag>
       <Tabs items={fileItems} value={file} onChange={value => { resetCopy(); setFile(value); }} />
@@ -287,24 +292,22 @@ function MaterialGenerator() {
   </View>;
 }
 
-export function PluginWorkbenchPage({ onBack }: { onBack: () => void }) {
-  const { colors, text, width, notify } = useDesign();
+export function PluginWorkbenchPage({ onBack, onConnect }: { onBack: () => void; onConnect: (intent: PluginEntryIntent) => void }) {
+  const { text, width, notify } = useDesign();
   const state = usePluginWorkbench();
   const [publicInfo, setPublicInfo] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const wide = width >= 1240;
   return <KeyboardAvoidingView behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-    <Page title={text("插件工作台", "Plugin workbench")} description={text("准备一个稳定的 HTTPS 入口，让用户找到并连接你的服务。", "Prepare a stable HTTPS entry so users can find and connect your service.")}
+    <Page title={text("插件工作台", "Plugin workbench")} description={text("连接已有服务，或为自己的插件准备发布材料。", "Connect an existing service or prepare your own plugin’s publishing materials.")}
       action={<Action kind="ghost" icon={ArrowLeft} label={text("返回插件", "Back to plugins")} onPress={onBack} />}>
-      <View style={{ flexDirection: "row", gap: 10, paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, backgroundColor: colors.accentBg, alignItems: "flex-start" }}>
-        <Info size={17} color={colors.accent} style={{ marginTop: 2 }} />
-        <Type size={13} color={colors.accent} style={{ flex: 1 }}>{text("本页仅准备材料和检查格式。请到「我的连接」进行真实连接、授权与调用；检查通过不会自动添加插件。", "This page only prepares materials and checks their format. Use My connections to connect, authorize, and call plugins. Passing these checks does not add a plugin.")}</Type>
-      </View>
-      <Tabs items={[{ id: "connect", label: text("已有接入链接", "I have a link") }, { id: "prepare", label: text("生成接入文件", "Prepare files") }]} value={state.tab} onChange={state.setTab} />
+      <Tabs items={[{ id: "connect", label: text("连接插件", "Connect a plugin") }, { id: "prepare", label: text("准备发布", "Prepare to publish") }]} value={state.tab} onChange={state.setTab} />
+      {state.tab === "prepare" ? <Type size={13} muted>{text("这里生成文件与清单，不会替你部署、认证或公开上架。", "This creates files and a checklist; it does not deploy, verify, or publicly list your plugin.")}</Type> : null}
       <View style={{ flexDirection: wide ? "row" : "column", gap: wide ? 42 : 32, alignItems: "flex-start" }}>
         <View style={{ flex: wide ? 1 : undefined, width: wide ? undefined : "100%", minWidth: 0 }}>
-          {state.tab === "connect" ? <ConnectionChecks /> : <MaterialGenerator />}
+          {state.tab === "connect" ? <ConnectionChecks onConnect={onConnect} /> : <MaterialGenerator />}
         </View>
-        <View style={{ width: wide ? 285 : "100%" }}><PreparationGuide /></View>
+        <View style={{ width: wide ? 285 : "100%" }}><Disclosure title={text("开发者说明", "Developer guide")} open={guideOpen} onToggle={() => setGuideOpen(value => !value)}><PreparationGuide /></Disclosure></View>
       </View>
       <View>
         <Divider />

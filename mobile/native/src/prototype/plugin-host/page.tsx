@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Linking, View } from 'react-native';
 import { randomUUID } from 'expo-crypto';
 import { ArrowLeft, Plus, RefreshCw } from 'lucide-react-native';
@@ -8,8 +8,36 @@ import { ChatAuthSheet } from '../ai-chat/auth-sheet';
 import type { ChatController } from '../ai-chat/use-chat';
 import { PluginsPage } from '../services/plugins';
 import { pluginRequest } from './client';
-import { decodeDiscovery, decodeInvocation, decodePluginConnection, decodePluginStatus, decodeResources, decodeTool, parseArguments, pluginError, publicHttps, record, type Discovery, type PluginConnection, type PluginInvocation, type PluginTool, type ResourceLink } from './core';
+import { decodeDiscovery, decodeInvocation, decodePluginConnection, decodePluginStatus, decodeResources, decodeTool, parseArguments, pluginError, pluginOrigin, connectionStatusLabel, authorizationLabel, initialPluginEntryState, pluginAuthModalReducer, canPresentPluginConnectionPage, publicHttps, record, type Discovery, type PluginConnection, type PluginInvocation, type PluginTool, type ResourceLink, type PluginEntryIntentOutcome } from './core';
 import { PluginResultView, ResourceViewer } from './result-view';
+import { normalizeOwnerName, type EntryKind, type PluginEntryIntent } from '../plugin-workbench/materials';
+
+type LinkIntent = { initialIntent?: PluginEntryIntent | null; onIntentHandled?: (intent: PluginEntryIntent, outcome: PluginEntryIntentOutcome) => void };
+const ownerLabel = (name: string | null | undefined, text: (zh: string, en: string) => string) => name
+  ? text(`所有者：${name}（发布者自声明）`, `Owner: ${name} (publisher-declared)`)
+  : text('所有者未声明', 'Owner not declared');
+
+function SourceSummary({ cardUrl, endpointUrl }: { cardUrl: string; endpointUrl: string }) {
+  const { text } = useDesign();
+  const cardOrigin = pluginOrigin(cardUrl), endpointOrigin = pluginOrigin(endpointUrl);
+  return <View style={{ gap: 4 }}>
+    <Type selectable size={12} muted>{text('服务来源：', 'Service source: ')}{endpointOrigin ?? text('暂不可识别', 'Unavailable')}</Type>
+    {cardOrigin !== endpointOrigin && <Type selectable size={12} muted>{text('说明文件来源：', 'Card source: ')}{cardOrigin ?? text('暂不可识别', 'Unavailable')}</Type>}
+  </View>;
+}
+
+function TechnicalDetails({ cardUrl, endpointUrl, children }: { cardUrl?: string; endpointUrl?: string; children?: ReactNode }) {
+  const { text } = useDesign();
+  const [open, setOpen] = useState(false);
+  return <View style={{ gap: 8 }}>
+    <Action kind="ghost" label={open ? text('收起技术详情', 'Hide technical details') : text('技术详情', 'Technical details')} onPress={() => setOpen(value => !value)} style={{ alignSelf: 'flex-start' }} />
+    {open && <View style={{ gap: 8 }}>
+      {cardUrl && <Type selectable size={12} muted>{text('说明文件：', 'Server Card: ')}{cardUrl}</Type>}
+      {endpointUrl && <Type selectable size={12} muted>{text('MCP 接收地址：', 'MCP endpoint: ')}{endpointUrl}</Type>}
+      {children}
+    </View>}
+  </View>;
+}
 
 export function invocationLabel(status: string, text: (zh: string, en: string) => string) {
   const labels: Record<string, [string, string]> = { awaiting_confirmation: ['等待确认', 'Awaiting confirmation'], running: ['执行中', 'Running'], succeeded: ['已完成', 'Completed'], tool_error: ['工具返回错误', 'Tool error'], unknown: ['结果未知，请勿重复执行', 'Outcome unknown; do not repeat'], cancelled: ['已取消', 'Cancelled'], expired: ['确认已过期', 'Confirmation expired'], failed: ['执行失败', 'Failed'], input_required: ['需要额外输入，当前不支持', 'Further input required; unsupported'] };
@@ -34,11 +62,12 @@ export function InvocationView({ invocation, token, onChanged, onContinue, autoS
   };
   return <View style={{ gap: 12, paddingVertical: 14 }}>
     <Type weight="500">{invocation.connection_title}</Type>
-    <Type selectable size={12} muted>{invocation.card_url}</Type>
-    <Type selectable size={12} muted>{text('接收地址：', 'Recipient endpoint: ')}{invocation.endpoint_url}</Type>
+    <Type size={12} muted>{ownerLabel(invocation.owner_name, text)}</Type>
+    <SourceSummary cardUrl={invocation.card_url} endpointUrl={invocation.endpoint_url} />
     <Type weight="500">{invocation.tool_name}</Type>
     <Type size={12} muted>{invocationLabel(invocation.status, text)}</Type>
     {invocation.status === 'awaiting_confirmation' && <>
+      <Type selectable size={12} muted>{text('实际接收地址：', 'Actual recipient endpoint: ')}{invocation.endpoint_url}</Type>
       <Type selectable size={13}>{JSON.stringify(invocation.arguments, null, 2)}</Type>
       <Type size={12} muted>{text('确认后将把这些参数发送给此插件。', 'Confirm to send these arguments to this plugin.')}</Type>
     </>}
@@ -52,6 +81,7 @@ export function InvocationView({ invocation, token, onChanged, onContinue, autoS
     {busy && <ActivityIndicator color={colors.accent} />}
     {!!error && <Type selectable color={colors.danger} size={13}>{pluginError(error, text)}</Type>}
     {!!invocation.error_code && <Type color={colors.danger} size={13}>{pluginError(invocation.error_code, text)}</Type>}
+    <TechnicalDetails cardUrl={invocation.card_url} endpointUrl={invocation.endpoint_url} />
     {showResult && invocation.result !== null && invocation.result !== undefined && <PluginResultView value={invocation.result} token={token} connectionId={invocation.connection_id} />}
   </View>;
 }
@@ -88,7 +118,7 @@ function ToolForm({ tool, busy, onPrepare }: { tool: PluginTool; busy: boolean; 
   </View>;
 }
 
-function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string; onSelect: (connection: PluginConnection) => void; onOpenWorkbench: () => void }) {
+function ConnectedPlugins({ token, onSelect, onOpenWorkbench, initialIntent, onIntentHandled }: { token: string; onSelect: (connection: PluginConnection) => void; onOpenWorkbench: () => void } & LinkIntent) {
   const { text, colors } = useDesign();
   const [connections, setConnections] = useState<PluginConnection[]>([]);
   const [selected, setSelected] = useState<PluginConnection | null>(null);
@@ -99,9 +129,10 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
   const [resources, setResources] = useState<ResourceLink[]>([]);
   const [prompts, setPrompts] = useState<unknown[]>([]);
   const [promptResult, setPromptResult] = useState<unknown>(null);
-  const [entry, setEntry] = useState('');
-  const [kind, setKind] = useState('card');
-  const [adding, setAdding] = useState(false);
+  const [entry, setEntry] = useState(() => initialPluginEntryState(initialIntent).entry);
+  const [kind, setKind] = useState<EntryKind>(() => initialPluginEntryState(initialIntent).kind);
+  const [advancedEntry, setAdvancedEntry] = useState(() => initialPluginEntryState(initialIntent).advanced);
+  const [adding, setAdding] = useState(() => initialPluginEntryState(initialIntent).adding);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -157,26 +188,44 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
       return { id: value.attempt_id, url: publicHttps(value.authorization_url)! };
     }, 'POST'); setOauth(value);
   };
+  const pendingCandidate = record(selected?.pending_update_details) && record(selected.pending_update_details.candidate) ? selected.pending_update_details.candidate : null;
   return <Page title={selected ? selected.title || selected.name : text('我的插件', 'My plugins')} description={selected?.description}
-    action={selected ? <Action kind="ghost" icon={ArrowLeft} label={text('返回', 'Back')} disabled={busy} onPress={() => { setSelected(null); closeToolSheet(); }} /> : <Action icon={Plus} label={text('添加插件', 'Add plugin')} disabled={busy} onPress={() => { setAdding(true); setDiscovery(null); }} />}>
+    action={selected ? <Action kind="ghost" icon={ArrowLeft} label={text('返回', 'Back')} disabled={busy} onPress={() => { setSelected(null); closeToolSheet(); }} /> : <Action icon={Plus} label={text('添加插件', 'Add plugin')} disabled={busy} onPress={() => { setKind('auto'); setAdvancedEntry(false); setAdding(true); setDiscovery(null); setError(null); }} />}>
     {busy && <ActivityIndicator accessibilityLabel={text('正在加载', 'Loading')} color={colors.accent} />}
     {!!error && <Type selectable color={colors.danger}>{pluginError(error, text)}</Type>}
     {!selected ? <>
-      {connections.map(connection => <Row key={connection.id} title={connection.title || connection.name} subtitle={connection.endpoint_url} onPress={busy ? undefined : () => { void run(() => open(connection)); }} />)}
-      {!connections.length && !busy && <Type muted>{text('添加服务方提供的插件链接，查看工具后即可使用。', 'Add a plugin link from its publisher to inspect and use its tools.')}</Type>}
+      {connections.map(connection => <Row key={connection.id} title={connection.title || connection.name} subtitle={`${ownerLabel(connection.owner_name, text)}\n${pluginOrigin(connection.endpoint_url) ?? text('来源待确认', 'Source unavailable')}`} onPress={busy ? undefined : () => { void run(() => open(connection)); }} />)}
+      {!connections.length && !busy && <View style={{ gap: 8 }}>
+        <Type weight="500">{text('还没有添加插件', 'No plugins added yet')}</Type>
+        <Type muted>{text('点「添加插件」，粘贴服务方的链接后确认添加。这里仅显示当前 Q 账号的个人连接。', 'Choose Add plugin and paste the publisher’s link. This list contains only the current Q account’s personal connections.')}</Type>
+      </View>}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Action kind="ghost" icon={RefreshCw} label={text('刷新连接', 'Refresh connections')} disabled={busy} onPress={() => { void run(load); }} /><Action kind="ghost" label={text('制作接入材料', 'Create integration materials')} onPress={onOpenWorkbench} /></View>
       {status && !status.available && <Type muted>{text('服务端尚未启用插件连接。', 'Plugin connections are not enabled on the server.')}</Type>}
     </> : <>
-      <Type selectable size={12} muted>{selected.card_url}</Type><Type selectable size={12} muted>{selected.endpoint_url}</Type>
-      <Type size={12} muted>{text('连接状态：', 'Connection: ')}{selected.status} · {text('授权：', 'Authorization: ')}{selected.auth_status}</Type>
+      <Type size={13} muted>{ownerLabel(selected.owner_name, text)}</Type>
+      <SourceSummary cardUrl={selected.card_url} endpointUrl={selected.endpoint_url} />
+      <Type size={12} muted>{connectionStatusLabel(selected.status, text)} · {authorizationLabel(selected.auth_status, text)}</Type>
       {selected.last_error_code && <Type color={colors.danger}>{pluginError(selected.last_error_code, text)}</Type>}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Action label={text('在聊天中使用', 'Use in chat')} disabled={busy || selected.status !== 'ready'} onPress={() => onSelect(selected)} />
         <Action kind="secondary" label={text('检查更新', 'Check updates')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/refresh'), decodePluginConnection, 'POST'); updateConnection(value); await open(value); }); }} />
         <Action kind="ghost" label={text('授权插件', 'Authorize plugin')} disabled={busy || !status?.oauth_configured} onPress={() => { void run(authorize); }} />
       </View>
+      <TechnicalDetails key={selected.id} cardUrl={selected.card_url} endpointUrl={selected.endpoint_url}>
+        <Type selectable size={12} muted>{selected.name} · {selected.version}</Type>
+        <Type size={12} muted>{text('所有者是发布者自行填写的说明，不代表小Q认证，也不改变当前账号权限。', 'The owner is a publisher declaration, not Q verification, and does not change account permissions.')}</Type>
+      </TechnicalDetails>
       {oauth && <View style={{ gap: 10 }}><Type selectable size={12}>{new URL(oauth.url).origin}</Type><Action label={text('在浏览器中授权', 'Authorize in browser')} onPress={() => { void Linking.openURL(oauth.url).catch(failure => setError(failure)); }} /><Action kind="ghost" label={text('我已授权，检查结果', 'Check authorization result')} disabled={busy} onPress={() => { void run(async () => { const result = await call(`/v1/plugins/oauth/attempts/${oauth.id}`, value => { if (!record(value) || typeof value.status !== 'string') throw new WorkbenchError('INVALID_RESPONSE'); return value; }); if (result.status !== 'succeeded') throw new WorkbenchError(typeof result.error_code === 'string' ? result.error_code : 'PLUGIN_AUTH_PENDING'); const connection = await call(path(), decodePluginConnection); updateConnection(connection); await open(connection); }); }} /></View>}
-      {selected.pending_update && <View style={{ gap: 10 }}><Type weight="500">{text('请检查新的连接和工具定义', 'Review the updated connection and tools')}</Type><Type selectable size={12}>{JSON.stringify(selected.pending_update_details, null, 2)}</Type><Action label={text('确认此更新', 'Accept this update')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/accept-update'), decodePluginConnection, 'POST', { revision: selected.revision }); updateConnection(value); await open(value); }); }} /></View>}
+      {selected.pending_update && <View style={{ gap: 10 }}>
+        <Type weight="500">{text('请检查新的连接和工具定义', 'Review the updated connection and tools')}</Type>
+        {pendingCandidate && <>
+          <Type>{typeof pendingCandidate.title === 'string' ? pendingCandidate.title : selected.title}</Type>
+          <Type size={12} muted>{ownerLabel(normalizeOwnerName(pendingCandidate.owner_name), text)}</Type>
+          {typeof pendingCandidate.card_url === 'string' && typeof pendingCandidate.endpoint_url === 'string' && <SourceSummary cardUrl={pendingCandidate.card_url} endpointUrl={pendingCandidate.endpoint_url} />}
+        </>}
+        <TechnicalDetails><Type selectable size={12}>{JSON.stringify(selected.pending_update_details, null, 2)}</Type></TechnicalDetails>
+        <Action label={text('确认此更新', 'Accept this update')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/accept-update'), decodePluginConnection, 'POST', { revision: selected.revision }); updateConnection(value); await open(value); }); }} />
+      </View>}
       <Type size={17} weight="500">{text('可用工具', 'Available tools')}</Type>
       {tools.map(item => <Row key={item.name} title={item.title || item.name} subtitle={item.description} onPress={busy ? undefined : () => { setActiveInvocation(null); setError(null); setTool(item); }} />)}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -192,11 +241,29 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
       {invocations.map(item => <InvocationView key={item.id} invocation={item} token={token} onChanged={updateInvocation} />)}
       <Action kind="ghost" label={text('断开此插件', 'Disconnect this plugin')} disabled={busy} onPress={() => { void run(async () => { await call(path(), () => undefined, 'DELETE'); setSelected(null); await load(); }); }} />
     </>}
-    <Sheet visible={adding} title={text('添加插件', 'Add plugin')} onClose={() => { if (!busy) setAdding(false); }}>
-      <Input label={text('插件地址', 'Plugin URL')} placeholder="https://example.com/server-card.json" value={entry} onChangeText={setEntry} autoCapitalize="none" />
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{[['card', 'Card'], ['catalog', 'Catalog'], ['page', text('网页', 'Web page')], ['domain', text('域名', 'Domain')]].map(([id, label]) => <Choice key={id} label={label} selected={kind === id} disabled={busy} onPress={() => setKind(id)} />)}</View>
-      <Action label={text('查找服务', 'Find services')} disabled={busy || !entry.trim()} onPress={() => { void run(async () => { setDiscovery(await call('/v1/plugins/discover', decodeDiscovery, 'POST', { entry: entry.trim(), kind })); }); }} />
-      {discovery?.candidates.map(candidate => <View key={candidate.candidate_id} style={{ gap: 10 }}><Type weight="500">{candidate.title || candidate.name}</Type><Type>{candidate.description}</Type><Type selectable size={12} muted>{candidate.card_url}{'\n'}{candidate.endpoint_url}</Type><Action label={text('添加这个服务', 'Add this service')} disabled={busy} onPress={() => { void run(async () => { const value = await call('/v1/plugins/connections', decodePluginConnection, 'POST', { discovery_id: discovery.discovery_id, candidate_id: candidate.candidate_id }); setAdding(false); await load(); await open(value); }); }} /></View>)}
+    <Sheet visible={adding} title={text('添加插件', 'Add plugin')} onClose={() => { if (!busy) { setAdding(false); if (initialIntent) onIntentHandled?.(initialIntent, 'dismissed'); } }}>
+      <Input label={text('插件链接', 'Plugin link')} placeholder="https://example.com/plugin" value={entry} onChangeText={value => { setEntry(value); setDiscovery(null); setError(null); }} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={4096} editable={!busy} hint={kind === 'auto' ? text('粘贴完整 HTTPS 链接或域名，小Q会自动识别。', 'Paste a complete HTTPS link or domain. Q identifies the entry automatically.') : text('使用你选择的入口类型，可在高级选项中修改。', 'Using your selected entry type. Change it in Advanced options.')} />
+      <Action label={text('继续', 'Continue')} disabled={busy || !entry.trim()} onPress={() => { void run(async () => {
+        const found = await call('/v1/plugins/discover', decodeDiscovery, 'POST', { entry: entry.trim(), kind });
+        setDiscovery(found);
+        if (found.candidates.length && initialIntent) onIntentHandled?.(initialIntent, 'discovered');
+      }); }} />
+      {busy && <ActivityIndicator accessibilityLabel={text('正在查找插件', 'Looking up the plugin')} color={colors.accent} />}
+      <Action kind="ghost" label={advancedEntry ? text('收起高级选项', 'Hide advanced options') : text('高级选项', 'Advanced options')} disabled={busy} onPress={() => setAdvancedEntry(value => !value)} style={{ alignSelf: 'flex-start' }} />
+      {advancedEntry && <View style={{ gap: 8 }}>
+        <Type size={12} muted>{text('通常无需修改。指定类型后仍保留完整链接，不会丢弃路径。', 'Usually no change is needed. Choosing a type still preserves the complete link and path.')}</Type>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{([['auto', text('自动识别', 'Automatic')], ['card', 'Server Card'], ['catalog', 'Catalog'], ['page', text('介绍页', 'Intro page')], ['domain', text('域名', 'Domain')]] as [EntryKind, string][]).map(([id, label]) => <Choice key={id} label={label} selected={kind === id} disabled={busy} onPress={() => { setKind(id); setDiscovery(null); }} />)}</View>
+      </View>}
+      {discovery && !discovery.candidates.length && <Type muted>{text('没有找到可添加的插件，请确认链接，或请服务方提供插件说明文件链接。', 'No addable plugin was found. Check the link or ask the publisher for its Server Card link.')}</Type>}
+      {discovery?.candidates.map(candidate => <View key={candidate.candidate_id} style={{ gap: 10 }}>
+        <Type size={17} weight="500">{candidate.title || candidate.name}</Type>
+        <Type>{candidate.description}</Type>
+        <Type size={12} muted>{ownerLabel(candidate.owner_name, text)}</Type>
+        <SourceSummary cardUrl={candidate.card_url} endpointUrl={candidate.endpoint_url} />
+        <TechnicalDetails cardUrl={candidate.card_url} endpointUrl={candidate.endpoint_url} />
+        <Type size={12} muted>{text('添加只保存个人连接，不会自动授权或执行工具。', 'Adding saves a personal connection; it does not authorize access or execute tools.')}</Type>
+        <Action label={text('确认添加', 'Confirm addition')} disabled={busy} onPress={() => { void run(async () => { const value = await call('/v1/plugins/connections', decodePluginConnection, 'POST', { discovery_id: discovery.discovery_id, candidate_id: candidate.candidate_id }); setAdding(false); await load(); await open(value); }); }} />
+      </View>)}
       {!!error && <Type color={colors.danger}>{pluginError(error, text)}</Type>}
     </Sheet>
     <Sheet visible={!!tool || !!activeInvocation} title={activeInvocation ? activeInvocation.status === 'awaiting_confirmation' ? text('确认调用', 'Confirm invocation') : text('调用详情', 'Invocation details') : tool?.title || tool?.name || ''} onClose={closeToolSheet}>
@@ -208,12 +275,17 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench }: { token: string;
   </Page>;
 }
 
-export function PluginHostPage({ chat, onOpenWorkbench, onSelect }: { chat: ChatController; onOpenWorkbench: () => void; onSelect: (connection: PluginConnection) => void }) {
-  const { text } = useDesign();
+export function PluginHostPage({ chat, onOpenWorkbench, onSelect, initialIntent, onIntentHandled }: { chat: ChatController; onOpenWorkbench: () => void; onSelect: (connection: PluginConnection) => void } & LinkIntent) {
+  const { text, colors } = useDesign();
   const [tab, setTab] = useState('connected');
+  const [authModalPending, authModalEvent] = useReducer(pluginAuthModalReducer, chat.authOpen);
+  const connectionPageReady = canPresentPluginConnectionPage({ platform: process.env.EXPO_OS, authenticated: !!chat.session, authOpen: chat.authOpen, authModalPending });
+  const openAuth = () => { authModalEvent('requested'); chat.openAuth(); };
   return <View style={{ flex: 1 }}><View style={{ paddingHorizontal: 24, paddingBottom: 12 }}><Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
-    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session ? <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} />
-      : <Page title={text('我的插件', 'My plugins')}><Type muted>{text('登录 Q 后添加插件，连接与授权保存在你的账户下。', 'Sign in to Q to save plugin connections and authorizations to your account.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} onPress={chat.openAuth} disabled={chat.authBusy} /></Page>}
-    {chat.authOpen && <ChatAuthSheet controller={chat} />}
+    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} initialIntent={initialIntent} onIntentHandled={onIntentHandled} />
+      : chat.session ? <Page title={text('我的插件', 'My plugins')}><ActivityIndicator color={colors.accent} accessibilityLabel={text('正在完成登录', 'Finishing sign-in')} /></Page>
+        : <Page title={text('我的插件', 'My plugins')}><Type muted>{initialIntent ? text('链接已保留。登录 Q 后继续查看插件信息，再确认添加。', 'Your link is kept. Sign in to Q to review the plugin and confirm addition.') : text('登录 Q 后添加插件，连接与授权保存在你的账户下。', 'Sign in to Q to save plugin connections and authorizations to your account.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} onPress={openAuth} disabled={chat.authBusy} /></Page>}
+    <ChatAuthSheet controller={chat} onShow={() => authModalEvent('shown')} onDismiss={() => authModalEvent('dismissed')}
+      description={text('登录后继续查看插件信息。添加、授权和执行仍需你确认。', 'After signing in, review the plugin. Adding, authorizing, and executing still require your confirmation.')} />
   </View>;
 }

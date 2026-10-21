@@ -22,6 +22,7 @@ pub async fn request_friend(
     )?;
     let mut tx = state.pool.begin().await?;
     let (low, high) = lock_pair(&mut tx, auth.user_id, input.user_id).await?;
+    ensure_peer_active(&mut tx, input.user_id).await?;
     ensure_unblocked(&mut tx, low, high).await?;
     let friends:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM social_conversations WHERE user_low=$1 AND user_high=$2 AND active)")
         .bind(low).bind(high).fetch_one(&mut *tx).await?;
@@ -54,6 +55,7 @@ pub async fn request_friend(
         }
         check_friend_capacity(&mut tx, id).await?;
     }
+    crate::content_policy::validate_content(&input.note)?;
     let row: RequestRow = sqlx::query_as(
         "INSERT INTO social_requests(id,from_id,to_id,note) VALUES($1,$2,$3,$4) RETURNING *",
     )
@@ -92,7 +94,7 @@ pub async fn respond_request(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(not_found)?;
-    let (low, high) = lock_pair(&mut tx, initial.from_id, initial.to_id).await?;
+    let (low, high) = lock_pair(&mut tx, auth.user_id, initial.from_id).await?;
     let current:Option<RequestRow>=sqlx::query_as("SELECT * FROM social_requests WHERE id=$1 AND to_id=$2 AND created_at>clock_timestamp()-interval '30 days'")
         .bind(id).bind(auth.user_id).fetch_optional(&mut *tx).await?;
     let request = current.ok_or_else(|| {
@@ -102,6 +104,7 @@ pub async fn respond_request(
         )
     })?;
     if input.accept {
+        ensure_peer_active(&mut tx, initial.from_id).await?;
         ensure_unblocked(&mut tx, low, high).await?;
         check_friend_capacity(&mut tx, low).await?;
         check_friend_capacity(&mut tx, high).await?;

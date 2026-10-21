@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inspectEntry, inspectCardJson, inspectDraft, createMaterials } from './materials.ts';
+import { inspectEntry, inspectCardJson, inspectDraft, createMaterials, normalizeOwnerName, OWNER_META_KEY } from './materials.ts';
 
 const schema = 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json';
 const errorIssues = report => (Array.isArray(report) ? report : report.issues).filter(issue => issue.level === 'error');
@@ -27,6 +27,44 @@ test('all four entry kinds work without claiming a network or schema validation'
   }
   assert.equal(inspectEntry('Example.com', 'domain').normalizedUrl, 'https://example.com/');
   assert.equal(inspectEntry('https://Example.com/', 'domain').normalizedUrl, 'https://example.com/');
+});
+
+test('auto checks preserve full URLs and never infer Card type or remove a supplied path', () => {
+  const url='https://Example.com/Specific/Entry/?tenant=A&tag=b&tag=a';
+  const report=inspectEntry(url,'auto');
+  assert.equal(errorIssues(report).length,0);
+  assert.equal(report.normalizedUrl,'https://example.com/Specific/Entry/?tenant=A&tag=b&tag=a');
+  assert.ok(report.issues.some(item=>item.field==='scope'&&item.level==='warning'));
+  assert.equal(inspectEntry('example.com','auto').normalizedUrl,'https://example.com/');
+  assert.ok(errorIssues(inspectEntry('example.com/specific/path','auto')).length);
+  assert.ok(errorIssues(inspectEntry(url,'domain')).length);
+  assert.equal(report.kind,undefined,'local checks do not pretend to identify the remote media type');
+});
+
+test('owner names are optional display claims with Unicode and control limits',()=>{
+  assert.equal(normalizeOwnerName('  Example Studio  '),'Example Studio');
+  assert.equal(normalizeOwnerName('😀'.repeat(80)),'😀'.repeat(80));
+  for(const value of [undefined,null,42,{},'', ' ', 'x'.repeat(81),'😀'.repeat(81),'hello\nworld','\towner','owner\u202e','owner\u2067','owner\u200f'])assert.equal(normalizeOwnerName(value),null);
+  assert.equal(errorIssues(inspectDraft(draft())).length,0);
+  assert.equal(errorIssues(inspectDraft(draft({ownerName:'   '}))).length,0);
+  for(const ownerName of [42,'x'.repeat(81),'owner\n','owner\u202e','owner\u2066'])assert.ok(errorIssues(inspectDraft(draft({ownerName}))).some(item=>item.field==='ownerName'));
+});
+
+test('owner metadata round-trips and generated HTML escapes the publisher claim',()=>{
+  const ownerName='Studio <Q> & "Friends"';
+  const generated=createMaterials(draft({ownerName:` ${ownerName} `}));
+  const card=JSON.parse(generated.card);
+  assert.deepEqual(card._meta[OWNER_META_KEY],{name:ownerName});
+  assert.equal(card.owner,undefined);
+  assert.equal(errorIssues(inspectCardJson(generated.card)).length,0);
+  assert.match(generated.intro,/Studio &lt;Q&gt; &amp; &quot;Friends&quot;/);
+  assert.match(generated.intro,/Publisher-declared, not verified/);
+  assert.equal(JSON.parse(createMaterials(draft()).card)._meta,undefined);
+  for(const owner of [{name:'bad\u202e'}, {name:''}, {name:44}, 'someone', null]){
+    const report=inspectCardJson(JSON.stringify(validCard({_meta:{[OWNER_META_KEY]:owner,'com.example/info':{note:'kept'}}})));
+    assert.equal(errorIssues(report).length,0,'invalid remote owner must not reject a standard Card');
+    assert.ok(report.issues.some(item=>item.field==='ownerName'&&item.level==='warning'));
+  }
 });
 
 test('domain mode never drops a supplied specific path or query', () => {

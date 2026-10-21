@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { AppState, BackHandler, Modal, Pressable, ScrollView, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import { Reveal, selectionFeedback } from "./motion";
@@ -32,6 +32,7 @@ import { CreatorFeed } from "./video/creator-feed";
 import { useChat } from "./ai-chat/use-chat";
 import { PluginWorkbenchPage } from "./plugin-workbench/workbench";
 import { PluginHostPage } from "./plugin-host/page";
+import { pluginEntryIntentReducer } from "./plugin-host/core";
 import { useQAccount } from "./account/account-state";
 import { useSocial } from "./social";
 
@@ -428,6 +429,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [page, setPage] = useState<PageId>(initialPage);
   const [sidebar, setSidebar] = useState(true);
   const [drawer, setDrawer] = useState(false);
+  const [pendingPluginIntent, updatePluginIntent] = useReducer(pluginEntryIntentReducer, null);
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const social = useSocial();
@@ -566,9 +568,9 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "profile" ? (
             <ProfilePage />
           ) : page === "plugin-workbench" ? (
-            <PluginWorkbenchPage onBack={() => navigate("plugins")} />
+            <PluginWorkbenchPage onBack={() => navigate("plugins")} onConnect={intent => { updatePluginIntent({ type: "received", intent }); navigate("plugins"); }} />
           ) : page === "plugins" ? (
-            <PluginHostPage chat={chat} onOpenWorkbench={() => navigate("plugin-workbench")} onSelect={connection => { chat.selectPlugin({ id: connection.id, title: connection.title || connection.name, endpoint_url: connection.endpoint_url }); navigate("chat"); }} />
+            <PluginHostPage chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onSelect={connection => { chat.selectPlugin({ id: connection.id, title: connection.title || connection.name, endpoint_url: connection.endpoint_url }); navigate("chat"); }} />
           ) : (
             <ServicePage page={page} onOpenWorkbench={() => navigate("plugin-workbench")} />
           )}

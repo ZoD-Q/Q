@@ -36,3 +36,5 @@ Playwright验证生产构建，默认自动启动4173端口的预览服务。设
 新增依赖用途：React Router用于深层链接与返回；Lucide提供一致图标；Vite提供静态构建；Playwright测试真实浏览器交互；tsx运行类型化纯逻辑测试。没有新增业务后端、UI组件库或状态库。字体为系统字体，原有小Q形象随制品提供。
 
 设计依据见[设计记录](docs/design.md)。开发前阅读[根规范](../AGENTS.md)、[Web补充规范](AGENTS.md)及[插件规范](../backend/docs/plugin-integration.md)。
+
+`public/privacy.html` 为公测隐私与社区说明源文件，计划由 Q API 域名的 `/privacy` 独立提供；它尚未部署，不能把管理网页构建成功视为该地址已可访问。安装位置、CSP 与发布顺序见[公测记录](../backend/deploy/PUBLIC-BETA.md)。

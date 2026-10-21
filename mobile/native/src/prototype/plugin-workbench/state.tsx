@@ -11,11 +11,11 @@ import {
 } from "./materials";
 
 const blankDraft: PluginDraft = {
-  title: "", description: "", name: "", version: "1.0.0", cardUrl: "", endpointUrl: "",
+  title: "", description: "", ownerName: "", name: "", version: "1.0.0", cardUrl: "", endpointUrl: "",
   needsAuth: false, hasUi: false, domainDiscovery: false, publicListing: false,
 };
 const exampleDraft: PluginDraft = {
-  title: "日程助手", description: "查询日程、规划时间并创建日历事件。",
+  title: "日程助手", description: "查询日程、规划时间并创建日历事件。", ownerName: "日程助手团队",
   name: "example.calendar/schedule", version: "1.0.0",
   cardUrl: "https://calendar.example/plugins/schedule/server-card.json",
   endpointUrl: "https://calendar.example/mcp/schedule",
@@ -24,7 +24,7 @@ const exampleDraft: PluginDraft = {
 
 function useWorkbenchState() {
   const [tab, setTab] = useState("connect");
-  const [entryKind, setKind] = useState<EntryKind>("card");
+  const [entryKind, setKind] = useState<EntryKind>("auto");
   const [entry, setEntryValue] = useState("");
   const [entryReport, setEntryReport] = useState<CheckReport | null>(null);
   const [cardInput, setCardValue] = useState("");

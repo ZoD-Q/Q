@@ -209,6 +209,7 @@ pub async fn send(
         return Ok((StatusCode::OK, Json(message)));
     }
     ensure_active(&mut tx, &c, auth.user_id).await?;
+    crate::content_policy::validate_content(body)?;
     if c.last_seq >= MAX_SEQUENCE {
         return Err(capacity());
     }

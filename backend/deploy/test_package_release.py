@@ -85,9 +85,14 @@ if '--target' in args:
     output /= args[args.index('--target') + 1].split('.')[0]
 output /= 'release'
 output.mkdir(parents=True)
-binary = output / 'xiaoq-backend'
-binary.write_bytes(Path(os.environ['FAKE_CARGO_FIXTURE']).read_bytes())
-binary.chmod(0o755)
+names = [args[index + 1] for index, value in enumerate(args) if value == '--bin']
+for name in names:
+    if name == 'account-admin' and os.environ.get('FAKE_CARGO_SKIP_ADMIN') == '1':
+        continue
+    fixture = os.environ.get('FAKE_CARGO_ADMIN_FIXTURE') if name == 'account-admin' else None
+    binary = output / name
+    binary.write_bytes(Path(fixture or os.environ['FAKE_CARGO_FIXTURE']).read_bytes())
+    binary.chmod(0o755)
 ''')
         compiler.chmod(0o755)
         self.compiler_log = self.base / 'compiler-arguments.json'
@@ -120,6 +125,12 @@ binary.chmod(0o755)
         with tarfile.open(path) as archive:
             return {item.name: archive.extractfile(item).read() for item in archive if item.isfile()}
 
+    def add_admin(self, source='scripts/account-admin.rs'):
+        path = self.repo / 'backend' / source
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('fn main() {} // synthetic compiler fixture; never executed\n')
+        return path
+
     def test_manifest_raw_bytes_numeric_order_hashes_and_clean_up(self):
         # A dirty local SQL edit must not enter the archived release.
         (self.repo / 'backend/migrations/0001_initial.sql').write_text('uncommitted change\n')
@@ -148,6 +159,76 @@ binary.chmod(0o755)
         manifest = Path(arguments[arguments.index('--manifest-path') + 1])
         self.assertEqual(manifest.parts[-3:], ('source', 'backend', 'Cargo.toml'))
         self.assertFalse(list((self.repo / 'backend/.local/release').glob('.build-*')))
+
+    def test_reviewed_admin_companion_uses_same_target_and_required_checksum(self):
+        self.add_admin()
+        revision = self.commit()
+        self.git('push', 'origin', 'main')
+        result = self.run_package(self.protected(revision))
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        files = self.read_release(revision)
+        names = ('xiaoq-backend', 'SOURCE_COMMIT', 'MIGRATIONS', 'account-admin')
+        self.assertEqual(set(files), {'q-release/' + name for name in (*names, 'SHA256SUMS')})
+        self.assertEqual(files['q-release/account-admin'], elf_fixture())
+        expected = ''.join(hashlib.sha256(files['q-release/' + name]).hexdigest() + '  ' + name + '\n'
+                           for name in names).encode()
+        self.assertEqual(files['q-release/SHA256SUMS'], expected)
+        arguments = json.loads(self.compiler_log.read_text())
+        self.assertEqual(arguments[arguments.index('--target') + 1], LINUX_TARGET)
+        self.assertEqual([arguments[i + 1] for i, value in enumerate(arguments) if value == '--bin'],
+                         ['xiaoq-backend', 'account-admin'])
+        self.assertIn('--locked', arguments)
+        self.assertNotIn('--all-features', arguments)
+        self.assertFalse(list((self.repo / 'backend/.local/release').glob('.build-*')))
+
+    def test_uncommitted_admin_source_cannot_enter_historical_package(self):
+        self.add_admin()
+        result = self.run_package(self.protected())
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertNotIn('q-release/account-admin', self.read_release(self.first))
+        self.assertNotIn('account-admin', json.loads(self.compiler_log.read_text()))
+
+    def test_conventional_rust_bin_source_is_also_built(self):
+        self.add_admin('src/bin/account-admin.rs')
+        revision = self.commit()
+        self.git('push', 'origin', 'main')
+        result = self.run_package(self.protected(revision))
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(self.read_release(revision)['q-release/account-admin'], elf_fixture())
+
+    def test_present_admin_must_be_built_and_pass_full_elf_validation(self):
+        self.add_admin()
+        revision = self.commit()
+        self.git('push', 'origin', 'main')
+        admin_fixture = self.base / 'admin-output.elf'
+        cases = {
+            'wrong-architecture': elf_fixture(machine=183),
+            'wrong-loader': elf_fixture(interpreter=b'/lib/ld-linux-aarch64.so.1\0'),
+            'truncated-segment': elf_fixture()[:-1],
+            'script': b'#!/bin/sh\nexit 0\n',
+        }
+        for name, data in cases.items():
+            with self.subTest(name=name):
+                admin_fixture.write_bytes(data)
+                result = self.run_package({**self.protected(revision), 'FAKE_CARGO_ADMIN_FIXTURE': str(admin_fixture)})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b'Release refused:', result.stderr)
+                self.assertFalse(list((self.repo / 'backend/.local/release').glob('*.tar.gz')))
+                self.assertFalse(list((self.repo / 'backend/.local/release').glob('.build-*')))
+        result = self.run_package({**self.protected(revision), 'FAKE_CARGO_SKIP_ADMIN': '1'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(list((self.repo / 'backend/.local/release').glob('*.tar.gz')))
+
+    def test_symlink_admin_source_is_rejected_before_compilation(self):
+        path = self.repo / 'backend/scripts/account-admin.rs'
+        path.parent.mkdir(parents=True)
+        path.symlink_to('../outside.rs')
+        revision = self.commit()
+        self.git('push', 'origin', 'main')
+        result = self.run_package(self.protected(revision))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'account-admin source must be a regular file', result.stderr)
+        self.assertFalse(self.compiler_log.exists())
 
     def test_linux_executable_and_pie_with_section_headers_are_accepted(self):
         for elf_type in (2, 3):
@@ -207,6 +288,7 @@ binary.chmod(0o755)
                 self.assert_binary_refused(fixture)
 
     def test_protected_pipeline_is_pinned_even_if_main_advances(self):
+        self.add_admin()
         (self.repo / 'backend/migrations/0011_later.sql').write_text('SELECT 11;\n')
         latest = self.commit()
         self.git('push', 'origin', 'main')
@@ -214,6 +296,7 @@ binary.chmod(0o755)
         result = self.run_package(self.protected())
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertNotIn(b'11 ', self.read_release(self.first)['q-release/MIGRATIONS'])
+        self.assertNotIn('q-release/account-admin', self.read_release(self.first))
         self.assertFalse((self.repo / 'backend/.local/release' / ('q-release-' + latest + '.tar.gz')).exists())
 
     def test_protected_pipeline_ref_override_and_checkout_mismatch_rejected(self):

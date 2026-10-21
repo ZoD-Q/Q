@@ -4,10 +4,12 @@
  * https://ai-catalog.io/spec/ and backend/docs/plugin-integration.md.
  * Q's concrete HTTPS / 2026-07-28 requirements are stricter than the upstream Card shape.
  */
-export type EntryKind = 'card' | 'catalog' | 'page' | 'domain';
+export type EntryKind = 'auto' | 'card' | 'catalog' | 'page' | 'domain';
+export type PluginEntryIntent = Readonly<{ entry: string; kind: EntryKind }>;
 export type PluginDraft = {
   title: string;
   description: string;
+  ownerName?: string;
   name: string;
   version: string;
   cardUrl: string;
@@ -21,6 +23,14 @@ export type Issue = { field: string; level: 'error' | 'warning'; zh: string; en:
 export type CheckReport = { issues: Issue[]; normalizedUrl?: string };
 
 const CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json';
+export const OWNER_META_KEY = 'com.kaicloudpay.q/owner';
+const OWNER_UNSAFE_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+/** Display-only, publisher-declared text. Never an account ID or proof of ownership. */
+export function normalizeOwnerName(value: unknown): string | null {
+  if (typeof value !== 'string' || OWNER_UNSAFE_CHARACTERS.test(value)) return null;
+  const name = value.trim();
+  return name && [...name].length <= 80 ? name : null;
+}
 const MCP_VERSION = '2026-07-28';
 const CARD_MEDIA = 'application/mcp-server-card+json';
 const CATALOG_MEDIA = 'application/ai-catalog+json';
@@ -117,8 +127,10 @@ function checkUrl(value: unknown, kind: EntryKind, field: string): CheckReport {
 }
 
 export function inspectEntry(value: string, kind: EntryKind): CheckReport {
-  if (!['card', 'catalog', 'page', 'domain'].includes(kind)) return { issues: [issue('kind', 'error', '请选择支持的入口类型。', 'Choose a supported entry type.'), localNotice()] };
-  const report = checkUrl(value, kind, 'entry');
+  if (!['auto', 'card', 'catalog', 'page', 'domain'].includes(kind)) return { issues: [issue('kind', 'error', '请选择支持的入口类型。', 'Choose a supported entry type.'), localNotice()] };
+  // This only chooses URL syntax rules. The server identifies a full URL from its response.
+  const syntaxKind = kind === 'auto' ? (typeof value === 'string' && /^[a-z][a-z0-9+.-]*:/i.test(value.trim()) ? 'card' : 'domain') : kind;
+  const report = checkUrl(value, syntaxKind, 'entry');
   return { ...report, issues: [...report.issues, localNotice()] };
 }
 
@@ -193,6 +205,10 @@ export function inspectCardJson(source: string): CheckReport {
   if (!isObject(card)) return { issues: [...issues, issue('json', 'error', 'Server Card 顶层必须是 JSON 对象。', 'The Server Card root must be a JSON object.')] };
   if (card.$schema !== CARD_SCHEMA) issues.push(issue('$schema', 'error', '请使用固定的 MCP Server Card v1 schema 地址。', 'Use the pinned MCP Server Card v1 schema URL.'));
   checkIdentity(card, issues);
+  if (isObject(card._meta) && Object.prototype.hasOwnProperty.call(card._meta, OWNER_META_KEY)) {
+    const owner = card._meta[OWNER_META_KEY];
+    if (!isObject(owner) || normalizeOwnerName(owner.name) === null) issues.push(issue('ownerName', 'warning', '所有者声明无效，将按未声明处理；这不影响标准 Card 的其他字段。', 'The owner declaration is invalid and will be treated as absent; other standard Card fields are unaffected.'));
+  }
   for (const field of RUNTIME_KEYS) if (field in card) issues.push(issue(field, 'error', 'Card 只描述身份与连接，不列出工具、资源、提示词或运行时能力。', 'Cards describe identity and connection, not tools, resources, prompts, or runtime capabilities.'));
   inspectSensitiveTree(card, issues);
   if (card.websiteUrl !== undefined) issues.push(...checkUrl(card.websiteUrl, 'page', 'websiteUrl').issues);
@@ -247,6 +263,11 @@ export function inspectDraft(draft: PluginDraft): Issue[] {
   if (!isObject(draft)) return [issue('draft', 'error', '请填写插件材料表单。', 'Complete the plugin material form.'), localNotice()];
   const issues: Issue[] = [localNotice()];
   checkIdentity(draft, issues);
+  if (draft.ownerName !== undefined && (typeof draft.ownerName !== 'string' || draft.ownerName.trim().length > 0 || OWNER_UNSAFE_CHARACTERS.test(draft.ownerName))) {
+    const ownerName = normalizeOwnerName(draft.ownerName);
+    if (ownerName === null) issues.push(issue('ownerName', 'error', '所有者请填写 1–80 个字符，不能包含控制字符或双向文字控制符。', 'Use 1–80 characters for the owner, without control or bidirectional formatting characters.'));
+    else checkText(ownerName, 'ownerName', 1, 80, issues);
+  }
   if (!Object.prototype.hasOwnProperty.call(draft, 'title')) checkText(undefined, 'title', 1, 100, issues);
   const card = checkUrl(draft.cardUrl, 'card', 'cardUrl');
   const endpoint = checkUrl(draft.endpointUrl, 'card', 'endpointUrl');
@@ -269,12 +290,14 @@ export function createMaterials(draft: PluginDraft): { card: string; catalog: st
   const cardUrl = checkUrl(draft.cardUrl, 'card', 'cardUrl').normalizedUrl!;
   const endpointUrl = checkUrl(draft.endpointUrl, 'card', 'endpointUrl').normalizedUrl!;
   const catalogUrl = catalogLocation(cardUrl, endpointUrl, draft.domainDiscovery).url;
-  const card = JSON.stringify({ $schema: CARD_SCHEMA, name: draft.name, title: draft.title, version: draft.version, description: draft.description, remotes: [{ type: 'streamable-http', url: endpointUrl, supportedProtocolVersions: [MCP_VERSION] }] }, null, 2);
+  const ownerName = normalizeOwnerName(draft.ownerName);
+  const card = JSON.stringify({ $schema: CARD_SCHEMA, name: draft.name, title: draft.title, version: draft.version, description: draft.description, ...(ownerName ? { _meta: { [OWNER_META_KEY]: { name: ownerName } } } : {}), remotes: [{ type: 'streamable-http', url: endpointUrl, supportedProtocolVersions: [MCP_VERSION] }] }, null, 2);
   // An absolute Card URL is a standard Catalog identifier and keeps query-scoped identities distinct.
   const catalog = JSON.stringify({ specVersion: '1.0', entries: [{ identifier: cardUrl, type: CARD_MEDIA, url: cardUrl }] }, null, 2);
-  const intro = `<!doctype html>\n<html lang="zh-CN">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n  <title>${html(draft.title)}</title>\n  <link rel="ai-catalog" type="${CATALOG_MEDIA}" href="${html(catalogUrl)}">\n</head>\n<body>\n  <h1>${html(draft.title)}</h1>\n  <p>${html(draft.description)}</p>\n  <p>本地生成材料，尚未部署或验证连接。 / Generated locally; not deployed or connection-verified.</p>\n  <a href="${html(cardUrl)}">Server Card</a>\n</body>\n</html>`;
+  const intro = `<!doctype html>\n<html lang="zh-CN">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n  <title>${html(draft.title)}</title>\n  <link rel="ai-catalog" type="${CATALOG_MEDIA}" href="${html(catalogUrl)}">\n</head>\n<body>\n  <h1>${html(draft.title)}</h1>\n  <p>${html(draft.description)}</p>${ownerName ? `\n  <p>所有者 / Owner: ${html(ownerName)}（发布者自声明，未经认证 / Publisher-declared, not verified）</p>` : ''}\n  <p>本地生成材料，尚未部署或验证连接。 / Generated locally; not deployed or connection-verified.</p>\n  <a href="${html(cardUrl)}">Server Card</a>\n</body>\n</html>`;
   const zh = [
     '以下为待办清单，生成材料不等于部署、授权、接入或公开收录成功。',
+    ...(ownerName ? [`所有者声明：${ownerName}；这是发布者自行填写的展示信息，不代表 Q 认证或账户权限。`] : []),
     `部署独立稳定 Card：${cardUrl}；响应类型 ${CARD_MEDIA}；用锁定的 v1 schema 完整验证。`,
     `部署 MCP 端点：${endpointUrl}；使用 HTTPS Streamable HTTP 与 MCP ${MCP_VERSION}，按逐请求版本模型实现，不把旧 initialize 握手只换日期。`,
     'Q 先按所需身份完成授权，再调用 server/discover；实际能力、输入输出、文本结果、权限和未知写操作恢复都须真实联调。',
@@ -289,6 +312,7 @@ export function createMaterials(draft: PluginDraft): { card: string; catalog: st
   ];
   const en = [
     'This is a to-do checklist. Generated materials do not prove deployment, authorization, integration, or public listing.',
+    ...(ownerName ? [`Owner declaration: ${ownerName}. This is publisher-provided display information, not Q verification or account authorization.`] : []),
     `Deploy the stable Card at ${cardUrl}; serve ${CARD_MEDIA}; validate against the complete pinned v1 schema.`,
     `Deploy ${endpointUrl} with HTTPS Streamable HTTP and MCP ${MCP_VERSION}; use the per-request version model, not an old initialize handshake with a changed date.`,
     'Q obtains any required authorization before server/discover. Verify runtime capabilities, schemas, text results, permissions, and recovery of uncertain writes with real integration tests.',

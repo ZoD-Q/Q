@@ -2,6 +2,7 @@
 use axum::{Json, extract::State};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -113,6 +114,7 @@ pub struct TransferResponse {
 struct PriorTransfer {
     id: Uuid,
     recipient_handle: String,
+    recipient_deleted_handle_hash: Option<Vec<u8>>,
     amount_minor: i64,
     memo: String,
     sender_balance_after: i64,
@@ -141,12 +143,13 @@ pub async fn execute_transfer(
         .fetch_one(&mut *tx)
         .await?;
     // A completed idempotency key takes precedence over a new recipient lookup.
-    // Replays depend on the immutable handle, not the recipient's editable profile.
+    // Deleted recipients retain only a handle digest so existing unknown transfers
+    // can still recover the original result without reassigning the destination.
     if let Some(response) = replay(&mut tx, sender_id, &request).await? {
         tx.commit().await?;
         return Ok(response);
     }
-    let recipient: Option<(Uuid, Uuid)> = sqlx::query_as("SELECT i.id,a.id FROM identities i JOIN ledger_accounts a ON a.user_id = i.id WHERE i.handle = $1")
+    let recipient: Option<(Uuid, Uuid)> = sqlx::query_as("SELECT i.id,a.id FROM identities i JOIN ledger_accounts a ON a.user_id = i.id WHERE i.handle = $1 AND i.status = 'active'")
         .bind(&request.recipient_handle).fetch_optional(&mut *tx).await?;
     let (recipient_user_id, recipient_id) = recipient.ok_or_else(ApiError::user_not_found)?;
     if recipient_user_id == sender_user_id {
@@ -154,6 +157,28 @@ pub async fn execute_transfer(
             "SELF_TRANSFER",
             "Choose a different recipient.",
         ));
+    }
+
+    // Account deletion and suspension take identity locks before private writes.
+    // Follow the same stable order before taking wallet locks.
+    let identities: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id,status FROM identities WHERE id IN ($1,$2) ORDER BY id FOR UPDATE",
+    )
+    .bind(sender_user_id)
+    .bind(recipient_user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if !identities
+        .iter()
+        .any(|(id, status)| *id == sender_user_id && status == "active")
+    {
+        return Err(ApiError::unauthorized());
+    }
+    if !identities
+        .iter()
+        .any(|(id, status)| *id == recipient_user_id && status == "active")
+    {
+        return Err(ApiError::user_not_found());
     }
 
     // Every transfer takes both row locks in the same UUID order. A competing transfer
@@ -213,11 +238,17 @@ async fn replay(
     sender_id: Uuid,
     request: &TransferRequest,
 ) -> ApiResult<Option<TransferResponse>> {
-    let prior: Option<PriorTransfer> = sqlx::query_as("SELECT t.id,i.handle AS recipient_handle,t.amount_minor,t.memo,t.sender_balance_after,t.created_at FROM ledger_transactions t JOIN ledger_accounts a ON a.id = t.recipient_account_id JOIN identities i ON i.id = a.user_id WHERE t.sender_account_id = $1 AND t.idempotency_key = $2")
+    let prior: Option<PriorTransfer> = sqlx::query_as("SELECT t.id,i.handle AS recipient_handle,i.deleted_handle_hash AS recipient_deleted_handle_hash,t.amount_minor,t.memo,t.sender_balance_after,t.created_at FROM ledger_transactions t JOIN ledger_accounts a ON a.id = t.recipient_account_id JOIN identities i ON i.id = a.user_id WHERE t.sender_account_id = $1 AND t.idempotency_key = $2")
         .bind(sender_id).bind(request.idempotency_key).fetch_optional(&mut **tx).await?;
     match prior {
         Some(prior) => {
-            if prior.recipient_handle != request.recipient_handle
+            let same_recipient = match prior.recipient_deleted_handle_hash.as_deref() {
+                Some(original_hash) => {
+                    original_hash == Sha256::digest(request.recipient_handle.as_bytes()).as_slice()
+                }
+                None => prior.recipient_handle == request.recipient_handle,
+            };
+            if !same_recipient
                 || prior.amount_minor != request.amount_minor
                 || prior.memo != request.memo
             {

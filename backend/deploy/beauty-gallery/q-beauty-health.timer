@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Q Beauty gallery every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=q-beauty-health.service
+
+[Install]
+WantedBy=timers.target

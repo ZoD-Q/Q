@@ -42,7 +42,7 @@ impl FromRequestParts<AppState> for Authenticated {
         }
         let token_hash = digest_token(token);
         let user_id: Option<Uuid> = sqlx::query_scalar(
-            "SELECT user_id FROM sessions WHERE token_hash = $1 AND expires_at > now()",
+            "SELECT s.user_id FROM sessions s JOIN identities i ON i.id=s.user_id WHERE s.token_hash = $1 AND s.expires_at > now() AND i.status='active'",
         )
         .bind(&token_hash)
         .fetch_optional(&state.pool)
@@ -86,6 +86,7 @@ pub async fn register(
     )?;
     let name = request.display_name.trim();
     validation::text(name, 1, 40, "Display name must contain 1–40 characters.")?;
+    crate::content_policy::validate_content(name)?;
     state.limit_auth(format!("handle:{handle}"), 10)?;
     let hash = hash_password(request.password, state.password_slots.clone()).await?;
     let mut tx = state.pool.begin().await?;
@@ -105,11 +106,12 @@ pub async fn login(
     validation::text(&request.password, 1, 128, "invalid")
         .map_err(|_| ApiError::invalid_credentials())?;
     state.limit_auth(format!("handle:{handle}"), 10)?;
-    let record: Option<(Uuid, String)> =
-        sqlx::query_as("SELECT id,password_hash FROM identities WHERE handle = $1")
-            .bind(&handle)
-            .fetch_optional(&state.pool)
-            .await?;
+    let record: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id,password_hash FROM identities WHERE handle = $1 AND status='active'",
+    )
+    .bind(&handle)
+    .fetch_optional(&state.pool)
+    .await?;
     // Unknown handles still run Argon2 to avoid a fast account-existence signal.
     let hash = record
         .as_ref()
@@ -171,6 +173,7 @@ fn digest_token(token: &str) -> Vec<u8> {
 }
 
 async fn create_session(tx: &mut Transaction<'_, Postgres>, user_id: Uuid) -> ApiResult<String> {
+    crate::account_lifecycle::lock_active(tx, user_id).await?;
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let token = format!("q_{}", URL_SAFE_NO_PAD.encode(bytes));
@@ -195,7 +198,11 @@ pub(crate) async fn hash_password(password: String, slots: Arc<Semaphore>) -> Ap
     .map_err(|_| ApiError::internal())?
 }
 
-async fn verify_password(password: String, hash: String, slots: Arc<Semaphore>) -> ApiResult<bool> {
+pub(crate) async fn verify_password(
+    password: String,
+    hash: String,
+    slots: Arc<Semaphore>,
+) -> ApiResult<bool> {
     let permit = slots
         .try_acquire_owned()
         .map_err(|_| ApiError::rate_limited())?;
