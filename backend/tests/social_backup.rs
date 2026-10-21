@@ -120,6 +120,15 @@ async fn deployed_backup_policy_never_restores_ephemeral_or_report_content() {
     let (_, snapshot) = request(&router, "GET", "/v1/social/snapshot", Some(&alice), None).await;
     let conversation = snapshot["friends"][0]["conversation_id"].as_str().unwrap();
     let message_path = format!("/v1/social/conversations/{conversation}/messages");
+    let ai_path = format!("/v1/ai/conversations/{}", Uuid::new_v4());
+    let (ai_status, _) = request(
+        &router,
+        "POST",
+        &ai_path,
+        Some(&alice),
+        Some(json!({"request_id":Uuid::new_v4(),"expected_revision":0,"title":"Persistent AI history","messages":[{"id":"backup-user","role":"user","content":"AI history survives restoration","status":"complete"}]})),
+    ).await;
+    assert_eq!(ai_status, 200);
     let (_, normal) = request(&router, "POST", &message_path, Some(&alice), Some(json!({"client_message_id":Uuid::new_v4(),"body":"ordinary history survives","ttl_seconds":null}))).await;
     let (_, unopened) = request(&router, "POST", &message_path, Some(&alice), Some(json!({"client_message_id":Uuid::new_v4(),"body":"unopened temporary content","ttl_seconds":300}))).await;
     let (_, opened) = request(&router, "POST", &message_path, Some(&alice), Some(json!({"client_message_id":Uuid::new_v4(),"body":"opened temporary content","ttl_seconds":300}))).await;
@@ -237,6 +246,15 @@ async fn deployed_backup_policy_never_restores_ephemeral_or_report_content() {
         AppState::new(restored.clone()).await.unwrap(),
         vec!["http://localhost:8081".parse().unwrap()],
     );
+    let (ai_status, ai_history) =
+        request(&restored_router, "GET", &ai_path, Some(&alice), None).await;
+    assert_eq!(ai_status, 200);
+    assert_eq!(
+        ai_history["messages"][0]["content"],
+        "AI history survives restoration"
+    );
+    let (other_status, _) = request(&restored_router, "GET", &ai_path, Some(&bob), None).await;
+    assert_eq!(other_status, 404);
     for id in [unopened["id"].as_str().unwrap(), opened_id] {
         let (status, body) = request(
             &restored_router,
@@ -287,7 +305,10 @@ async fn deployed_backup_policy_never_restores_ephemeral_or_report_content() {
     source.close().await;
     restored.close().await;
     for name in [&source_name, &restored_name] {
-        sqlx::query(&format!("DROP DATABASE {name}"))
+        // These UUID-named databases were created by this test above. PostgreSQL
+        // may still observe a just-closed pool connection on a slower CI host;
+        // force only these disposable databases, never the configured test DB.
+        sqlx::query(&format!("DROP DATABASE {name} WITH (FORCE)"))
             .execute(&admin)
             .await
             .unwrap();

@@ -7,6 +7,7 @@ export function chatErrorMessage(code: string, text: Translate) {
     case 'CONTENT_BLOCKED': return text('这段内容未通过基础安全检查，请修改后重试。', 'This content did not pass the basic safety check. Edit it and try again.');
     case 'ACCOUNT_SUSPENDED': return text('此账号已暂停使用，请通过设置中的反馈邮箱联系处理。', 'This account is suspended. Contact the feedback address in Settings.');
     case 'AI_NOT_CONFIGURED': return text('服务端还没有配置 DeepSeek，暂时无法开始对话。', 'DeepSeek is not configured on the server yet.');
+    case 'AI_STATUS_CHECKING': return text('正在检查 Q 对话配置，请稍候再发送。', 'Checking the Q chat configuration. Try sending again shortly.');
     case 'AI_AUTH_ERROR': return text('DeepSeek 服务凭据当前不可用，请联系管理员。', 'The DeepSeek service credentials are unavailable. Contact the administrator.');
     case 'AI_QUOTA_EXCEEDED': return text('DeepSeek 账户额度不足，请联系管理员后重试。', 'The DeepSeek account has insufficient credit. Contact the administrator.');
     case 'AI_RATE_LIMITED': case 'AI_BUSY': case 'RATE_LIMITED': return text('请求较多，请稍后再试。', 'Too many requests. Try again shortly.');
@@ -24,5 +25,15 @@ export function chatErrorMessage(code: string, text: Translate) {
     case 'PLUGIN_TURN_LIMIT': return text('这一轮已使用 8 次工具结果，请开始新的一轮。', 'This turn reached eight tool results. Start a new turn.');
     case 'PLUGIN_RESULT_UNAVAILABLE': return text('这次工具结果尚不可用于续答，请先查询调用状态。', 'This tool result is not ready for continuation. Check the invocation status.');
     default: return text('暂时无法连接 Q 服务，请检查网络或稍后重试。', 'Unable to reach Q. Check the connection or try again later.');
+  }
+}
+
+/** The public endpoint reports configuration, not live supplier health or login state. */
+export function chatStatusErrorMessage(code: string, text: Translate) {
+  switch (code) {
+    case 'INSECURE_API_URL': return text('当前应用的服务地址配置有误，请更新应用或联系支持。', 'This app has an invalid service address. Update the app or contact support.');
+    case 'INVALID_RESPONSE': return text('无法识别 Q 对话配置，请重试或更新应用。', 'Could not read the Q chat configuration. Retry or update the app.');
+    case 'UNAUTHORIZED': return text('无法读取 Q 对话配置，请重试或联系支持。', 'Could not access the Q chat configuration. Retry or contact support.');
+    default: return text('暂时无法检查 Q 对话配置，请检查网络后重试。', 'Could not check the Q chat configuration. Check your connection and retry.');
   }
 }

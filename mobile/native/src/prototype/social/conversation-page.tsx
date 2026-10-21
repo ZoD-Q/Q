@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, TextInput, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Send, Timer, TimerOff } from 'lucide-react-native';
@@ -21,6 +21,9 @@ export function SocialConversationPage({ conversationId }: { conversationId: str
   const evidenceAvailable = reportedMessage ? canReportEvidence(reportedMessage, !!reportBody && remainingMs(reportBody.deadline, chat.clock.mono, chat.clock.wall) > 0) : false;
   useEffect(() => subscribeReset(closeReport), [closeReport, subscribeReset]);
   useFocusEffect(useCallback(() => () => closeReport(), [closeReport]));
+  const listRef = useRef<FlatList<SocialMessage>>(null);
+  const positioned = useRef(false);
+  useEffect(() => { if (!chat.messages.length) positioned.current = false; }, [chat.messages.length]);
   const { markRead } = chat;
   const viewability = useMemo(() => ({ itemVisiblePercentThreshold: 70, minimumViewTime: 500 }), []);
   const onViewable = useCallback(({ viewableItems }: { viewableItems: { item: SocialMessage; isViewable: boolean }[] }) => {
@@ -57,11 +60,13 @@ export function SocialConversationPage({ conversationId }: { conversationId: str
         style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingHorizontal: 20, paddingVertical: 8 }}>
         <Avatar user={conversation.user} size={38} /><View style={{ flex: 1 }}><Type size={14}>{friend?.remark || conversation.user.display_name}</Type><Type muted size={12}>{friend?.intimacy_enabled && friend.peer_intimacy_enabled ? `${friend.intimacy_score} ${text('个双向互动日', 'mutual interaction days')}` : `@${conversation.user.handle}`}</Type></View>
       </Pressable> : null}
-      <FlatList data={chat.messages} keyExtractor={item => item.id} renderItem={messageRow} contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 18, flexGrow: 1 }}
+      <FlatList ref={listRef} data={chat.messages} keyExtractor={item => item.id} renderItem={messageRow} contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 18, flexGrow: 1 }}
+        onContentSizeChange={() => { if (chat.messages.length && !positioned.current) { positioned.current = true; listRef.current?.scrollToEnd({ animated: false }); } }}
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        ListHeaderComponent={chat.hasMore ? <SocialButton quiet label={text('加载更早消息', 'Load earlier messages')} disabled={chat.loading} onPress={() => void chat.loadOlder()} /> : undefined}
         onViewableItemsChanged={onViewable} viewabilityConfig={viewability}
         ListEmptyComponent={chat.loading ? <Loading /> : <View style={{ paddingVertical: 38, gap: 10 }}><Type muted>{text('从一句问候开始。', 'Start with a hello.')}</Type></View>}
         ListFooterComponent={<View style={{ gap: 12, paddingTop: 8 }}>
-          {chat.hasMore ? <SocialButton quiet label={text('加载后续消息', 'Load more messages')} disabled={chat.loading} onPress={() => void chat.sync()} /> : null}
           <ErrorNotice code={chat.error} />
           {chat.error && !chat.pending ? <SocialButton quiet label={text('重新连接', 'Reconnect')} onPress={() => { void chat.sync(); void social.refresh(); }} /> : null}
           {chat.pending ? <View style={{ gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.soft }}><Type size={13}>{text('上一条消息等待确认，请先核查结果。', 'The previous message is pending. Confirm its result first.')}</Type>

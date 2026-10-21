@@ -38,7 +38,7 @@ import type { Conversation } from "./ai-chat/state-model";
 import { MODEL_NAMES } from "./ai-chat/state-model";
 import type { ChatController } from "./ai-chat/use-chat";
 import { ChatAuthSheet } from "./ai-chat/auth-sheet";
-import { chatErrorMessage } from "./ai-chat/messages";
+import { chatErrorMessage, chatStatusErrorMessage } from "./ai-chat/messages";
 import type { AiModel } from "@xiaoq/shared";
 import { ChatProposal } from './plugin-host/chat-proposal';
 import { openPrivacyPolicy } from './privacy';
@@ -217,13 +217,20 @@ export function ChatPage({ controller, onOpenPlugins }: {
           </View>
         </View>
       </View>
+      {controller.historyUnavailable ? <Type size={12} muted>{text("当前服务器暂不支持云端历史，对话仅保留在本次会话。", "This server does not support cloud history yet. Chats are kept for this session only.")}</Type> : null}
+      {controller.historyBusy ? <Type size={12} muted>{text("正在读取历史…", "Loading history…")}</Type> : null}
+      {controller.historyError ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}><Type size={13} color={colors.danger}>{text("聊天记录尚未同步，请重试；版本冲突时请重新登录加载服务器记录。", "History is not synced. Retry; for a version conflict, sign in again to load server history.")} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /><Action kind="ghost" label={text("重载云端版本（替换本机未保存内容）", "Reload cloud version (replace unsaved changes)")} disabled={controller.busy || controller.historyBusy} onPress={controller.reloadCloud} /></View> : null}
       {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
-      {controller.authBusy || !controller.status?.configured ? (
+      {controller.authBusy ? <Type size={11} muted style={{ textAlign: "center" }}>{text("正在恢复登录…", "Restoring session…")}</Type> : null}
+      {controller.statusPhase !== "ready" ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
-          <Type size={11} muted>{controller.authBusy
-            ? text("正在恢复登录…", "Restoring session…")
-            : text("Q 对话服务暂不可用", "Q chat is currently unavailable")}</Type>
-          {!controller.status?.configured ? <Action kind="ghost" label={text("重新连接", "Reconnect")} onPress={() => { void controller.restore(); }} disabled={controller.authBusy} /> : null}
+          <Type size={11} muted>{controller.statusBusy
+            ? text("正在检查 Q 对话配置…", "Checking Q chat configuration…")
+            : controller.statusPhase === "unconfigured"
+              ? text("Q 对话服务尚未配置", "Q chat has not been configured")
+              : chatStatusErrorMessage(controller.statusError, text)}</Type>
+          {controller.statusPhase === "error" && controller.status?.configured ? <Type size={11} muted>{text("上次配置检查正常，你仍可尝试发送。", "The last configuration check succeeded. You can still try sending.")}</Type> : null}
+          {!controller.statusBusy ? <Action kind="ghost" label={text("重新检查", "Check again")} onPress={controller.reconnect} /> : null}
         </View>
       ) : null}
       <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10 }}>
@@ -457,7 +464,9 @@ export function HistoryPage({
   items,
   onOpen,
   onNew,
+  controller,
 }: {
+  controller: ChatController;
   items: Conversation[];
   onOpen: (id: string) => void;
   onNew: () => void;
@@ -478,6 +487,9 @@ export function HistoryPage({
         />
       }
     >
+      {controller.historyUnavailable ? <Type size={13} muted>{text("当前仅显示本次会话的记录。云端历史需要后端升级。", "Only this session’s chats are shown. Cloud history requires a server update.")}</Type> : null}
+      {controller.historyError ? <><Type color={colors.danger}>{text("历史加载或保存失败", "History load or save failed")} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /></> : null}
+      <Action kind="ghost" label={controller.historyBusy ? text("正在加载…", "Loading…") : text("刷新历史", "Refresh history")} disabled={controller.historyBusy} onPress={() => { void controller.loadHistory(); }} />
       <Input
         label={text("搜索对话", "Search conversations")}
         placeholder={text("搜索关键词", "Search a thought")}
@@ -491,8 +503,8 @@ export function HistoryPage({
             icon={SquarePen}
             title={item.title}
             subtitle={text(
-              `${item.messages.length} 条消息`,
-              `${item.messages.length} messages`,
+              item.messages.length ? `${item.messages.length} 条消息` : "点击加载记录",
+              item.messages.length ? `${item.messages.length} messages` : "Open to load messages",
             )}
             onPress={() => onOpen(item.id)}
             last={index === filtered.length - 1}
@@ -517,6 +529,7 @@ export function HistoryPage({
           </View>
         ) : null}
       </View>
+      {controller.historyCursor ? <Action kind="ghost" label={text("加载更多历史", "Load more history")} disabled={controller.historyBusy} onPress={() => { void controller.loadHistory(true); }} /> : null}
     </Page>
   );
 }

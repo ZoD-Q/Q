@@ -74,11 +74,11 @@ npm run db:start
 | `Q_SEED_DEMO` | 仅连接恰好为默认本地 URL 时默认 `true`，其他数据库默认 `false` |
 | `Q_CARGO_BIN` | `$HOME/.cargo/bin/cargo` |
 | `Q_API_URL` | API 黑盒测试目标，默认 `http://127.0.0.1:8787` |
-| `EXPO_PUBLIC_API_URL` | 移动端原有 API 客户端的地址；不是默认前端启动的依赖 |
+| `EXPO_PUBLIC_API_URL` | 客户端默认 `https://q.kaicloudpay.com`；本地测试需显式地址与 `Q_LOCAL_API_TEST=1` |
 
 `Q_SEED_DEMO=true` 首次创建 `kai`、`lin`，密码 `Qdemo12345!`，首次各发一次 1000.00 Q。重复启动不会重置资料、余额或补发欢迎金。当前演示余额以已有账本为准。
 
-开发模式下，iOS 模拟器和浏览器的原有 API 客户端默认连接 `127.0.0.1`，Android 模拟器使用 `10.0.2.2`。Release 不使用回环默认值。使用真机或发布构建时显式设置手机可达的 HTTPS `EXPO_PUBLIC_API_URL`；数据库仍只绑定本机回环地址。发布配置门禁与剩余准备见 [移动端说明](../README.md#testflight-发布准备)。
+普通开发、模拟器与发布客户端统一默认连接 `https://q.kaicloudpay.com`。只有本地测试显式设置 `Q_LOCAL_API_TEST=1` 和 `EXPO_PUBLIC_API_URL`：iOS/浏览器用 `http://127.0.0.1:8787`，Android 模拟器用 `http://10.0.2.2:8787`。原生测试项目使用独立应用标识；数据库仍只绑定本机回环地址。发布配置门禁与剩余准备见 [移动端说明](../README.md#testflight-发布准备)。
 
 ## API 验收与只读迁移检查
 
@@ -218,3 +218,26 @@ TEST_DATABASE_URL=postgresql://xiaoq:xiaoq_demo_local@127.0.0.1:55432/xiaoq_demo
 - 构建 2 正式签名归档通过，内含公开 HTTPS API，未含本机测试地址或凭据。上传因 Mac 锁定无法读取 Xcode 账号而失败，未取得 Apple 构建 2 处理结果；构建 1 的 VALID 状态不能替代它。
 
 本机证据在忽略目录 `.local/public-beta/validation/` 和 `.local/public-beta/archive/`。后端、隐私页、远端 CI、人工合并与外部 Beta 审核仍须按[公测发布记录](../../backend/deploy/PUBLIC-BETA.md)完成。
+
+## 模拟器默认服务与对话恢复（2026-10-21）
+
+问题复现：Q Public Beta QA / iOS 26.5 中安装的 `0.1.0 (2)` 为此前的本机验收包，实际访问 `http://127.0.0.1:57637/v1/ai/status`。临时服务停止后，聊天与插件登录均无法连接；应用将未知/失败配置统一显示为对话服务不可用。另复现正常慢检查被误报、关闭登录弹窗取消配置检查、一次失败清空最后可用配置三个生命周期问题。
+
+修复：普通客户端默认使用 `https://q.kaicloudpay.com`；本地接口必须选择独立测试应用。Debug/Release 都有单独原生应用构建检查阶段，不依赖 React Native 是否跳过 JS 打包；CocoaPods 配置阶段不把 Pod 标识误当应用标识。状态检查与登录/生成分离，检查中不误报，暂时失败有限重试且保留最后已知状态；重查不自动重发聊天或清空身份。
+
+验证：
+
+- 移动端 typecheck、lint、七组测试通过（utils 23、video 10、plugins 39、api-workbench 11、chat 67、account 42、social 32，共 224 项）；OpenAPI 再生成无差异、Web 导出通过。
+- 新测试覆盖慢检查、登录关闭、晚到响应、隐藏取消、重试上限、会话 401、流式回答中重查；构建测试实际执行 Expo 配置与原生检查脚本，覆盖 `SKIP_BUNDLING=1`、Pod 阶段、陈旧项目标识和本地测试隔离。
+- 后端 fmt、全功能 clippy、默认单元/中间件测试通过；独立 PostgreSQL 17.10 测试库中身份/账本 3 项、AI 2 项、AI 插件 1 项全部通过。没有操作业务账本。
+- 公网 HTTPS 健康、AI 配置、已有验收账号登录/资料、视频/插件连接列表与注销通过。两次短 DeepSeek Flash 验证（回环和公网各一次）均收到 status/delta/done、每次 47 tokens，未输出密钥或账号凭据；服务器代码和配置未修改。
+- Release 模拟器实际构建成功，并覆盖安装到出问题的设备，保留应用数据；检查 `.app` 身份、内嵌 JS 和 EXConstants 元数据均指向公网，不含旧 57637 测试端口。关闭 Metro 和诊断服务后重启，首页不再显示不可用；虚构凭据的登录返回明确账号密码错误，说明请求已到达后端。
+- 独立复审修复了 Pod 标识误判和 Debug 跳过打包门禁的问题，最终无阻塞项。iOS 26.5 模拟器为实际界面证据，Android、真机与 TestFlight 新包未验收；配置与本次供应商成功不是永久可用性承诺。
+
+### 合并云端历史后的复验
+
+保留同分支 `2fa7477` / `199a953` 的账号历史与恢复检查；修复合并后的状态调用，并补充旧后端首次历史列表 404/405 的显式会话模式。该模式在本次登录内保持，不会因服务器后来升级而静默上传之前的本机对话；网络/5xx、详情或写入失败不触发降级。
+
+合并结果的七组移动端测试 235 项通过（23 / 10 / 39 / 11 / 77 / 42 / 33），类型、lint、接口生成一致性及 Web 导出通过。Rust fmt、全功能 clippy、61 单元及 3 中间件测试通过；隔离 PostgreSQL 的账号生命周期、AI、历史、插件、身份/账本、社交、视频共 45 项及真实 pg_dump/pg_restore 1 项通过。
+
+最终 Release 在问题模拟器重新安装并成功运行：使用现有专用验收账号真实登录，显示旧后端的会话历史说明，发送短文本并得到真实 DeepSeek `OK` 回答，随后退出验收账号。凭据只在受限临时文件和安全输入状态中短暂使用，已清除；没有新增线上账号或业务账本写入。已停止本机 Metro/诊断服务，模拟器应用独立使用长期 HTTPS 后端。

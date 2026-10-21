@@ -2534,6 +2534,24 @@
               "maximum": 100,
               "default": 50
             }
+          },
+          {
+            "name": "latest",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Latest page; mutually exclusive with after_seq and before_seq."
+          },
+          {
+            "name": "before_seq",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Exclusive older page; mutually exclusive with after_seq and latest=true."
           }
         ]
       },
@@ -3266,6 +3284,137 @@
             }
           }
         }
+      }
+    },
+    "/v1/ai/conversations": {
+      "get": {
+        "operationId": "listAiConversations",
+        "tags": [
+          "ai"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConversationPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured local error, before opening a stream. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "description": "Account-owned durable history, stable creation-time/UUID descending pagination; up to 100 conversations."
+      }
+    },
+    "/v1/ai/conversations/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getAiConversation",
+        "tags": [
+          "ai"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConversation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured local error, before opening a stream. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveAiConversation",
+        "tags": [
+          "ai"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConversation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured local error, before opening a stream. See contracts/api.md.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiConversationSave"
+              }
+            }
+          }
+        },
+        "description": "Full display snapshot max 4 MiB. CAS revision, zero creates. Replay latest request_id with identical payload returns same revision; older or stale saves conflict. Tool metadata never authorizes execution. Account deletion erases history."
       }
     }
   },
@@ -5138,13 +5287,23 @@
           "server_time": {
             "type": "string",
             "format": "date-time"
+          },
+          "next_before_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "has_older": {
+            "type": "boolean"
           }
         },
         "required": [
           "items",
           "next_after_seq",
           "has_more",
-          "server_time"
+          "server_time",
+          "next_before_seq",
+          "has_older"
         ]
       },
       "SocialSendRequest": {
@@ -5381,6 +5540,233 @@
           "completed_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "AiConversationMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "role",
+          "content",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "description": "At most 1 MiB UTF-8."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "streaming",
+              "complete",
+              "incomplete",
+              "cancelled",
+              "error",
+              "tool"
+            ]
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "deepseek-flash",
+              "deepseek-v4-pro"
+            ]
+          },
+          "thinking": {
+            "type": "boolean"
+          },
+          "finishReason": {
+            "$ref": "#/components/schemas/AiFinishReason"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AiUsage"
+          },
+          "contextLimited": {
+            "type": "boolean"
+          },
+          "toolProposalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolInvocationIds": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "AiConversationPlugin": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "endpoint_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "endpoint_url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      },
+      "AiConversationSave": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "expected_revision",
+          "title",
+          "messages"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "messages": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/AiConversationMessage"
+            }
+          },
+          "plugin": {
+            "$ref": "#/components/schemas/AiConversationPlugin"
+          }
+        }
+      },
+      "AiConversationSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "revision",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "messages",
+          "revision",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "messages": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/AiConversationMessage"
+            }
+          },
+          "plugin": {
+            "$ref": "#/components/schemas/AiConversationPlugin"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiConversationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiConversationSummary"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         }
       }

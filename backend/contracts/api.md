@@ -126,3 +126,52 @@ The app uses the shared Q session store: native SecureStore, web memory only, se
 ## Social conversations
 
 Authenticated friends, one-to-one messages, explicit ephemeral opening, intimacy, relationship confirmation and reports are specified in [Social API](social.md). They share Q identity but never share AI conversation content or provider credentials.
+
+
+## Account-owned AI history (source implementation, 2026-10-21)
+
+These endpoints require the existing Q Bearer session, scope every read/write to
+its active account, and return `Cache-Control: no-store`. They do not invoke a
+model or a plugin. Deploy the new migration and client together; previously lost
+in-memory history cannot be recovered.
+
+- `GET /v1/ai/conversations?limit=20&cursor=UUID`: summaries
+  `{items:[{id,title,revision,updated_at}],next_cursor:UUID|null}`. Limit 1–100;
+  stable descending creation-time/UUID order (edits do not move records), cursor exclusive. A null cursor ends pagination.
+- `GET /v1/ai/conversations/{id}`: full snapshot
+  `{id,title,messages,plugin?,revision,updated_at}`; another account's ID returns
+  `404 AI_HISTORY_NOT_FOUND`.
+- `POST /v1/ai/conversations/{id}`: `{request_id,expected_revision,title,messages,plugin?}`.
+  UUIDs identify the conversation and original save request. Revision 0 creates;
+  subsequent writes must match the last known revision. A successful response is
+  the full saved snapshot at revision `expected_revision + 1`.
+
+The latest request ID and canonical payload are retained with the snapshot.
+Replaying that same ID and payload returns the same snapshot/revision without a
+second write. Changed payload with that ID returns `409 AI_HISTORY_REQUEST_REUSED`.
+Stale revisions or earlier requests after a newer save return
+`409 AI_HISTORY_CONFLICT`; clients must reload or explicitly resolve, never
+silently overwrite. Unknown outcomes keep the original request and query/retry
+it before starting another save or model request.
+
+Message fields preserve the client's displayed `id`, `role`, `content`, `status`
+and optional model, thinking, finish/usage and plugin-card metadata; exact shapes
+are in OpenAPI. This is display history, not proof of model usage or permission
+to invoke tools. All tool execution still uses the server's owned proposals,
+confirmation and saved results. Stored plugin URLs are labels, not fetch targets.
+
+The client saves the prompt and pending answer before opening the model stream,
+then saves terminal or interrupted state. Reloaded pending/streaming answers are
+shown as interrupted, never as completed. Unacknowledged answer fragments can be
+lost on a process crash; persistence does not make a generation run in the
+background. Model context selection is separate from full stored history.
+
+Limits are explicit: 100 conversations per account (`409 AI_HISTORY_LIMIT`),
+2,000 messages per snapshot, title up to 200 Unicode characters, message content
+up to 1 MiB UTF-8, and canonical snapshot up to 4 MiB
+(`413 AI_HISTORY_TOO_LARGE`). No silent history truncation. History has no
+automatic expiry, is included in ordinary database backups, and online snapshots
+are erased with account deletion. Backup retention and deletion reconciliation
+remain as described in the account lifecycle contract.
+
+Client compatibility with pre-history servers: only an initial authenticated collection GET `/v1/ai/conversations` returning 404 or 405, before any successful cloud history access, can select explicitly disclosed session-only history. An established cloud-history session never downgrades because of a later failure. Detail 404, POST failures, malformed responses, 401, timeouts and 5xx do not authorize downgrade or discard unresolved writes. Core AI status and streaming remain independent of optional history capability.

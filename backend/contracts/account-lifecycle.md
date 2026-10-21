@@ -53,6 +53,7 @@ private cleanup. It:
   message bodies. It ends relationships and clears their remarks/preferences and
   mutual interaction bookkeeping. Pending friendship requests and notifications
   involving the account are removed.
+- Deletes all account-owned AI conversation snapshots, including their last save request metadata.
 - Deletes reports submitted by this account and their copied evidence. Existing
   content-free report idempotency receipts remain.
 

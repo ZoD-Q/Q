@@ -62,3 +62,10 @@ export type SocialReportReceipt = components['schemas']['SocialReportReceipt'];
 export type AccountDeletionRequest = components['schemas']['AccountDeletionRequest'];
 export type AccountDeletionStatusRequest = components['schemas']['AccountDeletionStatusRequest'];
 export type AccountDeletionReceipt = components['schemas']['AccountDeletionReceipt'];
+
+export type AiConversation = components['schemas']['AiConversation'];
+export type AiConversationSave = components['schemas']['AiConversationSave'];
+export type AiConversationSummary = components['schemas']['AiConversationSummary'];
+export type AiConversationPage = components['schemas']['AiConversationPage'];
+export type AiConversationMessage = components['schemas']['AiConversationMessage'];
+export type AiConversationPlugin = components['schemas']['AiConversationPlugin'];

@@ -1,9 +1,9 @@
 import { fetch } from 'expo/fetch';
 import type { ApiErrorBody } from '@xiaoq/shared';
 import type { CopyKey } from '@/i18n';
+import { resolveApiUrl } from './api-target.mjs';
 
-const localHost = process.env.EXPO_OS === 'android' ? '10.0.2.2' : '127.0.0.1';
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? `http://${localHost}:8787` : '')).replace(/\/$/, '');
+export const API_URL = resolveApiUrl(process.env.EXPO_PUBLIC_API_URL);
 export class ApiError extends Error {
   constructor(public code: string, public status = 0) { super(code); this.name = 'ApiError'; }
 }
