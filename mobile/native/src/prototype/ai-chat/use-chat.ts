@@ -10,6 +10,10 @@ import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conver
 import { createHistoryWriter, decodeHistory, decodeHistoryPage, restoreHistory } from './history';
 import { createAiConsentGate, hasAiConsent, revokeAiConsent, subscribeAiConsent } from './consent';
 import { createAiStatusMonitor, initialAiStatus } from './status-monitor';
+import { bankIdForPlugin, bankTransferArguments, decodeInvocation, decodePluginConnection, type JsonObject } from '../plugin-host/core';
+import { parseBankIntent, type BankIntent } from '../banking/intent';
+import { getBank } from '../banking/catalog';
+import { decodeBankWallet } from '../banking/client';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number };
 type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean };
@@ -346,11 +350,108 @@ export function useChat(visible: boolean) {
     });
     return true;
   };
+  const prepareBankCommand = (conversation: Conversation, baseMessages: ChatMessage[], intent: BankIntent, retryAnswer?: ChatMessage) => {
+    const authenticated = sessionRef.current;
+    if (inflight.current || authBusy || historyBusy || historyAction.current) return false;
+    if (!authenticated) { setAuthOpen(true); return false; }
+    if (!historyReady.current || historyOwner.current !== authenticated.token) return false;
+    if (writers.current.get(authenticated.token)?.hasPending(conversation.id)) { setHistoryError('HISTORY_SAVE_PENDING'); return false; }
+    const text = (zh: string, en: string) => authenticated.user.locale === 'en' ? en : zh;
+    const selectedBankId = bankIdForPlugin(conversation.plugin);
+    const sourceBankId = intent.kind === 'transfer' ? intent.fromBankId ?? selectedBankId : selectedBankId;
+    // A bank command cannot silently change the plugin attached to an existing conversation.
+    const mismatch = !!conversation.plugin && sourceBankId !== selectedBankId;
+    const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: retryAnswer?.id ?? randomUUID(), controller: new AbortController(), generation: generation.current };
+    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: '', status: 'pending', bankCommand: true };
+    inflight.current = request;
+    let next: Conversation = { ...conversation, messages: [...baseMessages, answer] };
+    const publish = () => updateItems(items => items.some(item => item.id === next.id) ? items.map(item => item.id === next.id ? next : item) : [next, ...items]);
+    const current = () => isCurrent(request.generation) && inflight.current === request && sessionRef.current?.token === authenticated.token;
+    const reply = (content: string) => { if (current()) updateAnswer(request, message => ({ ...message, content, status: 'complete' })); };
+    publish(); hydrated.current.add(next.id); select(next.id); setPhase('waiting'); setMessageError('');
+    void (async () => {
+      let guidance = '';
+      if (mismatch) guidance = text('这条对话正在使用另一插件。请先在钱包或银行插件页选择付款银行，再开始新对话。', 'This chat is using another plugin. Select the source bank in Wallet or Bank plugins to start a new chat.');
+      else if (intent.kind === 'unsupported') {
+        const reasons: Record<string, [string, string]> = {
+          NEGATED_OR_CANCELLED: ['我没有发起转账。已有待确认转账请点击卡片里的取消按钮。', 'I have not initiated a transfer. Cancel any pending transfer using its card.'],
+          REAL_ACCOUNT_UNSUPPORTED: ['当前只支持你的模拟账户或虚构收款人陈小明，请不要填写真实卡号或手机号。', 'Use your simulated accounts or the fictional recipient Chen Xiaoming. Do not enter real card or phone numbers.'],
+          SCHEDULED_TRANSFER: ['当前支持即时模拟转账，预约和定期转账还未开放。', 'Immediate demo transfers are available; scheduled and recurring transfers are not.'],
+          CURRENCY_NOT_HKD: ['当前银行插件只支持模拟港币，请用 HKD 金额重新填写。', 'Bank plugins support simulated HKD only. Enter the amount in HKD.'],
+          INVALID_AMOUNT: ['请填写大于零、最多两位小数的港币金额。', 'Enter a positive HKD amount with at most two decimal places.'],
+        };
+        guidance = text(...(reasons[intent.reason] ?? ['这条指令还不够明确。请一次填写一笔转账，例如：从汇丰转 500 港币到陈小明的中银香港。', 'Please specify one transfer, for example: Transfer HKD 500 from HSBC to Chen at BOCHK.']));
+      } else if (intent.kind === 'transfer') {
+        const missing = [!sourceBankId ? text('付款银行', 'source bank') : '', !intent.toBankId ? text('收款银行', 'destination bank') : '', !intent.recipient ? text('收款人（自己或陈小明）', 'recipient (yourself or Chen Xiaoming)') : '', intent.amountMinor === undefined ? text('港币金额', 'HKD amount') : ''].filter(Boolean);
+        if (missing.length) guidance = text(`还需要${missing.join('、')}。请补全后发送完整转账指令；目前没有发起转账。`, `Please include ${missing.join(', ')} in a complete transfer instruction. No transfer has been initiated.`);
+        else if (intent.recipient === 'me' && sourceBankId === intent.toBankId) guidance = text('付款和收款是同一个账户，请选择另一家收款银行。', 'The source and destination are the same account. Choose another destination bank.');
+        else if (intent.memo !== undefined && (Array.from(intent.memo).length > 120 || /[\u0000-\u001f\u007f]/.test(intent.memo))) guidance = text('备注最多 120 个字符，且不能包含换行或控制字符。', 'The memo must be at most 120 characters without line breaks or control characters.');
+      }
+      if (!guidance && !sourceBankId) guidance = text('请先在钱包或银行插件页选择一家已添加的银行。', 'Select an added bank in Wallet or Bank plugins first.');
+      if (guidance) {
+        next = { ...next, messages: [...baseMessages, { ...answer, status: 'complete', content: guidance }] };
+        if (!current()) return;
+        publish();
+        if (!await persist(authenticated, next) && current()) setHistoryError('HISTORY_SAVE_FAILED');
+        return;
+      }
+      // Reading an existing account never opens or adds a bank on the user's behalf.
+      const wallet = await workbenchRequest({ baseUrl: API_URL, path: '/v1/banking/wallet', token: authenticated.token, decode: decodeBankWallet, signal: request.controller.signal, transport: expoFetch });
+      if (!current()) return;
+      const account = wallet.accounts.find(item => item.bank_id === sourceBankId);
+      if (!account?.connection_id) { reply(text('请先在钱包或银行插件页添加付款银行，再回到这里转账。', 'Add the source bank in Wallet or Bank plugins, then return here.')); return; }
+      if (intent.kind === 'transfer' && intent.recipient === 'me' && !wallet.accounts.some(item => item.bank_id === intent.toBankId && item.connection_id)) {
+        reply(text('请先在钱包添加你自己的收款银行。当前没有创建转账。', 'Add your destination bank in Wallet first. No transfer has been created.')); return;
+      }
+      const connection = await workbenchRequest({ baseUrl: API_URL, path: `/v1/plugins/connections/${account.connection_id}`, token: authenticated.token, decode: decodePluginConnection, signal: request.controller.signal, transport: expoFetch });
+      if (!current()) return;
+      if (bankIdForPlugin(connection) !== sourceBankId || connection.status !== 'ready' || (conversation.plugin && conversation.plugin.id !== connection.id)) throw new WorkbenchError('BANK_NOT_CONNECTED');
+      const selected: ChatPlugin = { id: connection.id, title: connection.title, endpoint_url: connection.endpoint_url, connection_kind: connection.connection_kind, builtin_service_id: connection.builtin_service_id };
+      next = { ...next, plugin: selected };
+      publish(); setPlugin(selected); setThink(false);
+      // The assistant ID is durable before prepare and reused after timeout/restart.
+      if (!await persist(authenticated, next)) { if (current()) updateAnswer(request, message => ({ ...message, status: 'error', errorCode: 'HISTORY_SAVE_FAILED' })); return; }
+      if (!current()) return;
+      let toolName: string, argumentsValue: JsonObject;
+      if (intent.kind === 'transfer') {
+        toolName = 'bank_transfer';
+        argumentsValue = { to_bank_id: intent.toBankId, recipient: intent.recipient === 'me' ? 'self' : 'demo_chen', amount_minor: intent.amountMinor, ...(intent.memo === undefined ? {} : { memo: intent.memo }) };
+      } else { toolName = intent.kind === 'history' ? 'bank_transactions' : 'bank_balance'; argumentsValue = intent.kind === 'history' ? { limit: 20 } : {}; }
+      const invocation = await workbenchRequest({ baseUrl: API_URL, path: '/v1/plugins/invocations', token: authenticated.token, method: 'POST', body: { connection_id: selected.id, tool_name: toolName, arguments: argumentsValue, idempotency_key: answer.id }, decode: decodeInvocation, signal: request.controller.signal, transport: expoFetch });
+      if (!current()) return;
+      if (invocation.connection_id !== selected.id || bankIdForPlugin(invocation) !== sourceBankId || invocation.tool_name !== toolName
+        || (toolName === 'bank_transfer' && (!bankTransferArguments(invocation) || invocation.arguments.to_bank_id !== argumentsValue.to_bank_id || invocation.arguments.recipient !== argumentsValue.recipient || invocation.arguments.amount_minor !== argumentsValue.amount_minor || (invocation.arguments.memo ?? '') !== (argumentsValue.memo ?? '')))) throw new WorkbenchError('INVALID_RESPONSE');
+      updateAnswer(request, message => ({ ...message, status: 'tool', toolProposalId: invocation.id,
+        content: text(`已通过${getBank(sourceBankId!).zh}插件准备好${toolName === 'bank_transfer' ? '转账' : '查询'}。请核对下方信息并确认。`, `The ${getBank(sourceBankId!).en} plugin has prepared your ${toolName === 'bank_transfer' ? 'transfer' : 'query'}. Review and confirm below.`) }));
+    })().catch(async error => {
+      if (!current()) return;
+      if (error instanceof WorkbenchError && error.status === 401) {
+        const version = invalidate(); applySession(null); clearPrivateState(); setAuthError('UNAUTHORIZED'); setAuthOpen(true);
+        await removeToken(authenticated.token).catch(() => { if (isCurrent(version)) setAuthError('STORAGE_ERROR'); });
+        return;
+      }
+      updateAnswer(request, message => ({ ...message, status: 'error', errorCode: errorCode(error), content: text('银行请求未完成。可以重试读取原提案；不会自动确认转账。', 'The bank request did not complete. Retry to recover the original proposal; transfers are never confirmed automatically.') }));
+    }).finally(() => {
+      const final = list.current.find(item => item.id === request.conversationId);
+      if (final && sessionRef.current?.token === authenticated.token && !writers.current.get(authenticated.token)?.hasPending(final.id)) void persist(authenticated, final);
+      if (inflight.current === request) { inflight.current = null; if (mounted.current) setPhase('idle'); }
+    });
+    return true;
+  };
   const send = (value: string) => {
     if (inflight.current || historyBusy || (activeIdRef.current && !hydrated.current.has(activeIdRef.current))) return false;
     const trimmed = value.trim();
     if (!trimmed) return false;
-    const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
+    let current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
+    const bankIntent = parseBankIntent(trimmed);
+    if ((!!bankIdForPlugin(current.plugin) && bankIntent.kind !== 'help') || (bankIntent.kind === 'transfer' && !!bankIntent.fromBankId)) {
+      if (!current.plugin && current.messages.length) current = { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [] };
+      const last = current.messages.at(-1);
+      if (last?.bankCommand && ['error', 'cancelled'].includes(last.status) && current.messages.findLast(message => message.role === 'user')?.content === trimmed) {
+        return prepareBankCommand(current, current.messages.slice(0, -1), bankIntent, last);
+      }
+      return prepareBankCommand(current, [...current.messages, { id: randomUUID(), role: 'user', content: trimmed, status: 'complete' }], bankIntent);
+    }
     if (current.messages.at(-1)?.errorCode === 'HISTORY_SAVE_FAILED' && current.messages.findLast(message => message.role === 'user')?.content === trimmed) {
       const base = prepareRetry(current);
       return base ? start(current, base, [], true) : false;
@@ -360,7 +461,11 @@ export function useChat(visible: boolean) {
   const retry = () => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
     const base = conversation ? prepareRetry(conversation) : null;
-    if (conversation && base) start(conversation, base, conversation.messages.at(-1)?.toolInvocationIds ?? []);
+    if (conversation && base) {
+      const last = conversation.messages.at(-1);
+      if (last?.bankCommand) prepareBankCommand(conversation, base, parseBankIntent(base.findLast(message => message.role === 'user')?.content ?? ''), last);
+      else start(conversation, base, last?.toolInvocationIds ?? []);
+    }
   };
   const cancelAiSharing = () => { consentGate.cancel(); setAiConsentOpen(false); };
   const confirmAiSharing = () => {

@@ -906,6 +906,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/banking/wallet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Read only the signed-in user’s connected simulated bank accounts. An empty wallet does not initialize accounts. */
+        get: operations["readBankWallet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/banking/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Explicitly add 1–20 first-party bank plugins. Each new self and fictional-recipient account is issued HKD 100,000 once, with balanced entries. Repeating the same bank list is idempotent and never refills balances; revoked plugins can reconnect without losing history. Does not open a real account or contact a bank. */
+        post: operations["connectBankPlugins"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/banking/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Saved transfer receipts involving the selected bank; initial credits are excluded. Stable descending created_at/UUID pagination; use the returned cursor with the same filter. */
+        get: operations["listBankTransfers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/banking/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Own-account double-entry ledger projection, including initial credits and incoming/outgoing transfers. Fictional recipient and issuance accounts are excluded. Stable descending created_at/UUID pagination; use the returned cursor with the same filter. */
+        get: operations["listBankEntries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1170,17 +1238,22 @@ export interface components {
         PluginConnection: {
             /** Format: uuid */
             id: string;
+            /** @description HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint. */
             card_url: string;
             name: string;
             title: string;
             description: string;
             version: string;
+            /** @description HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint. */
             endpoint_url: string;
             revision: number;
             /** @enum {string} */
             status: "ready" | "auth_required" | "blocked" | "needs_review" | "revoked";
-            /** @enum {string} */
-            auth_status: "none" | "required" | "authorized" | "blocked";
+            /**
+             * @description anonymous is only used for server-owned bank_demo simulations; it is not bank OAuth authorization.
+             * @enum {string}
+             */
+            auth_status: "none" | "required" | "authorized" | "blocked" | "anonymous";
             last_error_code: string | null;
             /** Format: date-time */
             created_at: string;
@@ -1203,6 +1276,13 @@ export interface components {
             } | null;
             /** @description Publisher-declared display name from Server Card _meta["com.kaicloudpay.q/owner"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null. */
             owner_name: string | null;
+            /**
+             * @description Trusted server-controlled execution type. Bank simulations are first-party built-ins, not remote MCP or real-bank connections.
+             * @enum {string}
+             */
+            connection_kind: "remote_mcp" | "bank_demo";
+            /** @enum {string|null} */
+            builtin_service_id: null | "q.bank-demo.hsbc" | "q.bank-demo.hangseng" | "q.bank-demo.bochk" | "q.bank-demo.scb" | "q.bank-demo.bea" | "q.bank-demo.dbs" | "q.bank-demo.citi" | "q.bank-demo.icbc" | "q.bank-demo.ccb" | "q.bank-demo.ncb" | "q.bank-demo.citic" | "q.bank-demo.cmbwinglung" | "q.bank-demo.dahsing" | "q.bank-demo.fubon" | "q.bank-demo.chiyu" | "q.bank-demo.shacombank" | "q.bank-demo.bocom" | "q.bank-demo.za" | "q.bank-demo.mox" | "q.bank-demo.livi";
         };
         PluginInvocationRequest: {
             /** Format: uuid */
@@ -1220,6 +1300,7 @@ export interface components {
             /** Format: uuid */
             connection_id: string;
             connection_title: string;
+            /** @description HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint. */
             card_url: string;
             tool_name: string;
             arguments: {
@@ -1236,9 +1317,17 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
             connection_revision: number;
+            /** @description HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint. */
             endpoint_url: string;
             /** @description Publisher-declared display name from Server Card _meta["com.kaicloudpay.q/owner"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null. */
             owner_name: string | null;
+            /**
+             * @description Trusted server-controlled execution type. Bank simulations are first-party built-ins, not remote MCP or real-bank connections.
+             * @enum {string}
+             */
+            connection_kind: "remote_mcp" | "bank_demo";
+            /** @enum {string|null} */
+            builtin_service_id: null | "q.bank-demo.hsbc" | "q.bank-demo.hangseng" | "q.bank-demo.bochk" | "q.bank-demo.scb" | "q.bank-demo.bea" | "q.bank-demo.dbs" | "q.bank-demo.citi" | "q.bank-demo.icbc" | "q.bank-demo.ccb" | "q.bank-demo.ncb" | "q.bank-demo.citic" | "q.bank-demo.cmbwinglung" | "q.bank-demo.dahsing" | "q.bank-demo.fubon" | "q.bank-demo.chiyu" | "q.bank-demo.shacombank" | "q.bank-demo.bocom" | "q.bank-demo.za" | "q.bank-demo.mox" | "q.bank-demo.livi";
         };
         PluginOAuthStart: {
             /** Format: uuid */
@@ -1508,12 +1597,21 @@ export interface components {
             /** Format: uuid */
             toolProposalId?: string;
             toolInvocationIds?: string[];
+            /** @description Display/recovery marker for a locally parsed banking command; does not grant tool execution authority. */
+            bankCommand?: boolean;
         };
         AiConversationPlugin: {
             /** Format: uuid */
             id: string;
             title: string;
             endpoint_url: string;
+            /**
+             * @description Trusted server-controlled execution type. Bank simulations are first-party built-ins, not remote MCP or real-bank connections.
+             * @enum {string}
+             */
+            connection_kind?: "remote_mcp" | "bank_demo";
+            /** @enum {string|null} */
+            builtin_service_id?: null | "q.bank-demo.hsbc" | "q.bank-demo.hangseng" | "q.bank-demo.bochk" | "q.bank-demo.scb" | "q.bank-demo.bea" | "q.bank-demo.dbs" | "q.bank-demo.citi" | "q.bank-demo.icbc" | "q.bank-demo.ccb" | "q.bank-demo.ncb" | "q.bank-demo.citic" | "q.bank-demo.cmbwinglung" | "q.bank-demo.dahsing" | "q.bank-demo.fubon" | "q.bank-demo.chiyu" | "q.bank-demo.shacombank" | "q.bank-demo.bocom" | "q.bank-demo.za" | "q.bank-demo.mox" | "q.bank-demo.livi";
         };
         AiConversationSave: {
             /** Format: uuid */
@@ -1547,6 +1645,102 @@ export interface components {
         AiConversationPage: {
             items: components["schemas"]["AiConversationSummary"][];
             /** Format: uuid */
+            next_cursor: string | null;
+        };
+        BankAccount: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            bank_id: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi";
+            bank_name: string;
+            bank_name_en: string;
+            /** Format: int64 */
+            balance_minor: number;
+            masked_number: string;
+            /** Format: uuid */
+            connection_id: string | null;
+        };
+        BankDemoRecipient: {
+            /** @enum {string} */
+            id: "demo_chen";
+            display_name: string;
+            /** @enum {boolean} */
+            demo: true;
+        };
+        BankWallet: {
+            /** @enum {string} */
+            mode: "demo";
+            /** @enum {string} */
+            currency: "HKD";
+            accounts: components["schemas"]["BankAccount"][];
+            /** Format: int64 */
+            total_balance_minor: number;
+            recipients: components["schemas"]["BankDemoRecipient"][];
+        };
+        BankConnectRequest: {
+            bank_ids: ("hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi")[];
+        };
+        BankTransferReceipt: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            source_bank_id: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi";
+            /** @enum {string} */
+            destination_bank_id: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi";
+            /** @enum {string} */
+            recipient: "self" | "demo_chen";
+            /** Format: int64 */
+            amount_minor: number;
+            /** @enum {string} */
+            currency: "HKD";
+            /** @enum {string} */
+            mode: "demo";
+            /** Format: int64 */
+            source_balance_minor: number;
+            /**
+             * Format: int64
+             * @description Only own-account transfers expose the destination balance; null for fictional demo_chen.
+             */
+            destination_balance_minor: number | null;
+            memo: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        BankEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** @enum {string} */
+            bank_id: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi";
+            /** @enum {string} */
+            kind: "initial" | "transfer";
+            /** @enum {string} */
+            direction: "in" | "out";
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: int64 */
+            balance_after_minor: number;
+            /** @enum {string} */
+            currency: "HKD";
+            /** @enum {string} */
+            mode: "demo";
+            memo: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @enum {string|null} */
+            source_bank_id: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi" | null;
+            /** @enum {string|null} */
+            destination_bank_id: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi" | null;
+            /** @enum {string|null} */
+            recipient: "self" | "demo_chen" | null;
+        };
+        BankTransactionPage: {
+            items: components["schemas"]["BankTransferReceipt"][];
+            next_cursor: string | null;
+        };
+        BankEntryPage: {
+            items: components["schemas"]["BankEntry"][];
             next_cursor: string | null;
         };
     };
@@ -3671,6 +3865,134 @@ export interface operations {
                 };
             };
             /** @description Safe structured local error, before opening a stream. See contracts/api.md. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    readBankWallet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped simulated HKD data. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankWallet"];
+                };
+            };
+            /** @description Structured error; no real financial action is performed. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    connectBankPlugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BankConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner-scoped simulated HKD data. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankWallet"];
+                };
+            };
+            /** @description Structured error; no real financial action is performed. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listBankTransfers: {
+        parameters: {
+            query?: {
+                bank_id?: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped simulated HKD data. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankTransactionPage"];
+                };
+            };
+            /** @description Structured error; no real financial action is performed. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listBankEntries: {
+        parameters: {
+            query?: {
+                bank_id?: "hsbc" | "hangseng" | "bochk" | "scb" | "bea" | "dbs" | "citi" | "icbc" | "ccb" | "ncb" | "citic" | "cmbwinglung" | "dahsing" | "fubon" | "chiyu" | "shacombank" | "bocom" | "za" | "mox" | "livi";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped simulated HKD data. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankEntryPage"];
+                };
+            };
+            /** @description Structured error; no real financial action is performed. */
             default: {
                 headers: {
                     [name: string]: unknown;

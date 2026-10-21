@@ -24,6 +24,8 @@ use crate::{
 pub(crate) struct StoredConnection {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub connection_kind: String,
+    pub builtin_service_id: Option<String>,
     pub candidate: Value,
     pub pending_candidate: Option<Value>,
     pub tools_snapshot: Option<Value>,
@@ -38,8 +40,40 @@ pub(crate) struct StoredConnection {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-pub(crate) const CONNECTION_FIELDS: &str = "id,user_id,candidate,pending_candidate,tools_snapshot,pending_tools,schema_fingerprint,revision,status,auth_status,auth_challenge,requested_scopes,last_error_code,created_at,updated_at";
+pub(crate) const CONNECTION_FIELDS: &str = "id,user_id,connection_kind,builtin_service_id,candidate,pending_candidate,tools_snapshot,pending_tools,schema_fingerprint,revision,status,auth_status,auth_challenge,requested_scopes,last_error_code,created_at,updated_at";
 impl StoredConnection {
+    /// Only server-created connection columns select an internal runtime. Card metadata never does.
+    pub(crate) fn bank_service_id(&self) -> ApiResult<Option<&str>> {
+        match (
+            self.connection_kind.as_str(),
+            self.builtin_service_id.as_deref(),
+        ) {
+            ("remote_mcp", None) => Ok(None),
+            ("bank_demo", Some(service)) if service.starts_with("q.bank-demo.") => {
+                let bank_id = service
+                    .strip_prefix("q.bank-demo.")
+                    .ok_or_else(ApiError::internal)?;
+                let expected = format!("urn:q:bank-demo:{bank_id}");
+                let card = self.card()?;
+                if bank_id.is_empty() || card.card_url != expected || card.endpoint_url != expected
+                {
+                    return Err(ApiError::internal());
+                }
+                Ok(Some(service))
+            }
+            _ => Err(ApiError::internal()),
+        }
+    }
+    pub(crate) fn require_remote(&self) -> ApiResult<()> {
+        if self.bank_service_id()?.is_some() {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "PLUGIN_CAPABILITY_UNSUPPORTED",
+                "This built-in demo plugin does not provide remote MCP resources, prompts, or OAuth.",
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn card(&self) -> ApiResult<Candidate> {
         serde_json::from_value(self.candidate.clone()).map_err(|_| ApiError::internal())
     }
@@ -52,7 +86,8 @@ impl StoredConnection {
         }
         Ok(())
     }
-    fn dto(&self) -> ApiResult<Connection> {
+    pub(crate) fn dto(&self) -> ApiResult<Connection> {
+        self.bank_service_id()?;
         let card = self.card()?;
         let pending_update = self.pending_candidate.is_some() || self.pending_tools.is_some();
         let pending_update_details = if pending_update {
@@ -91,6 +126,8 @@ impl StoredConnection {
         Ok(Connection {
             owner_name: card.owner_name(),
             id: self.id,
+            connection_kind: self.connection_kind.clone(),
+            builtin_service_id: self.builtin_service_id.clone(),
             card_url: card.card_url,
             name: card.name,
             title: card.title,
@@ -112,6 +149,8 @@ impl StoredConnection {
 pub struct Connection {
     pub owner_name: Option<String>,
     pub id: Uuid,
+    pub connection_kind: String,
+    pub builtin_service_id: Option<String>,
     pub card_url: String,
     pub name: String,
     pub title: String,
@@ -326,12 +365,15 @@ pub async fn add_connection(
         ));
     }
     let id = Uuid::new_v4();
-    let inserted: Option<Uuid> = sqlx::query_scalar("INSERT INTO plugin_connections(id,user_id,service_id,candidate) VALUES ($1,$2,$3,$4) ON CONFLICT(user_id,service_id) DO NOTHING RETURNING id")
+    let inserted: Option<Uuid> = sqlx::query_scalar("INSERT INTO plugin_connections(id,user_id,service_id,candidate,connection_kind,builtin_service_id) VALUES ($1,$2,$3,$4,'remote_mcp',NULL) ON CONFLICT(user_id,service_id) DO NOTHING RETURNING id")
         .bind(id).bind(auth.user_id).bind(service_id).bind(json!(card)).fetch_optional(&mut *tx).await?;
     let (id, should_probe) = if let Some(id) = inserted {
         (id, true)
     } else {
-        let (id, status): (Uuid,String) = sqlx::query_as("SELECT id,status FROM plugin_connections WHERE user_id=$1 AND service_id=$2 FOR UPDATE").bind(auth.user_id).bind(service_id).fetch_one(&mut *tx).await?;
+        let (id, status, kind): (Uuid,String,String) = sqlx::query_as("SELECT id,status,connection_kind FROM plugin_connections WHERE user_id=$1 AND service_id=$2 FOR UPDATE").bind(auth.user_id).bind(service_id).fetch_one(&mut *tx).await?;
+        if kind != "remote_mcp" {
+            return Err(ApiError::internal());
+        }
         if status == "revoked" {
             sqlx::query("UPDATE plugin_connections SET candidate=$3,pending_candidate=NULL,tools_snapshot=NULL,pending_tools=NULL,schema_fingerprint=NULL,revision=revision+1,status='ready',auth_status='none',auth_challenge=NULL,requested_scopes='{}',last_error_code=NULL,updated_at=now() WHERE id=$1 AND user_id=$2")
                 .bind(id).bind(auth.user_id).bind(json!(card)).execute(&mut *tx).await?;
@@ -390,7 +432,7 @@ pub async fn revoke(
     Path(id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
     let mut tx = state.pool.begin().await?;
-    let changed=sqlx::query("UPDATE plugin_connections SET status='revoked',auth_status='none',revision=revision+1,auth_challenge=NULL,updated_at=now() WHERE id=$1 AND user_id=$2")
+    let changed=sqlx::query("UPDATE plugin_connections SET status='revoked',auth_status=CASE WHEN connection_kind='bank_demo' THEN 'anonymous' ELSE 'none' END,revision=revision+1,auth_challenge=NULL,updated_at=now() WHERE id=$1 AND user_id=$2")
         .bind(id).bind(auth.user_id).execute(&mut *tx).await?;
     if changed.rows_affected() == 0 {
         return Err(not_found());
@@ -411,11 +453,17 @@ pub async fn refresh(
     auth: Authenticated,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Connection>> {
-    let runtime = runtime(&state)?;
     let connection = owned(&state, auth.user_id, id).await?;
     if connection.status == "revoked" {
         return Err(not_found());
     }
+    if connection.bank_service_id()?.is_some() {
+        if connection.status != "needs_review" {
+            load_tools_for_user(&state, auth.user_id, id).await?;
+        }
+        return Ok(Json(owned(&state, auth.user_id, id).await?.dto()?));
+    }
+    let runtime = runtime(&state)?;
     let current = connection.card()?;
     let latest = discovery::fetch_card(&runtime.http, &current.card_url)
         .await
@@ -492,6 +540,7 @@ pub(crate) async fn record_remote_error(
     connection: &StoredConnection,
     error: &McpError,
 ) -> ApiResult<()> {
+    connection.require_remote()?;
     let auth =
         error.category == ErrorCategory::Authorization || matches!(error.status, Some(401 | 403));
     if auth {
@@ -532,17 +581,21 @@ pub(crate) async fn handle_remote<T>(
 pub async fn load_tools_for_user(state: &AppState, user: Uuid, id: Uuid) -> ApiResult<Vec<Tool>> {
     let connection = owned(state, user, id).await?;
     connection.usable()?;
-    let runtime = runtime(state)?;
-    let bearer = oauth::bearer_for(state, &connection).await?;
-    let tools = handle_remote(
-        state,
-        &connection,
-        runtime
-            .client
-            .tools(&connection.card()?.endpoint_url, bearer.as_ref())
-            .await,
-    )
-    .await?;
+    let tools = if let Some(service) = connection.bank_service_id()? {
+        crate::banking::tools(service)?
+    } else {
+        let runtime = runtime(state)?;
+        let bearer = oauth::bearer_for(state, &connection).await?;
+        handle_remote(
+            state,
+            &connection,
+            runtime
+                .client
+                .tools(&connection.card()?.endpoint_url, bearer.as_ref())
+                .await,
+        )
+        .await?
+    };
     let value = json!(tools);
     let signature = fingerprint(&value)?;
     if connection
@@ -576,6 +629,7 @@ async fn authorized(
 ) -> ApiResult<(StoredConnection, Option<RemoteBearer>)> {
     let connection = owned(state, user, id).await?;
     connection.usable()?;
+    connection.require_remote()?;
     let bearer = oauth::bearer_for(state, &connection).await?;
     Ok((connection, bearer))
 }
@@ -584,8 +638,8 @@ pub async fn resources(
     auth: Authenticated,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
-    let runtime = runtime(&state)?;
     let (connection, bearer) = authorized(&state, auth.user_id, id).await?;
+    let runtime = runtime(&state)?;
     let values = handle_remote(
         &state,
         &connection,
@@ -611,8 +665,8 @@ pub async fn read_resource(
     if request.uri.is_empty() || request.uri.len() > 4096 || request.uri.contains('\0') {
         return Err(ApiError::validation("Invalid resource URI."));
     }
-    let runtime = runtime(&state)?;
     let (connection, bearer) = authorized(&state, auth.user_id, id).await?;
+    let runtime = runtime(&state)?;
     // A resource URI is only a parameter to this owner's MCP server, never an HTTP fetch target.
     Ok(Json(
         handle_remote(
@@ -635,8 +689,8 @@ pub async fn prompts(
     auth: Authenticated,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
-    let runtime = runtime(&state)?;
     let (connection, bearer) = authorized(&state, auth.user_id, id).await?;
+    let runtime = runtime(&state)?;
     let values = handle_remote(
         &state,
         &connection,
@@ -673,8 +727,8 @@ pub async fn get_prompt(
     {
         return Err(ApiError::validation("Invalid prompt parameters."));
     }
-    let runtime = runtime(&state)?;
     let (connection, bearer) = authorized(&state, auth.user_id, id).await?;
+    let runtime = runtime(&state)?;
     Ok(Json(
         handle_remote(
             &state,

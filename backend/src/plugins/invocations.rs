@@ -25,6 +25,8 @@ use crate::{
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct Invocation {
     pub owner_name: Option<String>,
+    pub connection_kind: String,
+    pub builtin_service_id: Option<String>,
     pub id: Uuid,
     pub connection_id: Uuid,
     pub connection_revision: i64,
@@ -54,7 +56,7 @@ struct StoredInvocation {
     expires_at: DateTime<Utc>,
 }
 const STORED: &str = "id,connection_id,connection_revision,request_fingerprint,tool_name,arguments,tool_snapshot,schema_fingerprint,status,expires_at";
-const VIEW: &str = "i.id,i.connection_id,i.connection_revision,i.tool_name,i.arguments,i.status,i.result,i.error_code,i.created_at,i.updated_at,i.expires_at,i.connection_snapshot->>'title' AS connection_title,i.connection_snapshot->>'card_url' AS card_url,i.connection_snapshot->>'endpoint_url' AS endpoint_url,i.connection_snapshot->>'owner_name' AS owner_name";
+const VIEW: &str = "i.id,i.connection_id,i.connection_revision,i.tool_name,i.arguments,i.status,i.result,i.error_code,i.created_at,i.updated_at,i.expires_at,i.connection_snapshot->>'title' AS connection_title,i.connection_snapshot->>'card_url' AS card_url,i.connection_snapshot->>'endpoint_url' AS endpoint_url,i.connection_snapshot->>'owner_name' AS owner_name,COALESCE(i.connection_snapshot->>'connection_kind','remote_mcp') AS connection_kind,i.connection_snapshot->>'builtin_service_id' AS builtin_service_id";
 
 async fn expire(state: &AppState, user: Uuid) -> ApiResult<()> {
     sqlx::query("UPDATE plugin_invocations SET status=CASE WHEN status='running' THEN 'unknown' ELSE 'expired' END,error_code=CASE WHEN status='running' THEN 'PLUGIN_RESULT_UNKNOWN' ELSE 'PLUGIN_PROPOSAL_EXPIRED' END,updated_at=now() WHERE user_id=$1 AND ((status='running' AND execution_deadline<now()) OR (status='awaiting_confirmation' AND expires_at<now()))")
@@ -141,7 +143,7 @@ pub async fn prepare_invocation(
     let id = Uuid::new_v4();
     let card = connection.card()?;
     let owner_name = card.owner_name();
-    let connection_snapshot = json!({"title":card.title,"card_url":card.card_url,"endpoint_url":card.endpoint_url,"owner_name":owner_name});
+    let connection_snapshot = json!({"title":card.title,"card_url":card.card_url,"endpoint_url":card.endpoint_url,"owner_name":owner_name,"connection_kind":connection.connection_kind,"builtin_service_id":connection.builtin_service_id});
     let mut tx = state.pool.begin().await?;
     // Serialize this owner's quota and key creation without locking another domain's records.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('q.plugins:' || $1::text,731291))")
@@ -302,8 +304,11 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
         return Err(changed());
     }
     let tool: Tool =
-        serde_json::from_value(proposal.tool_snapshot).map_err(|_| ApiError::internal())?;
+        serde_json::from_value(proposal.tool_snapshot.clone()).map_err(|_| ApiError::internal())?;
     protocol::validate_arguments(&tool, &proposal.arguments).map_err(super::mcp_error)?;
+    if connection.bank_service_id()?.is_some() {
+        return confirm_bank(state, user, &connection, &proposal, &tool).await;
+    }
     let bearer = oauth::bearer_for(state, &connection).await?;
     let runtime = runtime(state)?;
     let mut tx = state.pool.begin().await?;
@@ -370,6 +375,95 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
     sqlx::query("UPDATE plugin_invocations SET status=$3,result=$4,error_code=$5,updated_at=now() WHERE id=$1 AND user_id=$2 AND status IN ('running','unknown')")
         .bind(id).bind(user).bind(status).bind(result).bind(error_code).execute(&state.pool).await?;
     get_invocation(state, user, id).await
+}
+
+/// Internal demo tools and their receipt commit together. There is no remote dispatch window.
+async fn confirm_bank(
+    state: &AppState,
+    user: Uuid,
+    connection: &store::StoredConnection,
+    proposal: &StoredInvocation,
+    tool: &Tool,
+) -> ApiResult<Invocation> {
+    let mut tx = state.pool.begin().await?;
+    // Account deletion takes identity -> connection -> invocation. Use the same order,
+    // and let revocation win before the ledger is touched when it owns the connection lock.
+    let active: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM identities WHERE id=$1 AND status='active' FOR SHARE")
+            .bind(user)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if active.is_none() {
+        return Err(ApiError::unauthorized());
+    }
+    let current: store::StoredConnection = sqlx::query_as(&format!(
+        "SELECT {} FROM plugin_connections WHERE id=$1 AND user_id=$2 FOR SHARE",
+        store::CONNECTION_FIELDS
+    ))
+    .bind(connection.id)
+    .bind(user)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(not_found)?;
+    current.usable()?;
+    let service = current.bank_service_id()?.ok_or_else(changed)?;
+    if current.status != "ready"
+        || current.auth_status != "anonymous"
+        || current.revision != proposal.connection_revision
+        || current.builtin_service_id != connection.builtin_service_id
+        || current.schema_fingerprint != connection.schema_fingerprint
+    {
+        return Err(changed());
+    }
+    let locked: StoredInvocation = sqlx::query_as(&format!(
+        "SELECT {STORED} FROM plugin_invocations WHERE id=$1 AND user_id=$2 FOR UPDATE"
+    ))
+    .bind(proposal.id)
+    .bind(user)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(not_found)?;
+    if locked.status != "awaiting_confirmation" {
+        tx.commit().await?;
+        return get_invocation(state, user, proposal.id).await;
+    }
+    // clock_timestamp is checked after lock waits, not transaction start time.
+    let unexpired: bool = sqlx::query_scalar("SELECT $1::timestamptz > clock_timestamp()")
+        .bind(locked.expires_at)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !unexpired {
+        sqlx::query("UPDATE plugin_invocations SET status='expired',error_code='PLUGIN_PROPOSAL_EXPIRED',updated_at=now() WHERE id=$1 AND user_id=$2")
+            .bind(proposal.id).bind(user).execute(&mut *tx).await?;
+        tx.commit().await?;
+        return get_invocation(state, user, proposal.id).await;
+    }
+    let result = crate::banking::execute_tool(
+        &mut tx,
+        user,
+        service,
+        proposal.id,
+        &locked.tool_name,
+        &locked.arguments,
+    )
+    .await?;
+    protocol::validate_tool_result(tool, &result).map_err(super::mcp_error)?;
+    if serde_json::to_vec(&result)
+        .map_err(|_| ApiError::internal())?
+        .len()
+        > MAX_RESULT_BYTES
+    {
+        return Err(ApiError::internal());
+    }
+    let status = if result.get("isError").and_then(Value::as_bool) == Some(true) {
+        "tool_error"
+    } else {
+        "succeeded"
+    };
+    sqlx::query("UPDATE plugin_invocations SET status=$3,result=$4,error_code=NULL,confirmed_at=now(),execution_deadline=NULL,updated_at=now() WHERE id=$1 AND user_id=$2")
+        .bind(proposal.id).bind(user).bind(status).bind(result).execute(&mut *tx).await?;
+    tx.commit().await?;
+    get_invocation(state, user, proposal.id).await
 }
 
 fn resource_links(value: &Value) -> usize {

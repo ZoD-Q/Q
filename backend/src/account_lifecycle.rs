@@ -277,6 +277,7 @@ async fn purge_private_data(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
 ) -> Result<(), sqlx::Error> {
+    crate::banking::purge_private_data(tx, user_id).await?;
     // Owner-only provider records are erased; minimal idempotency identities survive.
     for statement in [
         "INSERT INTO account_erased_operations(user_id,kind,idempotency_key,operation_id) SELECT user_id,'video',idempotency_key,id FROM video_jobs WHERE user_id=$1 ON CONFLICT DO NOTHING",

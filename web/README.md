@@ -38,3 +38,5 @@ Playwright验证生产构建，默认自动启动4173端口的预览服务。设
 设计依据见[设计记录](docs/design.md)。开发前阅读[根规范](../AGENTS.md)、[Web补充规范](AGENTS.md)及[插件规范](../backend/docs/plugin-integration.md)。
 
 `public/privacy.html` 为公测隐私与社区说明源文件，计划由 Q API 域名的 `/privacy` 独立提供；它尚未部署，不能把管理网页构建成功视为该地址已可访问。安装位置、CSP 与发布顺序见[公测记录](../backend/deploy/PUBLIC-BETA.md)。
+
+2026-10-22 银行插件源码同步：隐私页说明按 Q 账号保存模拟 HKD 账户与流水，注销清除银行模拟备注、保留最小不可变分录；QDC 原有保留规则不变。该说明不代表已连接真实银行或已发布新版隐私页。本地 `typecheck`、`lint`、17 项逻辑测试、`build` 与 17 项 Playwright 验收通过。

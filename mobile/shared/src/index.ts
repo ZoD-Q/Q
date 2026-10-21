@@ -69,3 +69,12 @@ export type AiConversationSummary = components['schemas']['AiConversationSummary
 export type AiConversationPage = components['schemas']['AiConversationPage'];
 export type AiConversationMessage = components['schemas']['AiConversationMessage'];
 export type AiConversationPlugin = components['schemas']['AiConversationPlugin'];
+
+// First-party simulated HKD banking, separate from the QDC wallet.
+export type BankAccount = components["schemas"]["BankAccount"];
+export type BankWallet = components["schemas"]["BankWallet"];
+export type BankConnectRequest = components["schemas"]["BankConnectRequest"];
+export type BankTransferReceipt = components["schemas"]["BankTransferReceipt"];
+export type BankEntry = components["schemas"]["BankEntry"];
+export type BankTransactionPage = components["schemas"]["BankTransactionPage"];
+export type BankEntryPage = components["schemas"]["BankEntryPage"];

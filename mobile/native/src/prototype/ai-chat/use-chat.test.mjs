@@ -6,10 +6,20 @@ import ts from 'typescript';
 import * as core from '../api-workbench/core.ts';
 import * as stream from './stream.ts';
 import * as stateModel from './state-model.ts';
-import * as history from './history.ts';
+import { registerHooks } from 'node:module';
 import { createAiStatusMonitor } from './status-monitor.ts';
 import { createAiConsentGate, createAiPermission } from './consent.ts';
 import { createSessionStore } from '../../services/session-core.ts';
+const resolver = registerHooks({ resolve(specifier, context, next) {
+  if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
+  return next(specifier, context);
+} });
+const history = await import('./history.ts');
+const pluginCore = await import('../plugin-host/core.ts');
+const bankIntent = await import('../banking/intent.ts');
+const bankCatalog = await import('../banking/catalog.ts');
+const bankData = await import('../banking/data.ts');
+test.after(() => resolver.deregister());
 
 const token = 'q_' + 'a'.repeat(43);
 const user = { id: '11111111-1111-4111-8111-111111111111', handle: 'fixture', display_name: 'Fixture', avatar: 'orbit', bio: '', theme: 'light', locale: 'en', created_at: '2026-10-21T00:00:00Z' };
@@ -27,7 +37,7 @@ const hookSource = ts.transpileModule(readFileSync(new URL('./use-chat.ts', impo
 /** Execute the actual hook's async actions with deterministic state/effect plumbing.
  * This verifies orchestration, not React rendering, layout, or native transport. */
 function harness({ stored = token, statusFetch = async () => json(configured), meFetch = async () => json(user),
-  historyFetch = async () => new Response('', { status: 404 }), historySave,
+  historyFetch = async () => new Response('', { status: 404 }), historySave, bankFetch,
 } = {}) {
   const slots = [], calls = [], timers = new Map(), streams = [], streamCompletions = [], historyPosts = [], ordering = [];
   let cursor = 0, dirty = true, visible = true, mounted = true, pendingEffects = [], result, now = 0, nextId = 0;
@@ -60,6 +70,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     'expo/fetch': { fetch: async (url, options) => {
       const path = new URL(url).pathname;
       calls.push({ path, method: options.method, signal: options.signal });
+      if (path.startsWith('/v1/banking/') || path.startsWith('/v1/plugins/')) { ordering.push(path + ':' + options.method); if (bankFetch) return bankFetch(path, options); throw new Error('Unexpected bank action'); }
       if (path === '/v1/ai/status') return statusFetch(options);
       if (path === '/v1/me') return meFetch(options);
       if (path === '/v1/ai/conversations') return historyFetch(options);
@@ -75,6 +86,10 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     '../../services/api': { API_URL: 'https://review.invalid' },
     '../../services/session-store': { ...session, readSessionSnapshot: session.readSnapshot, getSessionRevision: session.getRevision, subscribeSession: session.subscribe },
     '../api-workbench/core': core,
+    '../plugin-host/core': pluginCore,
+    '../banking/intent': bankIntent,
+    '../banking/catalog': bankCatalog,
+    '../banking/client': bankData,
     './stream': { ...stream, streamChat: options => {
       streams.push(options); ordering.push('chat:POST');
       return new Promise((resolve, reject) => {
@@ -335,4 +350,47 @@ test('session-only history is sticky for its login and a new login probes indepe
   view.grantConsent(); assert.equal(view.current.send('new login cloud conversation'), true); await view.flush();
   assert.equal(view.historyPosts.length, 1);
   assert.equal(view.historyPosts[0].body.messages[0].content, 'new login cloud conversation');
+});
+
+const bankConnectionId='22222222-2222-4222-8222-222222222222';
+const bankConnection={id:bankConnectionId,card_url:'urn:q:bank-demo:hsbc',endpoint_url:'urn:q:bank-demo:hsbc',name:'q.bank-demo.hsbc',title:'汇丰模拟',description:'Q simulation',version:'1.0.0',revision:1,status:'ready',auth_status:'anonymous',last_error_code:null,created_at:user.created_at,updated_at:user.created_at,pending_update:false,connection_kind:'bank_demo',builtin_service_id:'q.bank-demo.hsbc'};
+const bankWallet={mode:'demo',currency:'HKD',accounts:[{id:user.id,bank_id:'hsbc',bank_name:'汇丰银行',bank_name_en:'HSBC',balance_minor:10000000,masked_number:'DEMO 1111',connection_id:bankConnectionId},{id:'33333333-3333-4333-8333-333333333333',bank_id:'bochk',bank_name:'中银香港',bank_name_en:'BOCHK',balance_minor:10000000,masked_number:'DEMO 2222',connection_id:'44444444-4444-4444-8444-444444444444'}],total_balance_minor:20000000,recipients:[{id:'demo_chen',display_name:'陈小明',demo:true}]};
+function bankFixture({prepare, wallet=bankWallet, readWallet}={}) {return async(path,options)=>{
+ if(path==='/v1/banking/wallet')return readWallet?readWallet(options):json(wallet);
+ if(path===`/v1/plugins/connections/${bankConnectionId}`)return json(bankConnection);
+ if(path==='/v1/plugins/invocations') {const body=JSON.parse(options.body);if(prepare)return prepare(body,options);return json({id:'55555555-5555-4555-8555-555555555555',connection_id:bankConnectionId,connection_revision:1,connection_title:bankConnection.title,card_url:bankConnection.card_url,endpoint_url:bankConnection.endpoint_url,connection_kind:'bank_demo',builtin_service_id:'q.bank-demo.hsbc',tool_name:body.tool_name,arguments:body.arguments,status:'awaiting_confirmation',result:null,error_code:null,created_at:user.created_at,updated_at:user.created_at,expires_at:'2026-10-22T00:00:00Z'});}
+ throw new Error('No confirmation or connection mutation is permitted in chat planning');
+};}
+const cloudHistory=()=>json({items:[],next_cursor:null});
+test('bank chat persists the proposal identity before invoking a bank and never calls a model or confirms',async t=>{
+ const gate=deferred();let first=true;
+ const view=harness({statusFetch:async()=>json({...configured,configured:false}),historyFetch:cloudHistory,bankFetch:bankFixture(),historySave:(id,body)=>{if(first){first=false;return gate.promise;}return json({id,...body,revision:body.expected_revision+1,updated_at:user.created_at});}});t.after(view.close);
+ await view.flush();assert.equal(view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK'),true);await view.flush();assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);
+ const firstPost=view.historyPosts[0];assert.equal(firstPost.body.plugin.connection_kind,'bank_demo');assert.equal(firstPost.body.messages.at(-1).bankCommand,true);
+ gate.resolve(json({id:firstPost.id,...firstPost.body,revision:1,updated_at:user.created_at}));await view.flush();
+ assert.equal(view.current.conversation.messages.at(-1).status,'tool');assert.equal(view.current.conversation.messages.at(-1).toolProposalId,'55555555-5555-4555-8555-555555555555');assert.equal(view.streams.length,0);assert.equal(view.calls.filter(c=>c.path.endsWith('/confirm')).length,0);assert.equal(view.calls.filter(c=>c.path.endsWith('/connect')).length,0);
+ assert.ok(view.ordering.indexOf('history:POST')<view.ordering.indexOf('/v1/plugins/invocations:POST'));
+});
+test('unknown bank proposal preparation retries the same durable id and payload without repeating the user message',async t=>{
+ const attempts=[];let fail=true;
+ const ordinary=bankFixture();const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture({prepare:async(body,options)=>{attempts.push(body);if(fail){fail=false;throw Error('lost response');}return ordinary('/v1/plugins/invocations',{...options,body:JSON.stringify(body)});}})});t.after(view.close);await view.flush();
+ view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK');await view.flush();assert.equal(view.current.conversation.messages.at(-1).status,'error');view.current.retry();await view.flush();
+ assert.deepEqual(attempts[0],attempts[1]);assert.equal(view.current.conversation.messages.filter(m=>m.role==='user').length,1);assert.equal(view.current.conversation.messages.at(-1).status,'tool');assert.equal(view.streams.length,0);
+});
+test('missing bank fields and unconnected banks only produce guidance, with no account creation',async t=>{
+ for(const prompt of ['Transfer HKD 500 from HSBC','Transfer HKD 500 from HSBC to Chen at BOCHK']) {
+  const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture({wallet:{...bankWallet,accounts:[],total_balance_minor:0}})});t.after(view.close);await view.flush();view.current.send(prompt);await view.flush();
+  assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);assert.equal(view.calls.filter(c=>c.path==='/v1/banking/connect').length,0);assert.equal(view.current.conversation.messages.at(-1).status,'complete');assert.equal(view.streams.length,0);
+ }
+});
+test('a bank lookup completing after account invalidation cannot publish or prepare a transfer',async t=>{
+ const pending=deferred();const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture({readWallet:()=>pending.promise})});t.after(view.close);await view.flush();view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK');await view.flush();
+ await view.changeToken('q_'+'b'.repeat(43));await view.flush();pending.resolve(json(bankWallet));await view.flush();assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);assert.equal(view.current.items.length,0);
+});
+
+test('a selected bank never turns a third-party source request into a debit from the signed-in user',async t=>{
+ const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture()});t.after(view.close);await view.flush();
+ view.current.selectPlugin(bankConnection);await view.flush();
+ view.current.send("Transfer 500 from Chen's account to my BOCHK account");await view.flush();
+ assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);assert.equal(view.streams.length,0);assert.equal(view.current.conversation.messages.at(-1).status,'complete');
 });

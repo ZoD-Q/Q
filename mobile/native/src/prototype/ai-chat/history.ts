@@ -1,4 +1,5 @@
 import type { ChatMessage, Conversation } from './state-model';
+import { decodePluginIdentity } from '../plugin-host/core';
 
 export type HistorySummary = { id: string; title: string; revision: number; updated_at: string };
 export type HistoryDetail = HistorySummary & Conversation;
@@ -17,6 +18,7 @@ export function decodeHistory(v: unknown): HistoryDetail {
     if (m.model !== undefined && !['deepseek-flash','deepseek-v4-pro'].includes(String(m.model))) return invalid();
     if (m.thinking !== undefined && typeof m.thinking !== 'boolean') return invalid();
     if (m.contextLimited !== undefined && typeof m.contextLimited !== 'boolean') return invalid();
+    if (m.bankCommand !== undefined && typeof m.bankCommand !== 'boolean') return invalid();
     if (m.finishReason !== undefined && !['stop','length','content_filter','tool_calls','insufficient_system_resource','aborted'].includes(String(m.finishReason))) return invalid();
     if (m.errorCode !== undefined && typeof m.errorCode !== 'string') return invalid();
     if (m.toolProposalId !== undefined && !uuid(m.toolProposalId)) return invalid();
@@ -27,7 +29,7 @@ export function decodeHistory(v: unknown): HistoryDetail {
   let plugin: Conversation['plugin'];
   if (v.plugin != null) {
     if (!record(v.plugin) || !uuid(v.plugin.id) || typeof v.plugin.title !== 'string' || typeof v.plugin.endpoint_url !== 'string') return invalid();
-    plugin = { id: v.plugin.id, title: v.plugin.title, endpoint_url: v.plugin.endpoint_url };
+    plugin = { id: v.plugin.id, title: v.plugin.title, endpoint_url: v.plugin.endpoint_url, ...decodePluginIdentity(v.plugin) };
   }
   return { ...summary, messages, ...(plugin ? { plugin } : {}) };
 }

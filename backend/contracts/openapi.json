@@ -3,7 +3,7 @@
   "info": {
     "title": "小Q API",
     "version": "0.5.0",
-    "description": "QDC ledger is simulated. Configured DeepSeek chat and personal Kling connections make real supplier requests. Local development, not production certified."
+    "description": "QDC and built-in bank HKD ledgers are simulated. Configured DeepSeek chat and personal Kling connections make real supplier requests. Local development, not production certified."
   },
   "servers": [
     {
@@ -3416,6 +3416,258 @@
         },
         "description": "Full display snapshot max 4 MiB. CAS revision, zero creates. Replay latest request_id with identical payload returns same revision; older or stale saves conflict. Tool metadata never authorizes execution. Account deletion erases history."
       }
+    },
+    "/v1/banking/wallet": {
+      "get": {
+        "operationId": "readBankWallet",
+        "tags": [
+          "banking"
+        ],
+        "description": "Read only the signed-in user’s connected simulated bank accounts. An empty wallet does not initialize accounts.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped simulated HKD data. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankWallet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; no real financial action is performed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/banking/connect": {
+      "post": {
+        "operationId": "connectBankPlugins",
+        "tags": [
+          "banking"
+        ],
+        "description": "Explicitly add 1–20 first-party bank plugins. Each new self and fictional-recipient account is issued HKD 100,000 once, with balanced entries. Repeating the same bank list is idempotent and never refills balances; revoked plugins can reconnect without losing history. Does not open a real account or contact a bank.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped simulated HKD data. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankWallet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; no real financial action is performed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankConnectRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/banking/transactions": {
+      "get": {
+        "operationId": "listBankTransfers",
+        "tags": [
+          "banking"
+        ],
+        "description": "Saved transfer receipts involving the selected bank; initial credits are excluded. Stable descending created_at/UUID pagination; use the returned cursor with the same filter.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped simulated HKD data. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankTransactionPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; no real financial action is performed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hsbc",
+                "hangseng",
+                "bochk",
+                "scb",
+                "bea",
+                "dbs",
+                "citi",
+                "icbc",
+                "ccb",
+                "ncb",
+                "citic",
+                "cmbwinglung",
+                "dahsing",
+                "fubon",
+                "chiyu",
+                "shacombank",
+                "bocom",
+                "za",
+                "mox",
+                "livi"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ]
+      }
+    },
+    "/v1/banking/entries": {
+      "get": {
+        "operationId": "listBankEntries",
+        "tags": [
+          "banking"
+        ],
+        "description": "Own-account double-entry ledger projection, including initial credits and incoming/outgoing transfers. Fictional recipient and issuance accounts are excluded. Stable descending created_at/UUID pagination; use the returned cursor with the same filter.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped simulated HKD data. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankEntryPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; no real financial action is performed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hsbc",
+                "hangseng",
+                "bochk",
+                "scb",
+                "bea",
+                "dbs",
+                "citi",
+                "icbc",
+                "ccb",
+                "ncb",
+                "citic",
+                "cmbwinglung",
+                "dahsing",
+                "fubon",
+                "chiyu",
+                "shacombank",
+                "bocom",
+                "za",
+                "mox",
+                "livi"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -4382,7 +4634,8 @@
             "format": "uuid"
           },
           "card_url": {
-            "type": "string"
+            "type": "string",
+            "description": "HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint."
           },
           "name": {
             "type": "string"
@@ -4397,7 +4650,8 @@
             "type": "string"
           },
           "endpoint_url": {
-            "type": "string"
+            "type": "string",
+            "description": "HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint."
           },
           "revision": {
             "type": "integer"
@@ -4418,8 +4672,10 @@
               "none",
               "required",
               "authorized",
-              "blocked"
-            ]
+              "blocked",
+              "anonymous"
+            ],
+            "description": "anonymous is only used for server-owned bank_demo simulations; it is not bank OAuth authorization."
           },
           "last_error_code": {
             "type": "string",
@@ -4500,6 +4756,41 @@
             "nullable": true,
             "maxLength": 80,
             "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
+          },
+          "connection_kind": {
+            "type": "string",
+            "enum": [
+              "remote_mcp",
+              "bank_demo"
+            ],
+            "description": "Trusted server-controlled execution type. Bank simulations are first-party built-ins, not remote MCP or real-bank connections."
+          },
+          "builtin_service_id": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              null,
+              "q.bank-demo.hsbc",
+              "q.bank-demo.hangseng",
+              "q.bank-demo.bochk",
+              "q.bank-demo.scb",
+              "q.bank-demo.bea",
+              "q.bank-demo.dbs",
+              "q.bank-demo.citi",
+              "q.bank-demo.icbc",
+              "q.bank-demo.ccb",
+              "q.bank-demo.ncb",
+              "q.bank-demo.citic",
+              "q.bank-demo.cmbwinglung",
+              "q.bank-demo.dahsing",
+              "q.bank-demo.fubon",
+              "q.bank-demo.chiyu",
+              "q.bank-demo.shacombank",
+              "q.bank-demo.bocom",
+              "q.bank-demo.za",
+              "q.bank-demo.mox",
+              "q.bank-demo.livi"
+            ]
           }
         },
         "required": [
@@ -4518,7 +4809,9 @@
           "updated_at",
           "pending_update",
           "pending_update_details",
-          "owner_name"
+          "owner_name",
+          "connection_kind",
+          "builtin_service_id"
         ],
         "additionalProperties": false
       },
@@ -4564,7 +4857,8 @@
             "type": "string"
           },
           "card_url": {
-            "type": "string"
+            "type": "string",
+            "description": "HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint."
           },
           "tool_name": {
             "type": "string"
@@ -4608,13 +4902,49 @@
             "type": "integer"
           },
           "endpoint_url": {
-            "type": "string"
+            "type": "string",
+            "description": "HTTPS URL for remote_mcp; exact urn:q:bank-demo:<bank_id> identity for trusted bank_demo. An internal URN is never fetched as a network endpoint."
           },
           "owner_name": {
             "type": "string",
             "nullable": true,
             "maxLength": 80,
             "description": "Publisher-declared display name from Server Card _meta[\"com.kaicloudpay.q/owner\"].name. Not verified ownership, a Q identity, or an authorization grant. Missing or malformed optional metadata is returned as null."
+          },
+          "connection_kind": {
+            "type": "string",
+            "enum": [
+              "remote_mcp",
+              "bank_demo"
+            ],
+            "description": "Trusted server-controlled execution type. Bank simulations are first-party built-ins, not remote MCP or real-bank connections."
+          },
+          "builtin_service_id": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              null,
+              "q.bank-demo.hsbc",
+              "q.bank-demo.hangseng",
+              "q.bank-demo.bochk",
+              "q.bank-demo.scb",
+              "q.bank-demo.bea",
+              "q.bank-demo.dbs",
+              "q.bank-demo.citi",
+              "q.bank-demo.icbc",
+              "q.bank-demo.ccb",
+              "q.bank-demo.ncb",
+              "q.bank-demo.citic",
+              "q.bank-demo.cmbwinglung",
+              "q.bank-demo.dahsing",
+              "q.bank-demo.fubon",
+              "q.bank-demo.chiyu",
+              "q.bank-demo.shacombank",
+              "q.bank-demo.bocom",
+              "q.bank-demo.za",
+              "q.bank-demo.mox",
+              "q.bank-demo.livi"
+            ]
           }
         },
         "required": [
@@ -4632,7 +4962,9 @@
           "expires_at",
           "connection_revision",
           "endpoint_url",
-          "owner_name"
+          "owner_name",
+          "connection_kind",
+          "builtin_service_id"
         ],
         "additionalProperties": false
       },
@@ -5614,6 +5946,10 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "bankCommand": {
+            "type": "boolean",
+            "description": "Display/recovery marker for a locally parsed banking command; does not grant tool execution authority."
           }
         }
       },
@@ -5639,6 +5975,41 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4096
+          },
+          "connection_kind": {
+            "type": "string",
+            "enum": [
+              "remote_mcp",
+              "bank_demo"
+            ],
+            "description": "Trusted server-controlled execution type. Bank simulations are first-party built-ins, not remote MCP or real-bank connections."
+          },
+          "builtin_service_id": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              null,
+              "q.bank-demo.hsbc",
+              "q.bank-demo.hangseng",
+              "q.bank-demo.bochk",
+              "q.bank-demo.scb",
+              "q.bank-demo.bea",
+              "q.bank-demo.dbs",
+              "q.bank-demo.citi",
+              "q.bank-demo.icbc",
+              "q.bank-demo.ccb",
+              "q.bank-demo.ncb",
+              "q.bank-demo.citic",
+              "q.bank-demo.cmbwinglung",
+              "q.bank-demo.dahsing",
+              "q.bank-demo.fubon",
+              "q.bank-demo.chiyu",
+              "q.bank-demo.shacombank",
+              "q.bank-demo.bocom",
+              "q.bank-demo.za",
+              "q.bank-demo.mox",
+              "q.bank-demo.livi"
+            ]
           }
         }
       },
@@ -5769,6 +6140,509 @@
             "nullable": true
           }
         }
+      },
+      "BankAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bank_id": {
+            "type": "string",
+            "enum": [
+              "hsbc",
+              "hangseng",
+              "bochk",
+              "scb",
+              "bea",
+              "dbs",
+              "citi",
+              "icbc",
+              "ccb",
+              "ncb",
+              "citic",
+              "cmbwinglung",
+              "dahsing",
+              "fubon",
+              "chiyu",
+              "shacombank",
+              "bocom",
+              "za",
+              "mox",
+              "livi"
+            ]
+          },
+          "bank_name": {
+            "type": "string"
+          },
+          "bank_name_en": {
+            "type": "string"
+          },
+          "balance_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "masked_number": {
+            "type": "string",
+            "pattern": "^DEMO ",
+            "maxLength": 64
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "bank_id",
+          "bank_name",
+          "bank_name_en",
+          "balance_minor",
+          "masked_number",
+          "connection_id"
+        ],
+        "additionalProperties": false
+      },
+      "BankDemoRecipient": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "demo_chen"
+            ]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "demo": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "demo"
+        ],
+        "additionalProperties": false
+      },
+      "BankWallet": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "demo"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "HKD"
+            ]
+          },
+          "accounts": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/BankAccount"
+            }
+          },
+          "total_balance_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recipients": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/BankDemoRecipient"
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "currency",
+          "accounts",
+          "total_balance_minor",
+          "recipients"
+        ],
+        "additionalProperties": false
+      },
+      "BankConnectRequest": {
+        "type": "object",
+        "properties": {
+          "bank_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "hsbc",
+                "hangseng",
+                "bochk",
+                "scb",
+                "bea",
+                "dbs",
+                "citi",
+                "icbc",
+                "ccb",
+                "ncb",
+                "citic",
+                "cmbwinglung",
+                "dahsing",
+                "fubon",
+                "chiyu",
+                "shacombank",
+                "bocom",
+                "za",
+                "mox",
+                "livi"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "bank_ids"
+        ],
+        "additionalProperties": false
+      },
+      "BankTransferReceipt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_bank_id": {
+            "type": "string",
+            "enum": [
+              "hsbc",
+              "hangseng",
+              "bochk",
+              "scb",
+              "bea",
+              "dbs",
+              "citi",
+              "icbc",
+              "ccb",
+              "ncb",
+              "citic",
+              "cmbwinglung",
+              "dahsing",
+              "fubon",
+              "chiyu",
+              "shacombank",
+              "bocom",
+              "za",
+              "mox",
+              "livi"
+            ]
+          },
+          "destination_bank_id": {
+            "type": "string",
+            "enum": [
+              "hsbc",
+              "hangseng",
+              "bochk",
+              "scb",
+              "bea",
+              "dbs",
+              "citi",
+              "icbc",
+              "ccb",
+              "ncb",
+              "citic",
+              "cmbwinglung",
+              "dahsing",
+              "fubon",
+              "chiyu",
+              "shacombank",
+              "bocom",
+              "za",
+              "mox",
+              "livi"
+            ]
+          },
+          "recipient": {
+            "type": "string",
+            "enum": [
+              "self",
+              "demo_chen"
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "HKD"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "demo"
+            ]
+          },
+          "source_balance_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "destination_balance_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "nullable": true,
+            "description": "Only own-account transfers expose the destination balance; null for fictional demo_chen."
+          },
+          "memo": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "source_bank_id",
+          "destination_bank_id",
+          "recipient",
+          "amount_minor",
+          "currency",
+          "mode",
+          "source_balance_minor",
+          "destination_balance_minor",
+          "memo",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "BankEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "transaction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bank_id": {
+            "type": "string",
+            "enum": [
+              "hsbc",
+              "hangseng",
+              "bochk",
+              "scb",
+              "bea",
+              "dbs",
+              "citi",
+              "icbc",
+              "ccb",
+              "ncb",
+              "citic",
+              "cmbwinglung",
+              "dahsing",
+              "fubon",
+              "chiyu",
+              "shacombank",
+              "bocom",
+              "za",
+              "mox",
+              "livi"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "initial",
+              "transfer"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out"
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "balance_after_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "HKD"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "demo"
+            ]
+          },
+          "memo": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_bank_id": {
+            "type": "string",
+            "enum": [
+              "hsbc",
+              "hangseng",
+              "bochk",
+              "scb",
+              "bea",
+              "dbs",
+              "citi",
+              "icbc",
+              "ccb",
+              "ncb",
+              "citic",
+              "cmbwinglung",
+              "dahsing",
+              "fubon",
+              "chiyu",
+              "shacombank",
+              "bocom",
+              "za",
+              "mox",
+              "livi"
+            ],
+            "nullable": true
+          },
+          "destination_bank_id": {
+            "type": "string",
+            "enum": [
+              "hsbc",
+              "hangseng",
+              "bochk",
+              "scb",
+              "bea",
+              "dbs",
+              "citi",
+              "icbc",
+              "ccb",
+              "ncb",
+              "citic",
+              "cmbwinglung",
+              "dahsing",
+              "fubon",
+              "chiyu",
+              "shacombank",
+              "bocom",
+              "za",
+              "mox",
+              "livi"
+            ],
+            "nullable": true
+          },
+          "recipient": {
+            "type": "string",
+            "enum": [
+              "self",
+              "demo_chen",
+              null
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "transaction_id",
+          "bank_id",
+          "kind",
+          "direction",
+          "amount_minor",
+          "balance_after_minor",
+          "currency",
+          "mode",
+          "memo",
+          "created_at",
+          "source_bank_id",
+          "destination_bank_id",
+          "recipient"
+        ],
+        "additionalProperties": false
+      },
+      "BankTransactionPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/BankTransferReceipt"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "additionalProperties": false
+      },
+      "BankEntryPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/BankEntry"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "additionalProperties": false
       }
     }
   }

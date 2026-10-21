@@ -320,10 +320,11 @@ pub async fn start(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<StartResult>> {
     state.limit_auth(format!("plugin-oauth:{}", auth.user_id), 10)?;
-    let runtime = runtime(&state)?;
-    let (client_id, redirect_uri) = public_urls(&runtime)?;
     let connection = store::owned(&state, auth.user_id, id).await?;
     connection.usable()?;
+    connection.require_remote()?;
+    let runtime = runtime(&state)?;
+    let (client_id, redirect_uri) = public_urls(&runtime)?;
     let metadata = discover_metadata(&runtime, &connection).await?;
     let state_secret = random_secret();
     let verifier = random_secret();
@@ -703,6 +704,7 @@ pub(crate) async fn bearer_for(
     connection: &StoredConnection,
 ) -> ApiResult<Option<RemoteBearer>> {
     connection.usable()?;
+    connection.require_remote()?;
     if connection.auth_status == "none" {
         return Ok(None);
     }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 // Expo resolves extensionless TS imports; match that one boundary in Node's test runner.
 const hook=registerHooks({resolve(specifier,context,next){
-  if(['../api-workbench/core','../plugin-workbench/materials'].includes(specifier) && context.parentURL?.endsWith('/plugin-host/core.ts')) return next(specifier+'.ts',context);
+  if(['../api-workbench/core','../plugin-workbench/materials','../banking/catalog'].includes(specifier) && context.parentURL?.endsWith('/plugin-host/core.ts')) return next(specifier+'.ts',context);
   return next(specifier,context);
 }});
 const {decodeResourceImage,decodeResult,decodeInvocation,decodePluginConnection,decodeDiscovery,parseArguments,publicHttps,pluginOrigin,connectionStatusLabel,authorizationLabel,pluginEntryIntentReducer,initialPluginEntryState,pluginAuthModalReducer,canPresentPluginConnectionPage,pluginError}=await import('./core.ts');

@@ -1,3 +1,4 @@
+import type { BankAccount } from "../banking/client";
 import { PluginsPage } from "./plugins";
 import { WalletPage } from "./wallet";
 import { KeysPage } from "./keys";
@@ -7,8 +8,10 @@ import { InsurancePage } from "./insurance";
 export function ServicePage({
   page,
   onOpenWorkbench,
+  onBankTransfer,
 }: {
   onOpenWorkbench: () => void;
+  onBankTransfer: (account: BankAccount) => void;
   page:
     | "plugins"
     | "wallet"
@@ -21,7 +24,7 @@ export function ServicePage({
     case "plugins":
       return <PluginsPage onOpenWorkbench={onOpenWorkbench} />;
     case "wallet":
-      return <WalletPage />;
+      return <WalletPage onTransfer={onBankTransfer} />;
     case "keys":
       return <KeysPage />;
     case "finance":

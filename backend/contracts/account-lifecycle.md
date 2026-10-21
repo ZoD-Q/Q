@@ -54,6 +54,7 @@ private cleanup. It:
   mutual interaction bookkeeping. Pending friendship requests and notifications
   involving the account are removed.
 - Deletes all account-owned AI conversation snapshots, including their last save request metadata.
+- Disables all bank simulation accounts and deletes their private memo rows. The immutable HKD amounts, bank/account identifiers, entries, timestamps and original invocation IDs remain under the pseudonymous identity. Bank transactions do not foreign-key to deleted plugin invocations; deletion cannot be blocked by their retained journal.
 - Deletes reports submitted by this account and their copied evidence. Existing
   content-free report idempotency receipts remain.
 

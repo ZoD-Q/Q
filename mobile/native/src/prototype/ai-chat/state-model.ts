@@ -14,8 +14,9 @@ export interface ChatMessage {
   contextLimited?: boolean;
   toolProposalId?: string;
   toolInvocationIds?: string[];
+  bankCommand?: boolean;
 }
-export interface ChatPlugin { id: string; title: string; endpoint_url: string }
+export interface ChatPlugin { id: string; title: string; endpoint_url: string; connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null }
 export interface Conversation { id: string; title: string; messages: ChatMessage[]; plugin?: ChatPlugin }
 export const MODEL_NAMES: Record<AiModel, string> = {
   'deepseek-flash': 'DeepSeek Flash',

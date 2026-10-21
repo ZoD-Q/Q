@@ -8,17 +8,20 @@ import { ChatAuthSheet } from '../ai-chat/auth-sheet';
 import type { ChatController } from '../ai-chat/use-chat';
 import { PluginsPage } from '../services/plugins';
 import { pluginRequest } from './client';
-import { decodeDiscovery, decodeInvocation, decodePluginConnection, decodePluginStatus, decodeResources, decodeTool, parseArguments, pluginError, pluginOrigin, connectionStatusLabel, authorizationLabel, initialPluginEntryState, pluginAuthModalReducer, canPresentPluginConnectionPage, publicHttps, record, type Discovery, type PluginConnection, type PluginInvocation, type PluginTool, type ResourceLink, type PluginEntryIntentOutcome } from './core';
+import { bankIdForPlugin, bankTransferArguments, decodeDiscovery, decodeInvocation, decodePluginConnection, decodePluginStatus, decodeResources, decodeTool, parseArguments, pluginError, pluginOrigin, connectionStatusLabel, authorizationLabel, initialPluginEntryState, pluginAuthModalReducer, canPresentPluginConnectionPage, publicHttps, record, type Discovery, type PluginConnection, type PluginInvocation, type PluginTool, type ResourceLink, type PluginEntryIntentOutcome } from './core';
 import { PluginResultView, ResourceViewer } from './result-view';
 import { normalizeOwnerName, type EntryKind, type PluginEntryIntent } from '../plugin-workbench/materials';
+import { BankProposalView } from '../banking/proposal';
+import { BankPluginCatalog } from '../banking/plugin-catalog';
 
 type LinkIntent = { initialIntent?: PluginEntryIntent | null; onIntentHandled?: (intent: PluginEntryIntent, outcome: PluginEntryIntentOutcome) => void };
 const ownerLabel = (name: string | null | undefined, text: (zh: string, en: string) => string) => name
   ? text(`所有者：${name}（发布者自声明）`, `Owner: ${name} (publisher-declared)`)
   : text('所有者未声明', 'Owner not declared');
 
-function SourceSummary({ cardUrl, endpointUrl }: { cardUrl: string; endpointUrl: string }) {
+function SourceSummary({ cardUrl, endpointUrl, bank = false }: { cardUrl: string; endpointUrl: string; bank?: boolean }) {
   const { text } = useDesign();
+  if (bank) return <Type size={12} muted>{text('小Q内置银行插件 · 服务端模拟资金', 'Q bank plugin · server-side simulated funds')}</Type>;
   const cardOrigin = pluginOrigin(cardUrl), endpointOrigin = pluginOrigin(endpointUrl);
   return <View style={{ gap: 4 }}>
     <Type selectable size={12} muted>{text('服务来源：', 'Service source: ')}{endpointOrigin ?? text('暂不可识别', 'Unavailable')}</Type>
@@ -49,40 +52,45 @@ export function InvocationView({ invocation, token, onChanged, onContinue, autoS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [showResult, setShowResult] = useState(autoShowResult);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
   const request = useRef<AbortController | null>(null);
+  const bank = bankIdForPlugin(invocation);
+  const bankTransfer = !!bank && invocation.tool_name === 'bank_transfer';
   useEffect(() => () => request.current?.abort(), []);
   const act = async (action: '' | '/confirm' | '/cancel') => {
     if (request.current) return;
+    if (action === '/confirm' && (needsRefresh || invocation.status !== 'awaiting_confirmation' || (bankTransfer && !bankTransferArguments(invocation)))) return;
     const controller = new AbortController(); request.current = controller; setBusy(true); setError(null);
     try {
       const value = await pluginRequest(token, `/v1/plugins/invocations/${invocation.id}${action}`, decodeInvocation, { method: action ? 'POST' : 'GET', ...(action === '/confirm' ? { body: { confirmed: true } } : {}), signal: controller.signal });
-      if (!controller.signal.aborted) { onChanged(value); if (value.result != null) setShowResult(true); }
-    } catch (failure) { if (!controller.signal.aborted) setError(failure); }
+      if (value.id !== invocation.id || value.connection_id !== invocation.connection_id) throw new WorkbenchError('INVALID_RESPONSE');
+      if (!controller.signal.aborted) { onChanged(value); setNeedsRefresh(false); if (value.result != null) setShowResult(true); }
+    } catch (failure) { if (!controller.signal.aborted) { setError(failure); if (action === '/confirm') setNeedsRefresh(true); } }
     finally { if (!controller.signal.aborted) { request.current = null; setBusy(false); } }
   };
   return <View style={{ gap: 12, paddingVertical: 14 }}>
     <Type weight="500">{invocation.connection_title}</Type>
-    <Type size={12} muted>{ownerLabel(invocation.owner_name, text)}</Type>
-    <SourceSummary cardUrl={invocation.card_url} endpointUrl={invocation.endpoint_url} />
-    <Type weight="500">{invocation.tool_name}</Type>
-    <Type size={12} muted>{invocationLabel(invocation.status, text)}</Type>
-    {invocation.status === 'awaiting_confirmation' && <>
+    {!bank && <Type size={12} muted>{ownerLabel(invocation.owner_name, text)}</Type>}
+    <SourceSummary cardUrl={invocation.card_url} endpointUrl={invocation.endpoint_url} bank={!!bank} />
+    {!bankTransfer && <><Type weight="500">{invocation.tool_name}</Type><Type size={12} muted>{invocationLabel(invocation.status, text)}</Type></>}
+    {bankTransfer && <BankProposalView invocation={invocation} busy={busy} needsRefresh={needsRefresh} onConfirm={() => { void act('/confirm'); }} onCancel={() => { void act('/cancel'); }} onRefresh={() => { void act(''); }} />}
+    {!bankTransfer && invocation.status === 'awaiting_confirmation' && <>
       <Type selectable size={12} muted>{text('实际接收地址：', 'Actual recipient endpoint: ')}{invocation.endpoint_url}</Type>
       <Type selectable size={13}>{JSON.stringify(invocation.arguments, null, 2)}</Type>
       <Type size={12} muted>{text('确认后将把这些参数发送给此插件。', 'Confirm to send these arguments to this plugin.')}</Type>
     </>}
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      {invocation.status === 'awaiting_confirmation' && <><Action label={text('确认执行一次', 'Confirm once')} disabled={busy} onPress={() => { void act('/confirm'); }} /><Action kind="ghost" label={text('取消', 'Cancel')} disabled={busy} onPress={() => { void act('/cancel'); }} /></>}
-      <Action kind="ghost" icon={RefreshCw} label={text('查询状态', 'Check status')} disabled={busy} onPress={() => { void act(''); }} />
-      {onContinue && ['succeeded', 'tool_error'].includes(invocation.status) && <Action kind="secondary" label={text('让小Q继续回答', 'Continue with Q')} disabled={busy} onPress={onContinue} />}
-      {invocation.result != null && <Action kind="ghost" label={showResult ? text('收起结果', 'Hide result') : text('查看结果', 'View result')} onPress={() => setShowResult(value => !value)} />}
+      {!bankTransfer && invocation.status === 'awaiting_confirmation' && <><Action label={text('确认执行一次', 'Confirm once')} disabled={busy || needsRefresh} onPress={() => { void act('/confirm'); }} /><Action kind="ghost" label={text('取消', 'Cancel')} disabled={busy} onPress={() => { void act('/cancel'); }} /></>}
+      {!bankTransfer && <Action kind="ghost" icon={RefreshCw} label={text('查询状态', 'Check status')} disabled={busy} onPress={() => { void act(''); }} />}
+      {onContinue && (bank ? invocation.status === 'succeeded' : ['succeeded', 'tool_error'].includes(invocation.status)) && <Action kind="secondary" label={text('让小Q继续回答', 'Continue with Q')} disabled={busy} onPress={onContinue} />}
+      {!bankTransfer && invocation.result != null && <Action kind="ghost" label={showResult ? text('收起结果', 'Hide result') : text('查看结果', 'View result')} onPress={() => setShowResult(value => !value)} />}
       {invocation.result == null && ['succeeded', 'tool_error'].includes(invocation.status) && <Action kind="ghost" label={text('读取结果', 'Load result')} disabled={busy} onPress={() => { void act(''); }} />}
     </View>
     {busy && <ActivityIndicator color={colors.accent} />}
     {!!error && <Type selectable color={colors.danger} size={13}>{pluginError(error, text)}</Type>}
     {!!invocation.error_code && <Type color={colors.danger} size={13}>{pluginError(invocation.error_code, text)}</Type>}
-    <TechnicalDetails cardUrl={invocation.card_url} endpointUrl={invocation.endpoint_url} />
-    {showResult && invocation.result !== null && invocation.result !== undefined && <PluginResultView value={invocation.result} token={token} connectionId={invocation.connection_id} />}
+    {!bank && <TechnicalDetails cardUrl={invocation.card_url} endpointUrl={invocation.endpoint_url} />}
+    {!bankTransfer && showResult && invocation.result !== null && invocation.result !== undefined && <PluginResultView value={invocation.result} token={token} connectionId={invocation.connection_id} />}
   </View>;
 }
 
@@ -194,27 +202,27 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, initialIntent, onI
     {busy && <ActivityIndicator accessibilityLabel={text('正在加载', 'Loading')} color={colors.accent} />}
     {!!error && <Type selectable color={colors.danger}>{pluginError(error, text)}</Type>}
     {!selected ? <>
-      {connections.map(connection => <Row key={connection.id} title={connection.title || connection.name} subtitle={`${ownerLabel(connection.owner_name, text)}\n${pluginOrigin(connection.endpoint_url) ?? text('来源待确认', 'Source unavailable')}`} onPress={busy ? undefined : () => { void run(() => open(connection)); }} />)}
+      {connections.map(connection => <Row key={connection.id} title={connection.title || connection.name} subtitle={bankIdForPlugin(connection) ? text('银行插件 · 模拟账户', 'Bank plugin · simulated account') : `${ownerLabel(connection.owner_name, text)}\n${pluginOrigin(connection.endpoint_url) ?? text('来源待确认', 'Source unavailable')}`} onPress={busy ? undefined : () => { void run(() => open(connection)); }} />)}
       {!connections.length && !busy && <View style={{ gap: 8 }}>
         <Type weight="500">{text('还没有添加插件', 'No plugins added yet')}</Type>
         <Type muted>{text('点「添加插件」，粘贴服务方的链接后确认添加。这里仅显示当前 Q 账号的个人连接。', 'Choose Add plugin and paste the publisher’s link. This list contains only the current Q account’s personal connections.')}</Type>
       </View>}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Action kind="ghost" icon={RefreshCw} label={text('刷新连接', 'Refresh connections')} disabled={busy} onPress={() => { void run(load); }} /><Action kind="ghost" label={text('制作接入材料', 'Create integration materials')} onPress={onOpenWorkbench} /></View>
-      {status && !status.available && <Type muted>{text('服务端尚未启用插件连接。', 'Plugin connections are not enabled on the server.')}</Type>}
+      {status && !status.available && <Type muted>{text('服务端尚未启用远程 MCP 连接；已添加的内置银行插件仍可使用。', 'Remote MCP connections are not enabled; added built-in bank plugins remain available.')}</Type>}
     </> : <>
       <Type size={13} muted>{ownerLabel(selected.owner_name, text)}</Type>
-      <SourceSummary cardUrl={selected.card_url} endpointUrl={selected.endpoint_url} />
+      <SourceSummary cardUrl={selected.card_url} endpointUrl={selected.endpoint_url} bank={!!bankIdForPlugin(selected)} />
       <Type size={12} muted>{connectionStatusLabel(selected.status, text)} · {authorizationLabel(selected.auth_status, text)}</Type>
       {selected.last_error_code && <Type color={colors.danger}>{pluginError(selected.last_error_code, text)}</Type>}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Action label={text('在聊天中使用', 'Use in chat')} disabled={busy || selected.status !== 'ready'} onPress={() => onSelect(selected)} />
-        <Action kind="secondary" label={text('检查更新', 'Check updates')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/refresh'), decodePluginConnection, 'POST'); updateConnection(value); await open(value); }); }} />
-        <Action kind="ghost" label={text('授权插件', 'Authorize plugin')} disabled={busy || !status?.oauth_configured} onPress={() => { void run(authorize); }} />
+        {!bankIdForPlugin(selected) && <><Action kind="secondary" label={text('检查更新', 'Check updates')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/refresh'), decodePluginConnection, 'POST'); updateConnection(value); await open(value); }); }} />
+        <Action kind="ghost" label={text('授权插件', 'Authorize plugin')} disabled={busy || !status?.oauth_configured} onPress={() => { void run(authorize); }} /></>}
       </View>
-      <TechnicalDetails key={selected.id} cardUrl={selected.card_url} endpointUrl={selected.endpoint_url}>
+      {!bankIdForPlugin(selected) && <TechnicalDetails key={selected.id} cardUrl={selected.card_url} endpointUrl={selected.endpoint_url}>
         <Type selectable size={12} muted>{selected.name} · {selected.version}</Type>
         <Type size={12} muted>{text('所有者是发布者自行填写的说明，不代表小Q认证，也不改变当前账号权限。', 'The owner is a publisher declaration, not Q verification, and does not change account permissions.')}</Type>
-      </TechnicalDetails>
+      </TechnicalDetails>}
       {oauth && <View style={{ gap: 10 }}><Type selectable size={12}>{new URL(oauth.url).origin}</Type><Action label={text('在浏览器中授权', 'Authorize in browser')} onPress={() => { void Linking.openURL(oauth.url).catch(failure => setError(failure)); }} /><Action kind="ghost" label={text('我已授权，检查结果', 'Check authorization result')} disabled={busy} onPress={() => { void run(async () => { const result = await call(`/v1/plugins/oauth/attempts/${oauth.id}`, value => { if (!record(value) || typeof value.status !== 'string') throw new WorkbenchError('INVALID_RESPONSE'); return value; }); if (result.status !== 'succeeded') throw new WorkbenchError(typeof result.error_code === 'string' ? result.error_code : 'PLUGIN_AUTH_PENDING'); const connection = await call(path(), decodePluginConnection); updateConnection(connection); await open(connection); }); }} /></View>}
       {selected.pending_update && <View style={{ gap: 10 }}>
         <Type weight="500">{text('请检查新的连接和工具定义', 'Review the updated connection and tools')}</Type>
@@ -227,11 +235,11 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, initialIntent, onI
         <Action label={text('确认此更新', 'Accept this update')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/accept-update'), decodePluginConnection, 'POST', { revision: selected.revision }); updateConnection(value); await open(value); }); }} />
       </View>}
       <Type size={17} weight="500">{text('可用工具', 'Available tools')}</Type>
-      {tools.map(item => <Row key={item.name} title={item.title || item.name} subtitle={item.description} onPress={busy ? undefined : () => { setActiveInvocation(null); setError(null); setTool(item); }} />)}
+      {tools.map(item => <Row key={item.name} title={item.title || item.name} subtitle={item.description} onPress={busy ? undefined : () => { if (bankIdForPlugin(selected) && item.name === 'bank_transfer') { onSelect(selected); return; } setActiveInvocation(null); setError(null); setTool(item); }} />)}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Action kind="ghost" label={text('重新读取工具', 'Reload tools')} disabled={busy} onPress={() => { void run(async () => { setTools(await call(path('/tools'), decodeList(decodeTool))); }); }} />
-        <Action kind="ghost" label={text('浏览图片资源', 'Browse image resources')} disabled={busy} onPress={() => { void run(async () => { setResources((await call(path('/resources'), decodeResources)).filter(item => item.mimeType?.startsWith('image/'))); }); }} />
-        <Action kind="ghost" label={text('查看提示模板', 'View prompts')} disabled={busy} onPress={() => { void run(async () => { setPrompts(await call(path('/prompts'), value => { if (!record(value) || !Array.isArray(value.prompts)) throw new WorkbenchError('INVALID_RESPONSE'); return value.prompts; })); }); }} />
+        {!bankIdForPlugin(selected) && <><Action kind="ghost" label={text('浏览图片资源', 'Browse image resources')} disabled={busy} onPress={() => { void run(async () => { setResources((await call(path('/resources'), decodeResources)).filter(item => item.mimeType?.startsWith('image/'))); }); }} />
+        <Action kind="ghost" label={text('查看提示模板', 'View prompts')} disabled={busy} onPress={() => { void run(async () => { setPrompts(await call(path('/prompts'), value => { if (!record(value) || !Array.isArray(value.prompts)) throw new WorkbenchError('INVALID_RESPONSE'); return value.prompts; })); }); }} /></>}
       </View>
       {resources.length > 0 && <ResourceViewer key={selected.id} token={token} connectionId={selected.id} resources={resources} />}
       {prompts.map((item, index) => record(item) && typeof item.name === 'string' ? <Row key={index} title={typeof item.title === 'string' ? item.title : item.name} subtitle={typeof item.description === 'string' ? item.description : undefined} onPress={busy ? undefined : () => { void run(async () => { setPromptResult(await call(path('/prompts/get'), value => value, 'POST', { name: item.name, arguments: {} })); }); }} /> : null)}
@@ -281,8 +289,8 @@ export function PluginHostPage({ chat, onOpenWorkbench, onSelect, initialIntent,
   const [authModalPending, authModalEvent] = useReducer(pluginAuthModalReducer, chat.authOpen);
   const connectionPageReady = canPresentPluginConnectionPage({ platform: process.env.EXPO_OS, authenticated: !!chat.session, authOpen: chat.authOpen, authModalPending });
   const openAuth = () => { authModalEvent('requested'); chat.openAuth(); };
-  return <View style={{ flex: 1 }}><View style={{ paddingHorizontal: 24, paddingBottom: 12 }}><Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
-    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} initialIntent={initialIntent} onIntentHandled={onIntentHandled} />
+  return <View style={{ flex: 1 }}><View style={{ paddingHorizontal: 24, paddingBottom: 12 }}><Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'banks', label: text('银行插件', 'Bank plugins') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
+    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? tab === 'banks' ? <BankPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} /> : <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} initialIntent={initialIntent} onIntentHandled={onIntentHandled} />
       : chat.session ? <Page title={text('我的插件', 'My plugins')}><ActivityIndicator color={colors.accent} accessibilityLabel={text('正在完成登录', 'Finishing sign-in')} /></Page>
         : <Page title={text('我的插件', 'My plugins')}><Type muted>{initialIntent ? text('链接已保留。登录 Q 后继续查看插件信息，再确认添加。', 'Your link is kept. Sign in to Q to review the plugin and confirm addition.') : text('登录 Q 后添加插件，连接与授权保存在你的账户下。', 'Sign in to Q to save plugin connections and authorizations to your account.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} onPress={openAuth} disabled={chat.authBusy} /></Page>}
     <ChatAuthSheet controller={chat} onShow={() => authModalEvent('shown')} onDismiss={() => authModalEvent('dismissed')}
