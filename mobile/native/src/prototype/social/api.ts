@@ -56,8 +56,8 @@ export function decodeSnapshot(value: unknown): SocialSnapshot {
 }
 export function decodeMessagePage(value: unknown): MessagePage {
   const x = record(value), items = array(x.items, decodeMessage, 100), next = integer(x.next_after_seq);
-  if (items.some((item, i) => i > 0 && item.seq <= items[i - 1].seq) || new Set(items.map(item => item.id)).size !== items.length || (items.length > 0 && items.at(-1)?.seq !== next)) throw new SocialError('INVALID_RESPONSE');
-  return { items, next_after_seq: next, has_more: bool(x.has_more), server_time: timestamp(x.server_time) };
+  if (items.some((item, i) => i > 0 && item.seq <= items[i - 1].seq) || new Set(items.map(item => item.id)).size !== items.length || (items.length > 0 && items.at(-1)?.seq !== next) || (items.length > 0 && items[0].seq !== integer(x.next_before_seq)) || (!items.length && integer(x.next_before_seq) !== 0)) throw new SocialError('INVALID_RESPONSE');
+  return { items, next_after_seq: next, has_more: bool(x.has_more), next_before_seq: integer(x.next_before_seq), has_older: bool(x.has_older), server_time: timestamp(x.server_time) };
 }
 export function decodeEphemeralState(value: unknown): SocialEphemeralState {
   const x = record(value), items = array(x.items, decodeMessage, 100);

@@ -45,3 +45,68 @@ test('only stop with a real answer is a complete turn',()=>{
   assert.equal(finishStatus('stop',''),'incomplete');
   for(const reason of ['length','content_filter','aborted','insufficient_system_resource','tool_calls'])assert.equal(finishStatus(reason,'partial'),'incomplete');
 });
+
+test('history writer serializes revisions and retries unknown writes with identical payload', async () => {
+  const { createHistoryWriter } = await import('./history.ts');
+  const calls=[]; let fail=true; let sequence=0;
+  const writer=createHistoryWriter(async(id,body)=>{
+    calls.push(structuredClone(body));
+    if(fail) { fail=false; throw Error('NETWORK_ERROR'); }
+    return {...body,revision:body.expected_revision+1,updated_at:'2026-10-21T00:00:00Z'};
+  },()=>`request-${++sequence}`);
+  const conversation={id:'c',title:'hello',messages:[message('u','user','hello')]};
+  await assert.rejects(writer.save(conversation),/NETWORK_ERROR/);
+  await assert.rejects(writer.save({...conversation,title:'changed'}),/HISTORY_SAVE_PENDING/);
+  await writer.retry({...conversation,title:'changed'});
+  assert.deepEqual(calls[0],calls[1]);
+  assert.deepEqual(Object.keys(calls[0]).sort(),['expected_revision','messages','request_id','title']);
+  await Promise.all([writer.save(conversation),writer.save({...conversation,title:'next'})]);
+  assert.deepEqual(calls.map(x=>x.expected_revision),[0,0,1,2]);
+});
+
+test('restored history interrupts unfinished streams and preserves tool metadata without running tools', async () => {
+  const { decodeHistory,restoreHistory,decodeHistoryPage }=await import('./history.ts');
+  const id='11111111-1111-4111-8111-111111111111';
+  const detail={id,title:'hello',revision:1,updated_at:'2026-10-21T00:00:00Z',messages:[{...message(id,'assistant','half','streaming'),toolProposalId:id,toolInvocationIds:[id]}]};
+  const restored=restoreHistory(decodeHistory(detail));
+  assert.equal(restored.messages[0].status,'cancelled');
+  assert.equal(restored.messages[0].toolProposalId,id);
+  assert.deepEqual(restored.messages[0].toolInvocationIds,[id]);
+  assert.equal(detail.messages[0].status,'streaming');
+  assert.throws(()=>decodeHistory({...detail,messages:[{...detail.messages[0],toolInvocationIds:['invalid']}]}),/INVALID_RESPONSE/);
+  assert.throws(()=>decodeHistoryPage({items:[],next_cursor:'invalid'}),/INVALID_RESPONSE/);
+});
+
+test('summary refresh never advances revision of a local hydrated snapshot', async () => {
+  const { createHistoryWriter } = await import('./history.ts');
+  const revisions=[];
+  const writer=createHistoryWriter(async(id,body)=>{ revisions.push(body.expected_revision); return {...body,id,revision:body.expected_revision+1,updated_at:'2026-10-21T00:00:00Z'}; },()=> 'request');
+  writer.seed('c',1,true);
+  writer.seed('c',2);
+  await writer.save({id:'c',title:'local revision one',messages:[]});
+  assert.deepEqual(revisions,[1]);
+  writer.seed('c',7,true);
+  await writer.save({id:'c',title:'loaded remote seven',messages:[]});
+  assert.deepEqual(revisions,[1,7]);
+});
+
+test('cloud replacement waits for an uncertain retry before fetching and replacing the snapshot', async () => {
+  const { createHistoryWriter }=await import('./history.ts');
+  let resolveSave; let attempts=0; let cloudRevision=1;
+  const writer=createHistoryWriter(async(id,body)=>{
+    if(attempts++===0) throw Error('NETWORK_ERROR');
+    await new Promise(resolve=> {resolveSave=resolve;});
+    cloudRevision=body.expected_revision+1;
+    return {...body,id,revision:cloudRevision,updated_at:'2026-10-21T00:00:00Z'};
+  },()=> 'request');
+  const c={id:'c',title:'local',messages:[]};
+  writer.seed(c.id,1,true);
+  await assert.rejects(writer.save(c));
+  const retry=writer.retry(c);
+  let fetched=false;
+  const reload=(async()=> {await writer.drain(); fetched=true; writer.discard(c.id,cloudRevision);})();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(fetched,false);
+  resolveSave(); await Promise.all([retry,reload]);
+  assert.equal(fetched,true); assert.equal(cloudRevision,2);
+});

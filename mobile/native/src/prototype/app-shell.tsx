@@ -434,7 +434,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const social = useSocial();
   const active = focused && foreground;
-  const chat = useChat(active && (page === "chat" || page === "plugins"));
+  const chat = useChat(active && (page === "chat" || page === "plugins" || page === "history"));
   const items = chat.items;
   const reduced = useReducedMotion();
   const navigate = (next: PageId) => {
@@ -564,7 +564,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "creators" ? (
             <CreatorFeed onBack={() => navigate("video")} />
           ) : page === "history" ? (
-            <HistoryPage items={items} onOpen={open} onNew={newChat} />
+            <HistoryPage controller={chat} items={items} onOpen={open} onNew={newChat} />
           ) : page === "profile" ? (
             <ProfilePage />
           ) : page === "plugin-workbench" ? (

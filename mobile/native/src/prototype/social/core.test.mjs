@@ -10,6 +10,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const { decodeEphemeralState, decodeMessage, decodeMessagePage, decodeSnapshot, socialRequest } = await import('./api.ts');
+const { mergeHistory, validateForwardPage } = await import('./history.ts');
 const web = await import('./outbox-store.web.ts');
 resolver.deregister();
 
@@ -313,4 +314,24 @@ test('CONTENT_BLOCKED is final only for its exact status and editable draft rest
   await store.write(newer,version);
   await store.remove(intent.ownerId,intent.conversationId,intent.clientMessageId);
   assert.deepEqual(await store.read(owner,conversation),newer);
+});
+
+
+test('long history prepends independently of live catch-up and rejects foreign or duplicate sequences', () => {
+  const item = seq => ({ ...envelope, id: `55555555-5555-4555-8555-${String(seq).padStart(12, '0')}`, seq });
+  const initial = Array.from({ length: 100 }, (_, index) => item(index + 151));
+  let loaded = mergeHistory([], initial, conversation);
+  const cursor = 250;
+  loaded = mergeHistory(loaded, [item(251), item(252)], conversation);
+  loaded = mergeHistory(loaded, Array.from({ length: 100 }, (_, index) => item(index + 51)), conversation);
+  loaded = mergeHistory(loaded, initial, conversation);
+  loaded = mergeHistory(loaded, Array.from({ length: 50 }, (_, index) => item(index + 1)), conversation);
+  assert.deepEqual(loaded.map(message => message.seq), Array.from({ length: 252 }, (_, index) => index + 1));
+  assert.equal(cursor, 250);
+  validateForwardPage([item(251), item(252)], cursor, 252, true);
+  assert.throws(() => validateForwardPage([], cursor, cursor, true), { code: 'INVALID_RESPONSE' });
+  assert.throws(() => validateForwardPage([item(252)], cursor, 252, false), { code: 'INVALID_RESPONSE' });
+  assert.throws(() => validateForwardPage([item(240)], cursor, 240, false), { code: 'INVALID_RESPONSE' });
+  assert.throws(() => mergeHistory(loaded, [{ ...item(253), conversation_id: owner }], conversation), { code: 'INVALID_RESPONSE' });
+  assert.throws(() => mergeHistory(loaded, [{ ...item(253), seq: 250 }], conversation), { code: 'INVALID_RESPONSE' });
 });

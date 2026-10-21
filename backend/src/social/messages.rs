@@ -8,7 +8,10 @@ use crate::validation;
 #[serde(deny_unknown_fields)]
 pub struct ListQuery {
     #[serde(default)]
-    after_seq: i64,
+    after_seq: Option<i64>,
+    before_seq: Option<i64>,
+    #[serde(default)]
+    latest: bool,
     #[serde(default = "default_limit")]
     limit: i64,
 }
@@ -20,6 +23,8 @@ pub struct MessagePage {
     items: Vec<SocialMessage>,
     next_after_seq: i64,
     has_more: bool,
+    next_before_seq: i64,
+    has_older: bool,
     server_time: DateTime<Utc>,
 }
 pub async fn list(
@@ -32,29 +37,68 @@ pub async fn list(
     let id = path(id)?;
     let Query(query) =
         query.map_err(|_| ApiError::validation("Provide a valid message cursor and limit."))?;
-    if !(0..=MAX_SEQUENCE).contains(&query.after_seq) || !(1..=100).contains(&query.limit) {
+    if query
+        .after_seq
+        .is_some_and(|seq| !(0..=MAX_SEQUENCE).contains(&seq))
+        || query
+            .before_seq
+            .is_some_and(|seq| !(1..=MAX_SEQUENCE).contains(&seq))
+        || !(1..=100).contains(&query.limit)
+        || usize::from(query.latest)
+            + usize::from(query.after_seq.is_some())
+            + usize::from(query.before_seq.is_some())
+            > 1
+    {
         return Err(ApiError::validation(
             "Message cursor or page limit is out of range.",
         ));
     }
     let mut tx = state.pool.begin().await?;
     conversation(&mut tx, id, auth.user_id).await?;
+    let backwards = query.latest || query.before_seq.is_some();
+    let cursor = if backwards {
+        query.before_seq.unwrap_or(MAX_SEQUENCE + 1)
+    } else {
+        query.after_seq.unwrap_or(0)
+    };
+    let clause = if backwards {
+        "m.seq<$2 ORDER BY m.seq DESC"
+    } else {
+        "m.seq>$2 ORDER BY m.seq"
+    };
     let mut items: Vec<SocialMessage> = sqlx::query_as(&format!(
-        "{MESSAGE_SELECT} WHERE m.conversation_id=$1 AND m.seq>$2 ORDER BY m.seq LIMIT $3"
+        "{MESSAGE_SELECT} WHERE m.conversation_id=$1 AND {clause} LIMIT $3"
     ))
     .bind(id)
-    .bind(query.after_seq)
+    .bind(cursor)
     .bind(query.limit + 1)
     .fetch_all(&mut *tx)
     .await?;
     let has_more = items.len() > query.limit as usize;
     items.truncate(query.limit as usize);
-    let next_after_seq = items.last().map_or(query.after_seq, |m| m.seq);
+    if backwards {
+        items.reverse();
+    }
+    let next_after_seq = items.last().map_or(query.after_seq.unwrap_or(0), |m| m.seq);
+    let next_before_seq = items.first().map_or(0, |m| m.seq);
+    let has_older = if backwards {
+        has_more
+    } else {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM social_messages WHERE conversation_id=$1 AND seq<$2)",
+        )
+        .bind(id)
+        .bind(next_before_seq)
+        .fetch_one(&mut *tx)
+        .await?
+    };
     tx.commit().await?;
     Ok(Json(MessagePage {
         items,
         next_after_seq,
         has_more,
+        next_before_seq,
+        has_older,
         server_time: Utc::now(),
     }))
 }

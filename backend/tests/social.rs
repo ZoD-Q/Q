@@ -2057,3 +2057,107 @@ async fn concurrent_sends_have_gap_free_committed_cursors_and_one_same_key_winne
     );
     h.finish().await;
 }
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL (real PostgreSQL)"]
+async fn long_history_latest_older_and_forward_cursors_remain_independent() {
+    let h = Harness::new().await;
+    let alice = h.register("history_alice").await;
+    let bob = h.register("history_bob").await;
+    let outsider = h.register("history_outsider").await;
+    let chat = h.befriend(&alice, &bob).await;
+    // Seed a long existing history directly, avoiding send rate limits while exercising real API reads.
+    sqlx::query("INSERT INTO social_messages(id,conversation_id,seq,sender_id,client_message_id,kind,body) SELECT gen_random_uuid(),$1,n,$2,gen_random_uuid(),'text','history '||n FROM generate_series(1,250) n")
+        .bind(chat).bind(alice.id).execute(&h.pool).await.unwrap();
+    sqlx::query("UPDATE social_conversations SET last_seq=250 WHERE id=$1")
+        .bind(chat)
+        .execute(&h.pool)
+        .await
+        .unwrap();
+    let base = messages_path(chat);
+    let latest = h
+        .ok("GET", &format!("{base}?latest=true&limit=100"), &bob, None)
+        .await;
+    assert_eq!(latest["items"][0]["seq"], 151);
+    assert_eq!(latest["next_after_seq"], 250);
+    assert_eq!(latest["next_before_seq"], 151);
+    assert_eq!(latest["has_older"], true);
+    let sent = h
+        .send(&alice, chat, "new during older pagination", None)
+        .await;
+    assert_eq!(sent["seq"], 251);
+    let mut seqs: Vec<i64> = latest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["seq"].as_i64().unwrap())
+        .collect();
+    let mut before = 151;
+    loop {
+        let page = h
+            .ok(
+                "GET",
+                &format!("{base}?before_seq={before}&limit=100"),
+                &bob,
+                None,
+            )
+            .await;
+        seqs.extend(
+            page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["seq"].as_i64().unwrap()),
+        );
+        before = page["next_before_seq"].as_i64().unwrap();
+        if page["has_older"] == false {
+            break;
+        }
+    }
+    let forward = h.messages(&bob, chat, 250, 100).await;
+    assert_eq!(forward["items"].as_array().unwrap().len(), 1);
+    seqs.push(forward["items"][0]["seq"].as_i64().unwrap());
+    seqs.sort();
+    assert_eq!(seqs, (1..=251).collect::<Vec<_>>());
+    assert_eq!(h.messages(&bob, chat, 251, 100).await["items"], json!([]));
+    assert_eq!(h.messages(&bob, chat, 0, 100).await["items"][0]["seq"], 1);
+    assert_eq!(conversation(&h.snapshot(&bob).await, chat)["read_seq"], 0);
+    h.ok(
+        "POST",
+        &format!("/v1/social/conversations/{chat}/read"),
+        &bob,
+        Some(json!({"through_seq":250})),
+    )
+    .await;
+    assert_eq!(
+        conversation(&h.snapshot(&bob).await, chat)["unread_count"],
+        1
+    );
+    for query in [
+        "latest=true&after_seq=0",
+        "latest=true&before_seq=151",
+        "after_seq=1&before_seq=151",
+        "before_seq=0",
+    ] {
+        assert_eq!(
+            h.request("GET", &format!("{base}?{query}"), Some(&bob.token), None)
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    for query in ["latest=true", "before_seq=151", "after_seq=0"] {
+        assert_eq!(
+            h.request(
+                "GET",
+                &format!("{base}?{query}"),
+                Some(&outsider.token),
+                None
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    h.finish().await;
+}
