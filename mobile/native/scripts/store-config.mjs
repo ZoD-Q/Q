@@ -1,4 +1,5 @@
 import { BlockList, isIP } from 'node:net';
+import { resolveApiUrl } from '../src/services/api-target.mjs';
 
 const nonPublicIpv4 = new BlockList();
 for (const [address, prefix] of [
@@ -39,8 +40,54 @@ export function isPublicHttpsApiUrl(value) {
 
 /** @param {Record<string, string | undefined>} env */
 export function assertStoreApiConfig(env) {
-  const storeBuild = env.Q_STORE_BUILD === '1' || ['production', 'testflight'].includes(env.EAS_BUILD_PROFILE ?? '');
-  if (storeBuild && !isPublicHttpsApiUrl(env.EXPO_PUBLIC_API_URL)) {
-    throw new Error('Store builds require EXPO_PUBLIC_API_URL to be a public HTTPS API address without credentials, query parameters, or a fragment. Configure the verified backend before building.');
+  if (env.Q_LOCAL_API_TEST !== undefined && !['0', '1'].includes(env.Q_LOCAL_API_TEST)) {
+    throw new Error('Q_LOCAL_API_TEST must be 0 or 1.');
   }
+  const localTest = env.Q_LOCAL_API_TEST === '1';
+  const storeBuild = env.Q_STORE_BUILD === '1' || ['production', 'testflight'].includes(env.EAS_BUILD_PROFILE ?? '');
+  const platform = (env.PLATFORM_NAME ?? '').toLowerCase();
+  const nativeAppleBuild = ['iphoneos', 'iphonesimulator'].includes(platform);
+  if (localTest && storeBuild) {
+    throw new Error('Local API test builds cannot use a store build flag or production/TestFlight profile.');
+  }
+  if (localTest && !env.EXPO_PUBLIC_API_URL?.trim()) {
+    throw new Error('Local API test builds require an explicit EXPO_PUBLIC_API_URL; the public default is not a test endpoint.');
+  }
+  if (localTest && nativeAppleBuild && platform !== 'iphonesimulator') {
+    throw new Error('Local API test native builds are restricted to the iOS simulator.');
+  }
+  if (!localTest && (storeBuild || nativeAppleBuild) && !isPublicHttpsApiUrl(resolveApiUrl(env.EXPO_PUBLIC_API_URL))) {
+    throw new Error('Native application and store builds require EXPO_PUBLIC_API_URL to be a public HTTPS API address without credentials, query parameters, or a fragment. Use the isolated local API test variant for local native testing.');
+  }
+}
+
+/**
+ * The variant is build configuration, never a runtime fallback to another server.
+ * @param {Record<string, string | undefined>} env
+ * @param {{iosBundleIdentifier?: string, androidPackage?: string}} identity
+ * @returns {{localTest: boolean, apiEnvironment: 'public' | 'local-test', configuredApiOrigin: string | null, iosBundleIdentifier: string | undefined, androidPackage: string | undefined}}
+ */
+export function resolveBuildVariant(env, identity) {
+  assertStoreApiConfig(env);
+  const localTest = env.Q_LOCAL_API_TEST === '1';
+  if (localTest && (!identity.iosBundleIdentifier || !identity.androidPackage)) {
+    throw new Error('Local API test builds require base iOS and Android application identifiers.');
+  }
+  const iosBundleIdentifier = localTest ? `${identity.iosBundleIdentifier}.localtest` : identity.iosBundleIdentifier;
+  const androidPackage = localTest ? `${identity.androidPackage}.localtest` : identity.androidPackage;
+  const nativeAppleBuild = ['iphoneos', 'iphonesimulator'].includes((env.PLATFORM_NAME ?? '').toLowerCase());
+  // Expo also evaluates app.config from the EXConstants pod target. Its bundle
+  // identifier belongs to a resource bundle, not to the app being produced.
+  const applicationTarget = env.PRODUCT_TYPE === 'com.apple.product-type.application' || env.WRAPPER_EXTENSION === 'app';
+  if (nativeAppleBuild && applicationTarget && env.PRODUCT_BUNDLE_IDENTIFIER !== iosBundleIdentifier) {
+    throw new Error('The native application identifier does not match the selected build variant. Regenerate the native project for that variant before building.');
+  }
+  let configuredApiOrigin = null;
+  try {
+    const url = new URL(resolveApiUrl(env.EXPO_PUBLIC_API_URL));
+    if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash) {
+      configuredApiOrigin = url.origin;
+    }
+  } catch { /* Invalid explicit development URLs never fall back to a different server. */ }
+  return { localTest, apiEnvironment: localTest ? 'local-test' : 'public', configuredApiOrigin, iosBundleIdentifier, androidPackage };
 }

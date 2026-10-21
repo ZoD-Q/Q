@@ -16,7 +16,7 @@ npm run dev
 
 浏览器地址通常为 http://localhost:8081 。原生Expo开发用 `npm run dev:native`；终端按i/a可打开已配置的模拟器。当前SDK58需要兼容版本Expo Go。
 
-默认启动只运行前端，不依赖Rust API或PostgreSQL。余额、交易和保险方案仍是界面预览；首页可登录 Q 后通过 Rust API 使用真实 DeepSeek 对话，API 工作台可使用个人可灵凭据生成视频。详见 [工作台说明](docs/video-api-workbench.md)。
+默认启动只运行前端，并连接长期运行的 `https://q.kaicloudpay.com`，不依赖本机 Rust API 或 PostgreSQL。余额、交易和保险方案仍是界面预览；首页可登录 Q 后通过 Rust API 使用真实 DeepSeek 对话，API 工作台可使用个人可灵凭据生成视频。详见 [工作台说明](docs/video-api-workbench.md)。
 
 视频创作直接预览：http://localhost:8081/?view=video 。创作者广场：http://localhost:8081/?view=creators 。
 
@@ -28,9 +28,9 @@ npm run dev
 
 当前发布 API 地址为 `EXPO_PUBLIC_API_URL=https://q.kaicloudpay.com`，公网 HTTPS 登录与真实 DeepSeek 流式调用已验证；服务器当前运行 `4af1ed7` 社交版本，见 [部署状态](../backend/deploy/STATUS.md)。该变量只放公开 API 地址，不能包含凭据；服务端密钥不进入移动端环境。Release 不再回落到设备本机地址。
 
-`native/app.config.ts` 在 `Q_STORE_BUILD=1` 或 EAS profile 为 `production` / `testflight` 时检查 API 地址，拒绝空值、HTTP、回环/私网、凭据、查询参数和片段。普通开发与 Web 导出不受此门禁影响。它只检查地址格式，不能替代 DNS、TLS 和真实服务验收；本次原生归档已启用该标志，并将同一公开 API 地址传入 JS 打包环境，后续归档也必须如此。
+`native/src/services/api-target.mjs` 为客户端与构建检查提供同一个默认地址。未设置或空 `EXPO_PUBLIC_API_URL` 时使用 `https://q.kaicloudpay.com`；显式设置的地址不会因连接失败而自动切换。发布构建及原生应用目标拒绝将非公网 HTTPS 地址装入正式应用。门禁同时识别 Xcode 构建环境，不能只靠是否记得设置 `Q_STORE_BUILD=1`；它检查配置格式，不替代 DNS、TLS 和真实接口验收。
 
-在已设置实际 `EXPO_PUBLIC_API_URL` 的终端，从 `mobile/native` 运行 `Q_STORE_BUILD=1 npx expo config --type public` 可先执行配置检查。`npm run test:utils` 已包含此门禁的边界测试。Expo Go 和 iOS 资源导出通过，不等于签名 IPA 或 TestFlight 处理成功；上传后还需检查 Apple 构建状态并实际安装验收。
+从 `mobile/native` 运行 `Q_STORE_BUILD=1 npx expo config --type public` 可检查默认正式配置；需要另一后端时显式设置经过验证的 `EXPO_PUBLIC_API_URL`。`npm run test:utils` 已包含此门禁的边界测试。Expo Go 和 iOS 资源导出通过，不等于签名 IPA 或 TestFlight 处理成功；上传后还需检查 Apple 构建状态并实际安装验收。
 
 本轮新增账号删除、注册规则确认和 AI 数据分享许可。依赖的新后端及 `https://q.kaicloudpay.com/privacy` 页面尚未部署，不能只上传新客户端就开放公测。发布顺序与数据恢复限制见[公测记录](../backend/deploy/PUBLIC-BETA.md)。
 
@@ -44,7 +44,7 @@ npm run dev
 - 分期：服务商品、期数选择、每期和总额、完整计划预览。
 - 保险：场景、保障比较、所选方案和确认预览。
 - 钱包：演示余额、流水筛选、收款与转账流程、渠道选择。
-- API 工作台：Q 登录、个人可灵连接、文生视频任务与结果；需单独启动后端并配置加密密钥。
+- API 工作台：Q 登录、个人可灵连接、文生视频任务与结果；线上功能取决于服务端配置，只有本地联调才需要单独启动本机后端。
 - 资料与消息：复用 Q 身份的资料更新、好友申请与接受、私聊、阅后消息和举报；使用前台轮询，尚无 OS 离线推送或端到端加密。账号隔离、恢复和数据保留边界见 [社交说明](docs/social-chat.md)。三主题与双语继续保留。
 
 演示界面的交互状态保留于本次浏览；AI 历史仅保留本次会话。账号、社交、MCP 连接和 API 工作台任务按各自合同由后端持久化，不能把它们当作刷新即重置的示例数据。
@@ -80,3 +80,9 @@ npm run export:web
 阅读 [设计说明](docs/design-direction.md)、[插件来源](docs/plugin-catalog-source.md)、[验收记录](docs/testing.md)。后续接回API前先读 `../backend/contracts/api.md`。
 
 工作台的功能范围与测试见 [插件工作台说明](docs/plugin-workbench.md)。
+
+## 本地接口测试与普通模拟器分离
+
+普通模拟器安装使用默认正式地址，关闭电脑上的开发服务后仍可连接线上后端。需要本地替身时，必须显式设置 `Q_LOCAL_API_TEST=1 EXPO_PUBLIC_API_URL=http://127.0.0.1:端口` 并重新生成原生项目：应用名称为“小Q 本地测试”，标识为 `com.kaicloud.xiaoq.localtest`，scheme 为 `xiaoq-localtest`。不要复用正式应用的原生目录；构建时会核对实际应用标识。测试模式禁止商店发布和 iOS 真机构建，也不能与 `Q_STORE_BUILD=1` 同时使用。
+
+构建完成后检查 `.app` 的 `Info.plist`、`EXConstants.bundle/app.config` 与实际打包的 API 地址；配置元数据只记录环境和公开 origin，不保存密钥。Expo Go 的本地联调也应显式使用该测试标志。真实 Key 永远在后端，配置检查或公开状态成功不代表供应商账户余额、授权或全部业务均已验收。

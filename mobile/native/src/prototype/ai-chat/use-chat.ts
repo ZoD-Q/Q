@@ -1,13 +1,14 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { fetch as expoFetch } from 'expo/fetch';
 import { randomUUID } from 'expo-crypto';
-import type { AiModel, AiStatus, AuthResponse } from '@xiaoq/shared';
+import type { AiModel, AuthResponse } from '@xiaoq/shared';
 import { API_URL } from '../../services/api';
 import { readSessionSnapshot, getSessionRevision, invalidateToken, removeToken, writeToken, subscribeSession } from '../../services/session-store';
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
 import { ChatError, decodeAiStatus, streamChat } from './stream';
 import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation, type ChatPlugin } from './state-model';
 import { createAiConsentGate, hasAiConsent, revokeAiConsent, subscribeAiConsent } from './consent';
+import { createAiStatusMonitor, initialAiStatus } from './status-monitor';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number };
 type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean };
@@ -17,8 +18,13 @@ const errorCode = (error: unknown) => error instanceof ChatError || error instan
 export function useChat(visible: boolean) {
   const [session, setSession] = useState<AuthResponse | null>(null);
   const sessionRef = useRef<AuthResponse | null>(null);
-  const [status, setStatus] = useState<AiStatus | null>(null);
-  const [statusError, setStatusError] = useState('');
+  const [statusSnapshot, setStatusSnapshot] = useState(initialAiStatus);
+  const [statusMonitor] = useState(() => createAiStatusMonitor({
+    load: signal => workbenchRequest({ baseUrl: API_URL, path: '/v1/ai/status', decode: decodeAiStatus, signal, transport: expoFetch, timeoutMs: 8000 }),
+    onChange: setStatusSnapshot,
+  }));
+  const { status, error: statusError, phase: statusPhase } = statusSnapshot;
+  const statusBusy = statusPhase === 'checking';
   const [authBusy, setAuthBusy] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authError, setAuthError] = useState('');
@@ -83,16 +89,9 @@ export function useChat(visible: boolean) {
     try { return await workbenchRequest({ baseUrl: API_URL, path, decode, token, method, body, signal: controller.signal, transport: expoFetch }); }
     finally { shortRequests.current.delete(controller); }
   };
-  const loadStatus = async (version: number) => {
-    try {
-      const result = await call('/v1/ai/status', decodeAiStatus);
-      if (isCurrent(version)) { setStatus(result); setStatusError(''); }
-    } catch (error) { if (isCurrent(version)) { setStatus(null); setStatusError(errorCode(error)); } }
-  };
   const restore = async () => {
     const version = invalidate();
     setAuthBusy(true); setAuthError('');
-    void loadStatus(version);
     let restoredToken: string | null = null;
     try {
       const snapshot = await readSessionSnapshot();
@@ -153,6 +152,13 @@ export function useChat(visible: boolean) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     activate();
   }, [visible]);
+  useEffect(() => {
+    // The shell already includes foreground/focus in visible. Keep this independent
+    // of login cancellation and session generations, and stop retries while hidden.
+    if (visible) statusMonitor.refresh();
+    else statusMonitor.pause();
+    return () => statusMonitor.pause();
+  }, [visible, statusMonitor]);
 
   const authenticate = async (mode: 'login' | 'register', fields: { handle: string; password: string; display_name?: string }) => {
     if (authLock.current) return false;
@@ -168,7 +174,6 @@ export function useChat(visible: boolean) {
       finally { if (pendingAuth.current?.version === version) pendingAuth.current = null; }
       if (!stored || !isCurrent(version)) return false;
       applySession(result); setAuthOpen(false);
-      void loadStatus(version);
       return true;
     } catch (error) { if (isCurrent(version)) setAuthError(errorCode(error)); return false; }
     finally { if (isCurrent(version)) { authLock.current = false; setAuthBusy(false); } }
@@ -196,7 +201,7 @@ export function useChat(visible: boolean) {
     const authenticated = sessionRef.current;
     if (inflight.current || authBusy) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
-    if (!status?.configured) { setMessageError(statusError || 'AI_NOT_CONFIGURED'); return false; }
+    if (!status?.configured) { setMessageError(statusBusy ? 'AI_STATUS_CHECKING' : statusError || 'AI_NOT_CONFIGURED'); return false; }
     let context: ReturnType<typeof buildContext>;
     try {
       const lastUser = baseMessages.findLastIndex(message => message.role === 'user');
@@ -273,7 +278,8 @@ export function useChat(visible: boolean) {
   };
 
   return {
-    session, status, statusError, authBusy, authOpen, authError, authenticate, logout, closeAuth, restore,
+    session, status, statusError, statusPhase, statusBusy, reconnect: statusMonitor.refresh,
+    authBusy, authOpen, authError, authenticate, logout, closeAuth, restore,
     openAuth: () => { setAuthError(''); setAuthOpen(true); },
     items, conversation: items.find(item => item.id === activeId) ?? null, activeId,
     draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError,

@@ -136,6 +136,8 @@ npm --prefix backend run db:start
 npm --prefix backend run dev
 ```
 
+普通客户端和模拟器默认连接长期服务 `https://q.kaicloudpay.com`。本地接口验收须显式设置 `Q_LOCAL_API_TEST=1` 与本机 `EXPO_PUBLIC_API_URL`，生成独立测试应用，不得以正式应用身份打包临时接口。
+
 Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本地 PostgreSQL 为 `127.0.0.1:55432`。停库用 `npm --prefix backend run db:stop`，不要删除数据目录。更多配置见 [后端说明](backend/README.md)。
 
 | 修改范围 | 必要验证 |

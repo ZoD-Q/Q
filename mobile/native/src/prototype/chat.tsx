@@ -38,7 +38,7 @@ import type { Conversation } from "./ai-chat/state-model";
 import { MODEL_NAMES } from "./ai-chat/state-model";
 import type { ChatController } from "./ai-chat/use-chat";
 import { ChatAuthSheet } from "./ai-chat/auth-sheet";
-import { chatErrorMessage } from "./ai-chat/messages";
+import { chatErrorMessage, chatStatusErrorMessage } from "./ai-chat/messages";
 import type { AiModel } from "@xiaoq/shared";
 import { ChatProposal } from './plugin-host/chat-proposal';
 import { openPrivacyPolicy } from './privacy';
@@ -218,12 +218,16 @@ export function ChatPage({ controller, onOpenPlugins }: {
         </View>
       </View>
       {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
-      {controller.authBusy || !controller.status?.configured ? (
+      {controller.authBusy ? <Type size={11} muted style={{ textAlign: "center" }}>{text("正在恢复登录…", "Restoring session…")}</Type> : null}
+      {controller.statusPhase !== "ready" ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
-          <Type size={11} muted>{controller.authBusy
-            ? text("正在恢复登录…", "Restoring session…")
-            : text("Q 对话服务暂不可用", "Q chat is currently unavailable")}</Type>
-          {!controller.status?.configured ? <Action kind="ghost" label={text("重新连接", "Reconnect")} onPress={() => { void controller.restore(); }} disabled={controller.authBusy} /> : null}
+          <Type size={11} muted>{controller.statusBusy
+            ? text("正在检查 Q 对话配置…", "Checking Q chat configuration…")
+            : controller.statusPhase === "unconfigured"
+              ? text("Q 对话服务尚未配置", "Q chat has not been configured")
+              : chatStatusErrorMessage(controller.statusError, text)}</Type>
+          {controller.statusPhase === "error" && controller.status?.configured ? <Type size={11} muted>{text("上次配置检查正常，你仍可尝试发送。", "The last configuration check succeeded. You can still try sending.")}</Type> : null}
+          {!controller.statusBusy ? <Action kind="ghost" label={text("重新检查", "Check again")} onPress={controller.reconnect} /> : null}
         </View>
       ) : null}
       <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10 }}>

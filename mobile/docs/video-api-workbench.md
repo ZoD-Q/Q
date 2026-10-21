@@ -18,9 +18,9 @@ API 工作台是用户主动启用的业务网络入口，复用 Q 身份服务�
 
 ## 本地运行
 
-默认 `npm --prefix mobile run dev` 仍只启动前端。使用真实 API 功能时单独启动 PostgreSQL 和 Rust API；服务端设置 `Q_VIDEO_ENCRYPTION_KEY`，值为随机 32 字节的标准 Base64（不能放在 `EXPO_PUBLIC_*`）。密钥缺失时功能关闭，不降级明文保存。请妥善备份该密钥；当前没有自动轮换/恢复服务。
+默认 `npm --prefix mobile run dev` 仍只启动前端。仅本地联调时单独启动 PostgreSQL 和 Rust API；服务端设置 `Q_VIDEO_ENCRYPTION_KEY`，值为随机 32 字节的标准 Base64（不能放在 `EXPO_PUBLIC_*`）。密钥缺失时功能关闭，不降级明文保存。请妥善备份该密钥；当前没有自动轮换/恢复服务。
 
-浏览器和 iOS 模拟器默认访问 `http://127.0.0.1:8787`；Android 模拟器为 `http://10.0.2.2:8787`。实机应设置 `EXPO_PUBLIC_API_URL` 指向可信 HTTPS 后端，且后端 CORS 允许相应浏览器源。不可把真实供应商凭据通过公网明文 HTTP 传输。
+所有普通客户端默认访问 `https://q.kaicloudpay.com`。仅显式本地测试设置 `Q_LOCAL_API_TEST=1` 与 `EXPO_PUBLIC_API_URL`：浏览器/iOS 模拟器可用 `http://127.0.0.1:8787`，Android 模拟器访问宿主用 `http://10.0.2.2:8787`。独立测试应用的原生项目须重新生成；不要覆盖正式应用。后端 CORS 需允许相应浏览器源，不可把真实供应商凭据通过公网明文 HTTP 传输。
 
 测试使用独立 PostgreSQL 测试库及显式编译启用的本地供应商测试替身，测试视频不是可灵模型生成。这能验证请求、任务生命周期与结果缺失/失败处理；没有用户自己的供应商凭据时，不代表真实账户余额、权限和生成质量已验收。
 

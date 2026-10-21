@@ -103,7 +103,7 @@ npm --prefix backend run db:start
 npm --prefix backend run dev
 ```
 
-沿用 `DATABASE_URL`、`Q_BIND`、`Q_CORS_ORIGINS` 与 `EXPO_PUBLIC_API_URL`。API 默认 `127.0.0.1:8787`；Android 模拟器默认通过 `10.0.2.2:8787` 访问宿主。真机使用可达的可信 HTTPS 地址，不能把个人凭据发到任意明文局域网地址。真实社交不需要模型或视频供应商密钥；生产或内部部署配置继续关闭公开演示账号初始化 `Q_SEED_DEMO`，具体环境由 [后端说明](../../backend/README.md) 管理。
+沿用 `DATABASE_URL`、`Q_BIND`、`Q_CORS_ORIGINS` 与 `EXPO_PUBLIC_API_URL`。客户端默认连接长期 HTTPS 服务 `https://q.kaicloudpay.com`；本机 Rust API 仍默认监听 `127.0.0.1:8787`。本地联调必须显式设置 `Q_LOCAL_API_TEST=1` 和本机 `EXPO_PUBLIC_API_URL`；Android 模拟器通过 `10.0.2.2:8787` 访问宿主。独立测试应用不要覆盖正式安装；真机不能把个人凭据发到任意明文局域网地址。真实社交不需要模型或视频供应商密钥；生产或内部部署配置继续关闭公开演示账号初始化 `Q_SEED_DEMO`，具体环境由 [后端说明](../../backend/README.md) 管理。
 
 契约变化须运行 `npm --prefix mobile run api:generate`，不得手改生成类型。社交专项及提交范围内的基础检查：
 
