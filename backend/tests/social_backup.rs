@@ -305,7 +305,10 @@ async fn deployed_backup_policy_never_restores_ephemeral_or_report_content() {
     source.close().await;
     restored.close().await;
     for name in [&source_name, &restored_name] {
-        sqlx::query(&format!("DROP DATABASE {name}"))
+        // These UUID-named databases were created by this test above. PostgreSQL
+        // may still observe a just-closed pool connection on a slower CI host;
+        // force only these disposable databases, never the configured test DB.
+        sqlx::query(&format!("DROP DATABASE {name} WITH (FORCE)"))
             .execute(&admin)
             .await
             .unwrap();
