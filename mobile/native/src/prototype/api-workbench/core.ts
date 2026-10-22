@@ -84,8 +84,9 @@ export function decodePending(value: unknown, owner: string): PendingVideo {
 }
 
 export function decodeError(value: unknown, status: number): WorkbenchError {
+  const fallback = status === 401 ? "UNAUTHORIZED" : status === 429 ? "RATE_LIMITED" : "REQUEST_FAILED";
   const code = record(value) && record(value.error) && string(value.error.code, 128) && /^[A-Z_]+$/.test(value.error.code)
-    ? value.error.code : "REQUEST_FAILED";
+    ? value.error.code : fallback;
   return new WorkbenchError(code, status);
 }
 
@@ -119,6 +120,18 @@ export async function loadWorkbenchSnapshot(loaders: {
 }
 
 
+function readResponseJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  let abort: () => void;
+  const reading = new Promise<unknown>((resolve, reject) => {
+    abort = () => reject(new Error("BODY_READ_ABORTED"));
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) { abort(); return; }
+    // A deadline must also settle the request if a transport ignores abort while reading.
+    Promise.resolve().then(() => response.json()).then(resolve, reject);
+  });
+  return reading.finally(() => signal.removeEventListener("abort", abort));
+}
+
 /** No automatic retries: every caller must preserve the original intent for uncertain writes. */
 export async function workbenchRequest<T>(options: {
   baseUrl: string;
@@ -143,6 +156,9 @@ export async function workbenchRequest<T>(options: {
   options.signal?.addEventListener("abort", cancel, { once: true });
   if (options.signal?.aborted) controller.abort();
   const timeout = setTimeout(cancel, options.timeoutMs ?? 30000);
+  const throwIfAborted = () => {
+    if (controller.signal.aborted) throw new WorkbenchError(options.signal?.aborted ? "CANCELLED" : "REQUEST_TIMEOUT");
+  };
   try {
     const response = await (options.transport ?? fetch)(`${options.baseUrl}${options.path}`, {
       method: options.method ?? "GET",
@@ -156,8 +172,20 @@ export async function workbenchRequest<T>(options: {
       },
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
     });
-    const payload: unknown = response.status === 204 ? undefined : await response.json().catch(() => null);
+    if (!response.ok && controller.signal.aborted) throw decodeError(null, response.status);
+    throwIfAborted();
+    let payload: unknown;
+    try {
+      payload = response.status === 204 ? undefined : await readResponseJson(response, controller.signal);
+    } catch (failure) {
+      // The received HTTP status remains authoritative even if its error body is interrupted.
+      if (!response.ok) throw decodeError(null, response.status);
+      // An interrupted response body is still a timeout/cancellation, not malformed wallet data.
+      throwIfAborted();
+      throw new WorkbenchError(failure instanceof SyntaxError ? "INVALID_RESPONSE" : "NETWORK_ERROR");
+    }
     if (!response.ok) throw decodeError(payload, response.status);
+    throwIfAborted();
     return options.decode(payload);
   } catch (error) {
     if (error instanceof WorkbenchError) throw error;

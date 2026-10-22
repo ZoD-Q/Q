@@ -70,6 +70,36 @@ test('history writer serializes revisions and retries unknown writes with identi
   assert.deepEqual(calls.map(x=>x.expected_revision),[0,0,1,2]);
 });
 
+test('new history writes keep only plugin display fields and retries preserve the original snapshot', async () => {
+  const { chatPluginSnapshot, createHistoryWriter } = await import('./history.ts');
+  const display = { id: '11111111-1111-4111-8111-111111111111', title: 'HSBC demo', endpoint_url: 'urn:q:bank-demo:hsbc', connection_kind: 'bank_demo', builtin_service_id: 'q.bank-demo.hsbc' };
+  const connection = { ...display, card_url: display.endpoint_url, status: 'ready', auth_status: 'anonymous', revision: 1, owner_name: 'Q', extra: { private: 'connection metadata' } };
+  const before = structuredClone(connection);
+  assert.deepEqual(chatPluginSnapshot(connection), display);
+  assert.deepEqual(connection, before);
+  const calls = []; let sequence = 0;
+  const writer = createHistoryWriter(async (id, body) => {
+    calls.push(structuredClone(body));
+    if (calls.length === 1) throw Error('NETWORK_ERROR');
+    return { id, ...body, revision: body.expected_revision + 1, updated_at: '2026-10-21T00:00:00Z' };
+  }, () => `request-${++sequence}`);
+  const conversation = { id: 'c', title: 'bank chat', messages: [message('u', 'user', 'hello')], plugin: connection };
+  await assert.rejects(writer.save(conversation), /NETWORK_ERROR/);
+  assert.deepEqual(calls[0].plugin, display);
+  connection.title = 'Changed after the failed request';
+  connection.builtin_service_id = 'q.bank-demo.bochk';
+  conversation.messages[0].content = 'new message';
+  await assert.rejects(writer.save(conversation), /HISTORY_SAVE_PENDING/);
+  await writer.retry(conversation);
+  assert.deepEqual(calls[1], calls[0]);
+  assert.equal(sequence, 1);
+  assert.equal(writer.hasPending('c'), false);
+
+  const remote = { id: display.id, title: 'Remote', endpoint_url: 'https://example.invalid/mcp', card_url: 'https://example.invalid/card', status: 'ready' };
+  assert.deepEqual(chatPluginSnapshot(remote), { id: remote.id, title: remote.title, endpoint_url: remote.endpoint_url });
+  assert.deepEqual(chatPluginSnapshot({ ...remote, connection_kind: 'remote_mcp', builtin_service_id: null }), { id: remote.id, title: remote.title, endpoint_url: remote.endpoint_url, connection_kind: 'remote_mcp', builtin_service_id: null });
+});
+
 test('restored history interrupts unfinished streams and preserves tool metadata without running tools', async () => {
   const { decodeHistory,restoreHistory,decodeHistoryPage }=await import('./history.ts');
   const id='11111111-1111-4111-8111-111111111111';

@@ -82,7 +82,7 @@ export function InvocationView({ invocation, token, onChanged, onContinue, autoS
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
       {!bankTransfer && invocation.status === 'awaiting_confirmation' && <><Action label={text('确认执行一次', 'Confirm once')} disabled={busy || needsRefresh} onPress={() => { void act('/confirm'); }} /><Action kind="ghost" label={text('取消', 'Cancel')} disabled={busy} onPress={() => { void act('/cancel'); }} /></>}
       {!bankTransfer && <Action kind="ghost" icon={RefreshCw} label={text('查询状态', 'Check status')} disabled={busy} onPress={() => { void act(''); }} />}
-      {onContinue && (bank ? invocation.status === 'succeeded' : ['succeeded', 'tool_error'].includes(invocation.status)) && <Action kind="secondary" label={text('让小Q继续回答', 'Continue with Q')} disabled={busy} onPress={onContinue} />}
+      {onContinue && ['succeeded', 'tool_error'].includes(invocation.status) && <Action kind="secondary" label={text('让小Q继续回答', 'Continue with Q')} disabled={busy} onPress={onContinue} />}
       {!bankTransfer && invocation.result != null && <Action kind="ghost" label={showResult ? text('收起结果', 'Hide result') : text('查看结果', 'View result')} onPress={() => setShowResult(value => !value)} />}
       {invocation.result == null && ['succeeded', 'tool_error'].includes(invocation.status) && <Action kind="ghost" label={text('读取结果', 'Load result')} disabled={busy} onPress={() => { void act(''); }} />}
     </View>

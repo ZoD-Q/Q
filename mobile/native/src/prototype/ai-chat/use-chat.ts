@@ -7,11 +7,11 @@ import { readSessionSnapshot, getSessionRevision, invalidateToken, removeToken, 
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
 import { ChatError, decodeAiStatus, streamChat } from './stream';
 import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation, type ChatPlugin } from './state-model';
-import { createHistoryWriter, decodeHistory, decodeHistoryPage, restoreHistory } from './history';
+import { chatPluginSnapshot, createHistoryWriter, decodeHistory, decodeHistoryPage, restoreHistory } from './history';
 import { createAiConsentGate, hasAiConsent, revokeAiConsent, subscribeAiConsent } from './consent';
 import { createAiStatusMonitor, initialAiStatus } from './status-monitor';
 import { bankIdForPlugin, bankTransferArguments, decodeInvocation, decodePluginConnection, type JsonObject } from '../plugin-host/core';
-import { parseBankIntent, type BankIntent } from '../banking/intent';
+import { parseBankIntent } from '../banking/intent';
 import { getBank } from '../banking/catalog';
 import { decodeBankWallet } from '../banking/client';
 
@@ -350,7 +350,11 @@ export function useChat(visible: boolean) {
     });
     return true;
   };
-  const prepareBankCommand = (conversation: Conversation, baseMessages: ChatMessage[], intent: BankIntent, retryAnswer?: ChatMessage) => {
+  // Legacy bank commands may already have prepared a proposal before losing the response.
+  // Only their explicit retry reuses the original identity; all new messages use the model.
+  const recoverBankCommand = (conversation: Conversation, baseMessages: ChatMessage[], retryAnswer: ChatMessage) => {
+    if (!retryAnswer.bankCommand) return false;
+    const intent = parseBankIntent(baseMessages.findLast(message => message.role === 'user')?.content ?? '');
     const authenticated = sessionRef.current;
     if (inflight.current || authBusy || historyBusy || historyAction.current) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
@@ -361,7 +365,7 @@ export function useChat(visible: boolean) {
     const sourceBankId = intent.kind === 'transfer' ? intent.fromBankId ?? selectedBankId : selectedBankId;
     // A bank command cannot silently change the plugin attached to an existing conversation.
     const mismatch = !!conversation.plugin && sourceBankId !== selectedBankId;
-    const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: retryAnswer?.id ?? randomUUID(), controller: new AbortController(), generation: generation.current };
+    const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: retryAnswer.id, controller: new AbortController(), generation: generation.current };
     const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: '', status: 'pending', bankCommand: true };
     inflight.current = request;
     let next: Conversation = { ...conversation, messages: [...baseMessages, answer] };
@@ -442,16 +446,7 @@ export function useChat(visible: boolean) {
     if (inflight.current || historyBusy || (activeIdRef.current && !hydrated.current.has(activeIdRef.current))) return false;
     const trimmed = value.trim();
     if (!trimmed) return false;
-    let current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
-    const bankIntent = parseBankIntent(trimmed);
-    if ((!!bankIdForPlugin(current.plugin) && bankIntent.kind !== 'help') || (bankIntent.kind === 'transfer' && !!bankIntent.fromBankId)) {
-      if (!current.plugin && current.messages.length) current = { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [] };
-      const last = current.messages.at(-1);
-      if (last?.bankCommand && ['error', 'cancelled'].includes(last.status) && current.messages.findLast(message => message.role === 'user')?.content === trimmed) {
-        return prepareBankCommand(current, current.messages.slice(0, -1), bankIntent, last);
-      }
-      return prepareBankCommand(current, [...current.messages, { id: randomUUID(), role: 'user', content: trimmed, status: 'complete' }], bankIntent);
-    }
+    const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
     if (current.messages.at(-1)?.errorCode === 'HISTORY_SAVE_FAILED' && current.messages.findLast(message => message.role === 'user')?.content === trimmed) {
       const base = prepareRetry(current);
       return base ? start(current, base, [], true) : false;
@@ -463,7 +458,7 @@ export function useChat(visible: boolean) {
     const base = conversation ? prepareRetry(conversation) : null;
     if (conversation && base) {
       const last = conversation.messages.at(-1);
-      if (last?.bankCommand) prepareBankCommand(conversation, base, parseBankIntent(base.findLast(message => message.role === 'user')?.content ?? ''), last);
+      if (last?.bankCommand) recoverBankCommand(conversation, base, last);
       else start(conversation, base, last?.toolInvocationIds ?? []);
     }
   };
@@ -511,7 +506,10 @@ export function useChat(visible: boolean) {
     } else if (conversation && !hydrated.current.has(conversation.id)) await openConversation(conversation.id);
     else await loadHistory();
   };
-  const selectPlugin = (value: ChatPlugin | null) => { newConversation(); setPlugin(value); if (value) setThink(false); };
+  const selectPlugin = (value: ChatPlugin | null) => {
+    newConversation(); setPlugin(value ? chatPluginSnapshot(value) : null); if (value) setThink(false);
+    statusMonitor.refresh();
+  };
   const resumeTool = (messageId: string, invocationId: string) => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
     const message = conversation?.messages.at(-1);

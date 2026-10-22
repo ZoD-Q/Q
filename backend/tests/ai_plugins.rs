@@ -23,7 +23,7 @@ use uuid::Uuid;
 use xiaoq_backend::{
     AppState,
     ai::AiRuntime,
-    app,
+    app, banking,
     plugins::{PluginRuntime, network::SafeHttp},
 };
 
@@ -39,6 +39,9 @@ struct Harness {
 
 impl Harness {
     async fn new() -> Self {
+        Self::with_provider(remote_model_reply).await
+    }
+    async fn with_provider(reply: fn(&Value) -> Vec<Value>) -> Self {
         let url = std::env::var("TEST_DATABASE_URL")
             .expect("TEST_DATABASE_URL must point to the dedicated PostgreSQL test database");
         let admin = PgPool::connect(&url).await.unwrap();
@@ -74,8 +77,9 @@ impl Harness {
                     assert!(!headers.contains_key("authorization"));
                     ([("content-type", "application/mcp-server-card+json")], Json(json!({
                         "$schema":"https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
-                        "name":format!("io.example.fixture/{name}"), "version":"1.0.0",
-                        "title":format!("Fixture {name}"), "description":"Local protocol fixture",
+                        "name":if name == "claimed-bank" { "com.kaicloudpay.q/bank-demo-hsbc".to_owned() } else { format!("io.example.fixture/{name}") }, "version":"1.0.0",
+                        "title":if name == "claimed-bank" { "汇丰银行 · q.bank-demo.hsbc".to_owned() } else { format!("Fixture {name}") }, "description":"Local protocol fixture",
+                        "_meta":{"com.kaicloudpay.q/bank":{"connection_kind":"bank_demo","builtin_service_id":"q.bank-demo.hsbc"}},
                         "remotes":[{"type":"streamable-http","url":format!("{origin}/{name}/mcp"),"supportedProtocolVersions":["2026-07-28"]}]
                     })))
                 }
@@ -110,28 +114,25 @@ impl Harness {
 
         let model_requests = Arc::new(Mutex::new(Vec::new()));
         let captured = model_requests.clone();
-        let provider = Router::new().route("/chat", post(move |headers: HeaderMap, Json(body): Json<Value>| {
-            let captured = captured.clone();
-            async move {
-                assert_eq!(headers["authorization"], "Bearer q-ai-test-fixture-only");
-                assert_eq!(body["parallel_tool_calls"], false);
-                assert_eq!(body["tools"][0]["function"]["name"], "q_tool_0");
-                let has_result = body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "tool");
-                captured.lock().unwrap().push(body);
-                let chunks = if has_result {
-                    vec![json!({"choices":[{"delta":{"content":"The saved result contains three local records."},"finish_reason":null}]}), json!({"choices":[{"delta":{},"finish_reason":"stop"}]})]
-                } else {
-                    vec![
-                        json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fixture_call","type":"function","function":{"name":"q_tool_0","arguments":"{\"query\":"}}]},"finish_reason":null}]}),
-                        json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"local-fixture\"}"}}]},"finish_reason":null}]}),
-                        json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]})
-                    ]
-                };
-                let mut wire = chunks.into_iter().map(|chunk| format!("data: {chunk}\n\n")).collect::<String>();
-                wire.push_str("data: [DONE]\n\n");
-                ([("content-type", "text/event-stream")], wire).into_response()
-            }
-        }));
+        let provider = Router::new().route(
+            "/chat",
+            post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                let captured = captured.clone();
+                async move {
+                    assert_eq!(headers["authorization"], "Bearer q-ai-test-fixture-only");
+                    assert_eq!(body["parallel_tool_calls"], false);
+                    assert_eq!(body["tools"][0]["function"]["name"], "q_tool_0");
+                    let chunks = reply(&body);
+                    captured.lock().unwrap().push(body);
+                    let mut wire = chunks
+                        .into_iter()
+                        .map(|chunk| format!("data: {chunk}\n\n"))
+                        .collect::<String>();
+                    wire.push_str("data: [DONE]\n\n");
+                    ([("content-type", "text/event-stream")], wire).into_response()
+                }
+            }),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let provider_endpoint = format!("http://{}/chat", listener.local_addr().unwrap())
             .parse()
@@ -226,6 +227,20 @@ impl Harness {
         self.request("POST", "/v1/ai/chat", Some(token), Some(body))
             .await
     }
+    async fn json(
+        &self,
+        method: &str,
+        path: &str,
+        token: &str,
+        body: Option<Value>,
+        expected: StatusCode,
+    ) -> Value {
+        let response = self.request(method, path, Some(token), body).await;
+        let status = response.status();
+        let value = read_json(response).await;
+        assert_eq!(status, expected, "{value}");
+        value
+    }
     async fn finish(self) {
         for server in self.servers {
             server.abort();
@@ -236,6 +251,31 @@ impl Harness {
             .await
             .unwrap();
         self.admin.close().await;
+    }
+}
+fn remote_model_reply(body: &Value) -> Vec<Value> {
+    assert!(
+        !body["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Server-verified Q built-in bank context:")
+    );
+    let has_result = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["role"] == "tool");
+    if has_result {
+        vec![
+            json!({"choices":[{"delta":{"content":"The saved result contains three local records."},"finish_reason":null}]}),
+            json!({"choices":[{"delta":{},"finish_reason":"stop"}]}),
+        ]
+    } else {
+        vec![
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fixture_call","type":"function","function":{"name":"q_tool_0","arguments":"{\"query\":"}}]},"finish_reason":null}]}),
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"local-fixture\"}"}}]},"finish_reason":null}]}),
+            json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
+        ]
     }
 }
 async fn read_json(response: Response) -> Value {
@@ -263,6 +303,374 @@ async fn read_events(response: Response) -> Vec<(String, Value)> {
 }
 fn chat_body(connection: &str, invocations: &[&str]) -> Value {
     json!({"model":"deepseek-flash","thinking":false,"messages":[{"role":"user","content":"Find the local fixture records."}],"plugin_connection_id":connection,"tool_invocation_ids":invocations})
+}
+
+const BALANCE_REQUEST: &str = "这张卡目前还有多少港币可用？";
+const HISTORY_REQUEST: &str = "给我看看这家最近几笔转账。";
+const TRANSFER_REQUEST: &str = "请从汇丰给陈小明在中银香港的户口转五百港币。";
+const UNCONNECTED_REQUEST: &str = "给陈小明的星展户口转一百港币。";
+const CLARIFY_REQUEST: &str = "帮我给朋友转点钱。";
+
+fn bank_chat_body(connection: &str, prompt: &str, invocations: &[&str]) -> Value {
+    let mut body = chat_body(connection, invocations);
+    body["messages"][0]["content"] = json!(prompt);
+    body
+}
+
+fn bank_model_reply(body: &Value) -> Vec<Value> {
+    let messages = body["messages"].as_array().unwrap();
+    let system = messages[0]["content"].as_str().unwrap();
+    assert!(system.contains("Server-verified Q built-in bank context:"));
+    assert!(system.contains("汇丰银行 / HSBC Hong Kong (bank_id=hsbc)"));
+    for bank in banking::BANKS {
+        assert!(system.contains(&format!("{} = {} / {}", bank.id, bank.name, bank.name_en)));
+    }
+    for boundary in [
+        "another person's account",
+        "another source bank",
+        "recipient='self'",
+        "recipient='demo_chen'",
+        "Never default to demo_chen",
+        "missing or ambiguous destination bank, recipient or amount",
+        "create the pending bank_transfer proposal",
+        "only prepares the host's confirmation card; it does not execute a transfer",
+        "Do not replace the host confirmation card with a verbal confirmation question",
+        "never confirm or execute automatically",
+        "not a mandatory prerequisite for every transfer proposal",
+        "HK$500 = 50000",
+        "do not automatically retry",
+        "respond in Chinese to Chinese requests and in English to English requests",
+        "Keep machine tool names and IDs unchanged",
+    ] {
+        assert!(
+            system.contains(boundary),
+            "missing bank context: {boundary}"
+        );
+    }
+    let tools = banking::tools("q.bank-demo.hsbc").unwrap();
+    assert_eq!(body["tools"].as_array().unwrap().len(), tools.len());
+    for (index, tool) in tools.iter().enumerate() {
+        let function = &body["tools"][index]["function"];
+        assert_eq!(function["name"], format!("q_tool_{index}"));
+        assert_eq!(function["parameters"], tool.input_schema);
+        assert_eq!(
+            function["description"],
+            format!(
+                "{}: {}",
+                tool.title.as_deref().unwrap_or(&tool.name),
+                tool.description
+            )
+        );
+    }
+    assert_eq!(body["thinking"]["type"], "disabled");
+    if let Some(result) = messages.iter().find(|message| message["role"] == "tool") {
+        let saved: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
+        assert!(saved["structuredContent"].is_object());
+        let kind = saved["structuredContent"]["kind"].as_str().unwrap();
+        let text = if saved["isError"] == true {
+            assert_eq!(kind, "bank_error");
+            assert_eq!(
+                saved["structuredContent"]["error_code"],
+                "BANK_ACCOUNT_UNAVAILABLE"
+            );
+            "收款银行尚未添加；保存的结果表明这次转账没有执行。".to_owned()
+        } else {
+            format!("已根据保存的 {kind} 结果回答，没有再次执行操作。")
+        };
+        return vec![
+            json!({"choices":[{"delta":{"content":text},"finish_reason":null}]}),
+            json!({"choices":[{"delta":{},"finish_reason":"stop"}]}),
+        ];
+    }
+    let prompt = messages
+        .iter()
+        .rev()
+        .find(|message| message["role"] == "user")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap();
+    // Scripted provider responses verify the real host chain, not model language accuracy.
+    let (index, arguments) = match prompt {
+        BALANCE_REQUEST => (0, json!({})),
+        HISTORY_REQUEST => (2, json!({"limit":10})),
+        TRANSFER_REQUEST => (
+            1,
+            json!({"to_bank_id":"bochk","recipient":"demo_chen","amount_minor":50000}),
+        ),
+        UNCONNECTED_REQUEST => (
+            1,
+            json!({"to_bank_id":"dbs","recipient":"demo_chen","amount_minor":10000}),
+        ),
+        CLARIFY_REQUEST => {
+            return vec![
+                json!({"choices":[{"delta":{"content":"请说明收款人、收款银行和具体港币金额；我还没有准备转账。"},"finish_reason":null}]}),
+                json!({"choices":[{"delta":{},"finish_reason":"stop"}]}),
+            ];
+        }
+        _ => panic!("unexpected bank fixture prompt"),
+    };
+    vec![
+        json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"bank_fixture_call","type":"function","function":{"name":format!("q_tool_{index}"),"arguments":arguments.to_string()}}]},"finish_reason":null}]}),
+        json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
+    ]
+}
+
+#[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; only contacts a loopback model fixture"]
+async fn bank_model_tools_prepare_confirm_and_resume_saved_results_without_reauthorizing_connections()
+ {
+    let mut h = Harness::with_provider(bank_model_reply).await;
+    h.state.plugins = None; // Built-in banks must not require an MCP client or OAuth.
+    let alice = h.register("ai_bank_alice").await;
+    let bob = h.register("ai_bank_bob").await;
+    let wallet = h
+        .json(
+            "POST",
+            "/v1/banking/connect",
+            &alice,
+            Some(json!({"bank_ids":["hsbc","bochk"]})),
+            StatusCode::OK,
+        )
+        .await;
+    let connection = wallet["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|account| account["bank_id"] == "hsbc")
+        .unwrap()["connection_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let user: Uuid = sqlx::query_scalar("SELECT id FROM identities WHERE handle='ai_bank_alice'")
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    let identity_query =
+        "SELECT revision,schema_fingerprint,status FROM plugin_connections WHERE id=$1";
+    let baseline: (i64, Option<String>, String) = sqlx::query_as(identity_query)
+        .bind(Uuid::parse_str(&connection).unwrap())
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    let mut transfer_count = 0_i64;
+    for (prompt, tool_name, final_status) in [
+        (BALANCE_REQUEST, "bank_balance", "succeeded"),
+        (TRANSFER_REQUEST, "bank_transfer", "succeeded"),
+        (HISTORY_REQUEST, "bank_transactions", "succeeded"),
+        (UNCONNECTED_REQUEST, "bank_transfer", "tool_error"),
+    ] {
+        let before = h
+            .json("GET", "/v1/banking/wallet", &alice, None, StatusCode::OK)
+            .await;
+        let events = read_events(
+            h.chat(&alice, bank_chat_body(&connection, prompt, &[]))
+                .await,
+        )
+        .await;
+        assert!(
+            !events.iter().any(|(kind, _)| kind == "error"),
+            "{events:?}"
+        );
+        let proposal = &events
+            .iter()
+            .find(|(kind, _)| kind == "tool_proposal")
+            .unwrap()
+            .1;
+        assert_eq!(proposal["connection_id"], connection);
+        assert_eq!(proposal["tool_name"], tool_name);
+        let invocation = proposal["invocation_id"].as_str().unwrap();
+        let path = format!("/v1/plugins/invocations/{invocation}");
+        let saved = h.json("GET", &path, &alice, None, StatusCode::OK).await;
+        assert_eq!(saved["status"], "awaiting_confirmation");
+        assert!(saved["result"].is_null());
+        assert_eq!(
+            h.json("GET", "/v1/banking/wallet", &alice, None, StatusCode::OK)
+                .await,
+            before
+        );
+        if prompt == BALANCE_REQUEST {
+            let observed = h.model_requests.lock().unwrap().len();
+            let unconfirmed = h
+                .chat(&alice, bank_chat_body(&connection, prompt, &[invocation]))
+                .await;
+            assert_eq!(unconfirmed.status(), StatusCode::CONFLICT);
+            assert_eq!(
+                read_json(unconfirmed).await["error"]["code"],
+                "PLUGIN_RESULT_UNAVAILABLE"
+            );
+            assert_eq!(
+                h.chat(&bob, bank_chat_body(&connection, prompt, &[invocation]))
+                    .await
+                    .status(),
+                StatusCode::NOT_FOUND
+            );
+            assert_eq!(h.model_requests.lock().unwrap().len(), observed);
+        }
+        let confirm_path = format!("{path}/confirm");
+        h.json(
+            "POST",
+            &confirm_path,
+            &bob,
+            Some(json!({"confirmed":true})),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        let confirmed = h
+            .json(
+                "POST",
+                &confirm_path,
+                &alice,
+                Some(json!({"confirmed":true})),
+                StatusCode::OK,
+            )
+            .await;
+        assert_eq!(confirmed["status"], final_status);
+        assert_eq!(
+            h.json(
+                "POST",
+                &confirm_path,
+                &alice,
+                Some(json!({"confirmed":true})),
+                StatusCode::OK
+            )
+            .await,
+            confirmed
+        );
+        if prompt == TRANSFER_REQUEST {
+            transfer_count += 1;
+        }
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM bank_demo_transactions WHERE user_id=$1 AND kind='transfer'",
+        )
+        .bind(user)
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+        assert_eq!(count, transfer_count);
+        let after = h
+            .json("GET", "/v1/banking/wallet", &alice, None, StatusCode::OK)
+            .await;
+        if prompt != TRANSFER_REQUEST {
+            assert_eq!(after, before);
+        }
+        let resumed = read_events(
+            h.chat(&alice, bank_chat_body(&connection, prompt, &[invocation]))
+                .await,
+        )
+        .await;
+        assert!(
+            resumed
+                .iter()
+                .any(|(kind, value)| kind == "done" && value["finish_reason"] == "stop"),
+            "{resumed:?}"
+        );
+        assert!(
+            !resumed
+                .iter()
+                .any(|(kind, _)| matches!(kind.as_str(), "tool_proposal" | "error"))
+        );
+        let model_result: Value = {
+            let requests = h.model_requests.lock().unwrap();
+            let result_message = requests.last().unwrap()["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|message| message["role"] == "tool")
+                .unwrap();
+            serde_json::from_str(result_message["content"].as_str().unwrap()).unwrap()
+        };
+        assert_eq!(
+            model_result["structuredContent"],
+            confirmed["result"]["structuredContent"]
+        );
+        assert_eq!(model_result["isError"], confirmed["result"]["isError"]);
+        assert_eq!(
+            h.json("GET", "/v1/banking/wallet", &alice, None, StatusCode::OK)
+                .await,
+            after
+        );
+        let current: (i64, Option<String>, String) = sqlx::query_as(identity_query)
+            .bind(Uuid::parse_str(&connection).unwrap())
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            current, baseline,
+            "model guidance must not change a saved tool fingerprint or require review"
+        );
+    }
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM plugin_invocations WHERE user_id=$1")
+            .bind(user)
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    let clarification = read_events(
+        h.chat(&alice, bank_chat_body(&connection, CLARIFY_REQUEST, &[]))
+            .await,
+    )
+    .await;
+    assert!(
+        clarification.iter().any(|(kind, value)| kind == "delta"
+            && value["text"].as_str().unwrap().contains("请说明收款人"))
+    );
+    assert!(
+        !clarification
+            .iter()
+            .any(|(kind, _)| matches!(kind.as_str(), "tool_proposal" | "error"))
+    );
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_invocations WHERE user_id=$1")
+        .bind(user)
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, before);
+    let initial_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM bank_demo_transactions WHERE user_id=$1 AND kind='initial'",
+    )
+    .bind(user)
+    .fetch_one(&h.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(initial_count, 4, "AI turns must not reissue bank funding");
+    let requests = h.model_requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 9);
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.to_string().contains(&alice)
+                || request.to_string().contains(&bob))
+    );
+    assert_eq!(h.business_calls.load(Ordering::SeqCst), 0);
+    h.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; only contacts loopback fixtures"]
+async fn remote_bank_name_and_metadata_do_not_grant_trusted_bank_context() {
+    let h = Harness::new().await;
+    let token = h.register("ai_remote_bank").await;
+    let connection = h.connect(&token, "claimed-bank").await;
+    let saved = h
+        .json(
+            "GET",
+            &format!("/v1/plugins/connections/{connection}"),
+            &token,
+            None,
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(saved["connection_kind"], "remote_mcp");
+    assert!(saved["builtin_service_id"].is_null());
+    let events = read_events(h.chat(&token, chat_body(&connection, &[])).await).await;
+    assert!(
+        events
+            .iter()
+            .any(|(kind, value)| kind == "tool_proposal" && value["tool_name"] == "fixture.lookup")
+    );
+    assert!(!events.iter().any(|(kind, _)| kind == "error"));
+    assert_eq!(h.business_calls.load(Ordering::SeqCst), 0);
+    h.finish().await;
 }
 
 #[tokio::test]

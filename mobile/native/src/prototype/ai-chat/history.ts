@@ -1,4 +1,4 @@
-import type { ChatMessage, Conversation } from './state-model';
+import type { ChatMessage, ChatPlugin, Conversation } from './state-model';
 import { decodePluginIdentity } from '../plugin-host/core';
 
 export type HistorySummary = { id: string; title: string; revision: number; updated_at: string };
@@ -6,6 +6,14 @@ export type HistoryDetail = HistorySummary & Conversation;
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const uuid = (v: unknown): v is string => typeof v === 'string' && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(v);
 const invalid = (): never => { throw new Error('INVALID_RESPONSE'); };
+/** A selected connection may contain runtime fields outside the history contract. */
+export function chatPluginSnapshot(value: ChatPlugin): ChatPlugin {
+  return {
+    id: value.id, title: value.title, endpoint_url: value.endpoint_url,
+    ...(value.connection_kind === undefined ? {} : { connection_kind: value.connection_kind }),
+    ...(value.builtin_service_id === undefined ? {} : { builtin_service_id: value.builtin_service_id }),
+  };
+}
 export function decodeSummary(v: unknown): HistorySummary {
   if (!record(v) || !uuid(v.id) || typeof v.title !== 'string' || Array.from(v.title).length > 200 || !Number.isSafeInteger(v.revision) || Number(v.revision) < 1 || typeof v.updated_at !== 'string' || !Number.isFinite(Date.parse(v.updated_at))) return invalid();
   return { id: v.id, title: v.title, revision: Number(v.revision), updated_at: v.updated_at };
@@ -53,7 +61,7 @@ export function createHistoryWriter(save: (id: string, body: SaveBody) => Promis
     const operation = previous.catch(() => {}).then(async () => {
       let body = pending.get(conversation.id);
       if (body && !retry) throw new Error('HISTORY_SAVE_PENDING');
-      if (!body) { body = { title: conversation.title, messages: JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[], ...(conversation.plugin ? { plugin: { ...conversation.plugin } } : {}), request_id: newId(), expected_revision: revisions.get(conversation.id) ?? 0 }; pending.set(conversation.id, body); }
+      if (!body) { body = { title: conversation.title, messages: JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[], ...(conversation.plugin ? { plugin: chatPluginSnapshot(conversation.plugin) } : {}), request_id: newId(), expected_revision: revisions.get(conversation.id) ?? 0 }; pending.set(conversation.id, body); }
       const result = await save(conversation.id, body);
       revisions.set(conversation.id, result.revision); pending.delete(conversation.id);
       return result;
