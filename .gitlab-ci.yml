@@ -175,11 +175,12 @@ deploy-check:
   stage: verify
   image: python:3.13-bookworm
   script:
-    - apt-get update && apt-get install -y --no-install-recommends nginx openssl
+    - apt-get update && apt-get install -y --no-install-recommends nginx openssl age
     - bash -n backend/deploy/package-release.sh backend/deploy/backup.sh backend/deploy/health-check.sh backend/deploy/test-nginx-config.sh web/deploy/remote.sh
     - bash backend/deploy/test-nginx-config.sh
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy -p 'test_*.py'
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/beauty-gallery -p 'test_*.py'
+    - Q_AGE_BIN=/usr/bin/age PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/offsite-backup -p 'test_*.py'
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
 
 # Automatic only for protected main; other permitted branches retain optional packaging.
