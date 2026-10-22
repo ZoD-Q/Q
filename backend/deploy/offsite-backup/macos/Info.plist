@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.kaicloud.q.offsite-backup</string>
+<key>CFBundleExecutable</key><string>QBackupLauncher</string>
+<key>CFBundleName</key><string>小Q异地备份</string>
+<key>CFBundleDisplayName</key><string>小Q异地备份</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>13.0</string>
+<key>LSUIElement</key><true/>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSDesktopFolderUsageDescription</key><string>小Q需要访问桌面的“异地备份”文件夹，用于保存和校验从小Q服务器下载的加密备份。不会要求完全磁盘访问权限。</string>
+</dict></plist>
