@@ -974,6 +974,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/insurance/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["insuranceStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/insurance/inquiries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Reserved only. Does not save data, contact providers or create tickets. No automatic retry. */
+        post: operations["insuranceInquiry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/insurance/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Reserved only. Does not save data, contact providers or create tickets. No automatic retry. */
+        post: operations["insuranceConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1742,6 +1792,24 @@ export interface components {
         BankEntryPage: {
             items: components["schemas"]["BankEntry"][];
             next_cursor: string | null;
+        };
+        InsuranceStatus: {
+            /** @enum {boolean} */
+            conversation_available: false;
+            /** @enum {boolean} */
+            inquiry_available: false;
+            /** @enum {boolean} */
+            accepts_personal_data: false;
+        };
+        InsuranceInquiryRequest: {
+            /** @enum {string} */
+            topic: "coverage" | "eligibility" | "claims";
+            /** @description Trimmed Unicode character count; NUL forbidden. Do not send personal or medical information. */
+            question: string;
+        };
+        InsuranceConversationRequest: {
+            /** @description Trimmed Unicode character count; NUL forbidden. Do not send personal or medical information. */
+            message: string;
         };
     };
     responses: never;
@@ -3993,6 +4061,128 @@ export interface operations {
                 };
             };
             /** @description Structured error; no real financial action is performed. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    insuranceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider capabilities; currently all false */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsuranceStatus"];
+                };
+            };
+        };
+    };
+    insuranceInquiry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsuranceInquiryRequest"];
+            };
+        };
+        responses: {
+            /** @description VALIDATION_ERROR */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description UNAUTHORIZED */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description INSURANCE_INQUIRY_UNAVAILABLE */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    insuranceConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsuranceConversationRequest"];
+            };
+        };
+        responses: {
+            /** @description VALIDATION_ERROR */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description UNAUTHORIZED */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description INSURANCE_SUPPORT_UNAVAILABLE */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Structured error */
             default: {
                 headers: {
                     [name: string]: unknown;

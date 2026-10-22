@@ -189,6 +189,7 @@ TEST_DATABASE_URL=postgresql://xiaoq:xiaoq_demo_local@127.0.0.1:55432/xiaoq_demo
 
 模拟器实际操作：恢复已有登录；未知受理和慢响应任务显示待确认，查询原任务后进入生成中；离开工作台再进入仍能恢复任务；数据库确认两条场景各只有一条任务；令测试会话失效后显示重新登录，换用 lin 后连接、任务和草稿均不带入 kai 的数据。原生表单保存与撤销通过，数据库确认撤销后加密凭据已清空。临时 URL 更新及并发顺序由可控供应商/数据库回归验证，未宣称真实生成媒体已播放。Android 和完整字体/无障碍矩阵仍未覆盖。
 
+
 ## TestFlight 配置与仓库对齐（2026-10-19）
 
 在 `0b99f90ef5f78293041bde8ae6b93758c0695933` 基线上恢复本次发布配置，保留已合入的账号、社交、二维码依赖和 GitLab 检查流程。版本为 `0.1.0 (1)`，Bundle ID 为 `com.kaicloud.xiaoq`；新增气泡 Q 图标和显式发布 API 配置检查，Release 不再回落到设备回环地址。
@@ -241,3 +242,42 @@ TEST_DATABASE_URL=postgresql://xiaoq:xiaoq_demo_local@127.0.0.1:55432/xiaoq_demo
 合并结果的七组移动端测试 235 项通过（23 / 10 / 39 / 11 / 77 / 42 / 33），类型、lint、接口生成一致性及 Web 导出通过。Rust fmt、全功能 clippy、61 单元及 3 中间件测试通过；隔离 PostgreSQL 的账号生命周期、AI、历史、插件、身份/账本、社交、视频共 45 项及真实 pg_dump/pg_restore 1 项通过。
 
 最终 Release 在问题模拟器重新安装并成功运行：使用现有专用验收账号真实登录，显示旧后端的会话历史说明，发送短文本并得到真实 DeepSeek `OK` 回答，随后退出验收账号。凭据只在受限临时文件和安全输入状态中短暂使用，已清除；没有新增线上账号或业务账本写入。已停止本机 Metro/诊断服务，模拟器应用独立使用长期 HTTPS 后端。
+
+## Hera 公开金融信息页面验证 2026-10-19
+
+工作区 `Q-hera`，基础提交 `4af1ed7`，本次改动未提交。三个正常入口显示六家真实机构的公开信息，不再进入虚构分期、保险和理财方案。数据及来源位于 `native/src/prototype/financial-catalog/catalog.ts`。
+
+- PASS：typecheck、lint、test:utils（11项，含目录检索、官方URL边界及金额逻辑）、test:video、test:plugins、test:api-workbench、test:account、test:social、test:chat、export:web、git diff --check。
+- PASS：390×844浏览器中分期关键词筛选、两项对比、详情、阅读清单、官方来源确认层；未登录收藏触发统一登录提示；保险目录可显示；理财按000009搜索并展示风险和费用说明。三个页面截图已保留。
+- NOT_RUN：本次没有启动身份后端，未实际登录验收收藏；收藏仅会话内存，不声明跨设备持久化。没有访问机构的认证接口，没有申请、核保、开户或支付。
+- NOT_RUN：Android新基线在现有Expo Go中遇到ExpoCrypto模块缺失；iOS需要macOS环境。本次浏览器手机尺寸验证不能替代原生设备验收。
+- 来源核对：建设银行、平安商城、易方达、华夏已读取公开页面；招商银行及人保服务大厅正文提取为空，按官方搜索索引核对并在UI明确标注。页面记录日期不是动态行情更新时间，不保证条目在售或个人可申请。
+
+## Hera H01 账号与资料增量验收（2026-10-21）
+
+基线为本地 hera / 4af1ed7，保留既有未提交金融页面。已 fetch：origin/main 为 8d37a03；本次未合并远端新功能，避免覆盖当前工作区。远端已增加聊天历史、注销等功能，后续同步后仍需重验，不能复用本报告直接宣称新基线通过。
+
+修复：账号恢复和资料更新收到 401 时，先清空账号并使共享会话逻辑失效，再尝试删除安全存储。物理删除失败时，其他模块不能再读取旧令牌。两个新增回归测试均先复现失败再通过。资料页面使用账号场景的超时、无效响应与存储失败提示。
+
+PASS：typecheck、lint、test:utils、test:video、test:plugins、test:api-workbench、test:account（18项）、test:social、test:chat、export:web。真实 PostgreSQL 独立 xiaoq_h01_test 数据库中 postgres 3项、social 14项通过；未改 Rust 业务代码或数据库迁移。
+
+Android / KAI_Pixel_7_API_35 / Expo Go 实测：
+- 恢复 Hera 已存登录；修改昵称、简介、头像、主题和语言，API读取确认已保存。
+- 强制结束 Expo Go 再打开，恢复 Hera 登录及英文、暖纸、修改后的资料。
+- 退出后显示未登录；第二个独立 QA 账号登录后显示自身昵称、空简介及中文，不继承 Hera 资料。
+- 仅将新 QA 账号会话时间调整为已过期，回到前台后清除身份，显示登录入口。
+- 键盘打开时可上滑表单露出登录按钮并成功提交。
+- 恢复 Hera 原昵称、空简介、星环头像、暖纸及中文，重新登录；保留模拟器在设置页。
+
+未覆盖：iOS 原生验收、完整字体/无障碍矩阵、真实系统 SecureStore 物理故障（由回归测试注入验证）、跨设备登录。聊天模型未配置，不声称真实对话已通过。未提交、推送、合并或部署。本轮仅完成 H01 增量，不代表 H02 钱包或其余模块完成。
+
+## Hera 上传前整合验证（2026-10-22）
+
+将此前金融目录、会话预览、H01 账号修复及保险全景面板整合到 `origin/main` 的 `de9a6bf` 基线上，目标为长期开发分支 `hera`。保留主线银行插件、账号生命周期及聊天历史功能；理财保持原版三家公司。冲突涉及服务入口、资料页导入、接口合同及验收记录，生成类型从合并后的 OpenAPI 重新生成。
+
+- PASS：typecheck、lint、export:web；移动端七组测试共 287 项（utils 31、video 10、plugins 64、api-workbench 16、account 44、social 33、chat 89）。
+- 修复主线原生构建保护测试在 Windows 上硬编码 `/bin/bash` 的执行失败：支持 `Q_TEST_BASH` 指定 Git Bash，传入正斜杠路径；真实保护脚本及全部断言保持执行，未跳过测试。本机使用 `D:\Git\bin\bash.exe`。
+- PASS：Rust fmt --check、clippy --all-targets --all-features -- -D warnings、cargo test --all-features；67 项单元、3 项中间件测试通过。
+- PASS：独立 `xiaoq_h01_test` PostgreSQL 测试库中 postgres 9 项、social 15 项。其他 ignored 集成测试交由 GitLab 完整流水线执行，不能把本地普通 cargo test 解释为已运行全部 ignored 测试。
+- 保险面板 Android 实测与截图对应合并前版本，详见 [保险全景说明](insurance-dashboard.md)。同步主线后的启动预览命令被自动审批检查拦截（仅返回 blocked by policy），没有把合并后模拟器复验记为通过；iOS 未验收。
+- 该记录是本地上传前验证，不代表 GitLab 流水线、人工合并或服务器部署已经完成。

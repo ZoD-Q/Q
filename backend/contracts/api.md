@@ -48,6 +48,15 @@ The native viewer displays bounded, signature/dimension-verified JPEG, PNG and W
 
 ## Endpoints
 
+### Insurance integration reservations (2026-10-22)
+
+- `GET /v1/insurance/status`: public, returns `conversation_available:false`, `inquiry_available:false`, `accepts_personal_data:false`.
+- `POST /v1/insurance/conversations`: Q Bearer required; body `{message}`. Valid input returns **503 INSURANCE_SUPPORT_UNAVAILABLE**.
+- `POST /v1/insurance/inquiries`: Q Bearer required; body `{topic,question}`, topic `coverage|eligibility|claims`. Valid input returns **503 INSURANCE_INQUIRY_UNAVAILABLE**.
+- Message/question: trim first, 1–1000 Unicode characters, NUL forbidden; unknown fields or topic are rejected with 400 VALIDATION_ERROR. Missing/invalid/expired identity returns 401 UNAUTHORIZED. Existing 16 KiB body limit applies.
+- These are reserved integration boundaries, not a live support system. No conversation IDs, tickets, persistence, provider requests, underwriting or success responses. Do not automatically retry 503. Do not send identity documents, health records or contact details. No user-ID override is accepted.
+- The mobile insurance catalogue and question/claims guidance are curated local content. It does not submit inquiries or messages while capabilities are unavailable. A future provider integration must add explicit capability handling, consent, owner isolation, retention and retry semantics before enabling these forms.
+
 - `GET /health` → `{status:"ok", mode:"demo"}`; verify DB connectivity.
 - `POST /v1/auth/register` body `{handle,password,display_name}` → 201 `{token,user}`. Handle normalized lowercase ASCII `[a-z0-9_]{3,24}`; `xiaoq` is reserved for the system. Password 10–128 characters; display_name 1–40 chars. Creates profile, wallet and balanced 100000 minor-unit welcome credit atomically. All data is simulated.
 - `POST /v1/auth/login` body `{handle,password}` → `{token,user}`. Generic invalid-credentials errors.

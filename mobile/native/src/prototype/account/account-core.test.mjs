@@ -6,6 +6,28 @@ import { createSessionStore } from '../../services/session-core.ts';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const user = id => ({ id, handle: id, display_name: id, avatar: 'orbit', bio: '', theme: 'light', locale: 'zh-CN', created_at: '2026-10-19T00:00:00Z' });
+
+for (const operation of ['refresh', 'updateProfile']) {
+  test(`${operation}: expired credentials are unusable across modules even when storage removal fails`, async () => {
+    let expired = false;
+    const f = fixture({
+      user: async token => { if (expired) throw { status: 401, code: 'UNAUTHORIZED' }; return user(token); },
+      patch: async () => { throw { status: 401, code: 'UNAUTHORIZED' }; },
+    }, 'alice');
+    await tick();
+    f.storage.remove = async () => { throw Error('secure storage unavailable'); };
+    const events = [];
+    f.store.subscribe(token => events.push(token));
+    expired = true;
+    if (operation === 'refresh') await f.controller.refresh();
+    else await f.controller.updateProfile({ bio: 'new bio' });
+    assert.equal(f.controller.getSnapshot().session, null);
+    assert.equal(await f.store.readToken(), null);
+    assert.equal(events.at(-1), null);
+    assert.equal(f.controller.getSnapshot().error, 'STORAGE_ERROR');
+    f.controller.stop();
+  });
+}
 function fixture(overrides = {}, initial = null) {
   let token = initial;
   const storage = { get: async () => token, set: async value => { token = value; }, remove: async () => { token = null; } };

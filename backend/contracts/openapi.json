@@ -3668,6 +3668,159 @@
           }
         ]
       }
+    },
+    "/v1/insurance/status": {
+      "get": {
+        "operationId": "insuranceStatus",
+        "tags": [
+          "insurance"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Provider capabilities; currently all false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsuranceStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/insurance/inquiries": {
+      "post": {
+        "operationId": "insuranceInquiry",
+        "tags": [
+          "insurance"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Reserved only. Does not save data, contact providers or create tickets. No automatic retry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InsuranceInquiryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "INSURANCE_INQUIRY_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/insurance/conversations": {
+      "post": {
+        "operationId": "insuranceConversation",
+        "tags": [
+          "insurance"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Reserved only. Does not save data, contact providers or create tickets. No automatic retry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InsuranceConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "INSURANCE_SUPPORT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6643,6 +6796,74 @@
           "next_cursor"
         ],
         "additionalProperties": false
+      },
+      "InsuranceStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversation_available",
+          "inquiry_available",
+          "accepts_personal_data"
+        ],
+        "properties": {
+          "conversation_available": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "inquiry_available": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "accepts_personal_data": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        }
+      },
+      "InsuranceInquiryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "question"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "enum": [
+              "coverage",
+              "eligibility",
+              "claims"
+            ]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Trimmed Unicode character count; NUL forbidden. Do not send personal or medical information."
+          }
+        }
+      },
+      "InsuranceConversationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Trimmed Unicode character count; NUL forbidden. Do not send personal or medical information."
+          }
+        }
       }
     }
   }

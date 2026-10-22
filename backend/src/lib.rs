@@ -26,6 +26,7 @@ pub mod client_ip;
 pub mod content_policy;
 pub mod error;
 pub mod identity;
+pub mod insurance;
 pub mod ledger;
 pub mod plugins;
 pub mod profiles;
@@ -153,6 +154,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
     Router::new()
         .merge(auth_routes)
         .merge(social::router())
+        .merge(insurance::router())
         .route("/health", get(health))
         .route("/v1/auth/logout", post(identity::logout))
         .merge(

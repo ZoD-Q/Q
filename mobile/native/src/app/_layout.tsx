@@ -8,6 +8,7 @@ import { QAccountProvider } from "@/prototype/account/account-state";
 import { SocialProvider } from "@/prototype/social";
 import { useReducedMotion } from "react-native-reanimated";
 
+import { FinancialPreviewProvider } from "@/prototype/services/preview-state";
 function RootStack() {
   const { colors, theme } = useDesign();
   const reducedMotion = useReducedMotion();
@@ -37,7 +38,7 @@ export default function Layout() {
           <SocialProvider>
             <VideoStudioProvider>
               <PluginWorkbenchProvider>
-                <RootStack />
+                <FinancialPreviewProvider><RootStack /></FinancialPreviewProvider>
               </PluginWorkbenchProvider>
             </VideoStudioProvider>
           </SocialProvider>
