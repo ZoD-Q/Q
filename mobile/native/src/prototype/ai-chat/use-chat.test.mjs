@@ -37,7 +37,7 @@ const hookSource = ts.transpileModule(readFileSync(new URL('./use-chat.ts', impo
 /** Execute the actual hook's async actions with deterministic state/effect plumbing.
  * This verifies orchestration, not React rendering, layout, or native transport. */
 function harness({ stored = token, statusFetch = async () => json(configured), meFetch = async () => json(user),
-  historyFetch = async () => new Response('', { status: 404 }), historySave, bankFetch,
+  historyFetch = async () => new Response('', { status: 404 }), historySave, historyDetail, bankFetch,
 } = {}) {
   const slots = [], calls = [], timers = new Map(), streams = [], streamCompletions = [], historyPosts = [], ordering = [];
   let cursor = 0, dirty = true, visible = true, mounted = true, pendingEffects = [], result, now = 0, nextId = 0;
@@ -74,6 +74,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
       if (path === '/v1/ai/status') return statusFetch(options);
       if (path === '/v1/me') return meFetch(options);
       if (path === '/v1/ai/conversations') return historyFetch(options);
+      if (path.startsWith('/v1/ai/conversations/') && options.method === 'GET' && historyDetail) return historyDetail(path.split('/').at(-1), options);
       if (path.startsWith('/v1/ai/conversations/') && options.method === 'POST') {
         const body = JSON.parse(options.body);
         const id = path.split('/').at(-1);
@@ -125,9 +126,14 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     token: () => stored,
     grantConsent: () => consent.grant(stored),
     changeToken: session.writeToken,
-    finishStream(index = 0) {
-      streams[index].onEvent({ type: 'delta', text: 'fixture answer' });
+    finishStream(index = 0, content = 'fixture answer') {
+      streams[index].onEvent({ type: 'delta', text: content });
       streams[index].onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'stop' });
+      streamCompletions[index]();
+    },
+    finishToolStream(proposal, index = 0) {
+      streams[index].onEvent({ type: 'tool_proposal', ...proposal });
+      streams[index].onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'tool_calls' });
       streamCompletions[index]();
     },
     async flush() { for (let i = 0; i < 80; i++) { await Promise.resolve(); if (dirty && mounted) render(); } },
@@ -362,35 +368,144 @@ function bankFixture({prepare, wallet=bankWallet, readWallet}={}) {return async(
  throw new Error('No confirmation or connection mutation is permitted in chat planning');
 };}
 const cloudHistory=()=>json({items:[],next_cursor:null});
-test('bank chat persists the proposal identity before invoking a bank and never calls a model or confirms',async t=>{
- const gate=deferred();let first=true;
- const view=harness({statusFetch:async()=>json({...configured,configured:false}),historyFetch:cloudHistory,bankFetch:bankFixture(),historySave:(id,body)=>{if(first){first=false;return gate.promise;}return json({id,...body,revision:body.expected_revision+1,updated_at:user.created_at});}});t.after(view.close);
- await view.flush();assert.equal(view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK'),true);await view.flush();assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);
- const firstPost=view.historyPosts[0];assert.equal(firstPost.body.plugin.connection_kind,'bank_demo');assert.equal(firstPost.body.messages.at(-1).bankCommand,true);
- gate.resolve(json({id:firstPost.id,...firstPost.body,revision:1,updated_at:user.created_at}));await view.flush();
- assert.equal(view.current.conversation.messages.at(-1).status,'tool');assert.equal(view.current.conversation.messages.at(-1).toolProposalId,'55555555-5555-4555-8555-555555555555');assert.equal(view.streams.length,0);assert.equal(view.calls.filter(c=>c.path.endsWith('/confirm')).length,0);assert.equal(view.calls.filter(c=>c.path.endsWith('/connect')).length,0);
- assert.ok(view.ordering.indexOf('history:POST')<view.ordering.indexOf('/v1/plugins/invocations:POST'));
-});
-test('unknown bank proposal preparation retries the same durable id and payload without repeating the user message',async t=>{
- const attempts=[];let fail=true;
- const ordinary=bankFixture();const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture({prepare:async(body,options)=>{attempts.push(body);if(fail){fail=false;throw Error('lost response');}return ordinary('/v1/plugins/invocations',{...options,body:JSON.stringify(body)});}})});t.after(view.close);await view.flush();
- view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK');await view.flush();assert.equal(view.current.conversation.messages.at(-1).status,'error');view.current.retry();await view.flush();
- assert.deepEqual(attempts[0],attempts[1]);assert.equal(view.current.conversation.messages.filter(m=>m.role==='user').length,1);assert.equal(view.current.conversation.messages.at(-1).status,'tool');assert.equal(view.streams.length,0);
-});
-test('missing bank fields and unconnected banks only produce guidance, with no account creation',async t=>{
- for(const prompt of ['Transfer HKD 500 from HSBC','Transfer HKD 500 from HSBC to Chen at BOCHK']) {
-  const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture({wallet:{...bankWallet,accounts:[],total_balance_minor:0}})});t.after(view.close);await view.flush();view.current.send(prompt);await view.flush();
-  assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);assert.equal(view.calls.filter(c=>c.path==='/v1/banking/connect').length,0);assert.equal(view.current.conversation.messages.at(-1).status,'complete');assert.equal(view.streams.length,0);
- }
-});
-test('a bank lookup completing after account invalidation cannot publish or prepare a transfer',async t=>{
- const pending=deferred();const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture({readWallet:()=>pending.promise})});t.after(view.close);await view.flush();view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK');await view.flush();
- await view.changeToken('q_'+'b'.repeat(43));await view.flush();pending.resolve(json(bankWallet));await view.flush();assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);assert.equal(view.current.items.length,0);
+const historyPluginFields = new Set(['id', 'title', 'endpoint_url', 'connection_kind', 'builtin_service_id']);
+function strictPluginHistory(id, body) {
+  if (Object.keys(body.plugin ?? {}).some(key => !historyPluginFields.has(key))) {
+    return new Response(JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'Invalid history plugin display metadata.' } }), { status: 400 });
+  }
+  return json({ id, ...body, revision: body.expected_revision + 1, updated_at: user.created_at });
+}
+
+test('all new selected-bank messages reach the model unchanged and save only plugin display metadata', async t => {
+  for (const prompt of [
+    '我卡里有多少钱', '我还有多少可以花的钱？', '戶口仲有幾多錢？', 'Check my balance',
+    '帮我转给我朋友200港币', 'Transfer HKD 500 from HSBC to Chen at BOCHK',
+    "Transfer 500 from Chen's account to my BOCHK account", 'What can you do?', '给我讲个笑话',
+  ]) {
+    const view = harness({ historyFetch: cloudHistory, historySave: strictPluginHistory }); t.after(view.close);
+    await view.flush(); view.grantConsent();
+    const connection = structuredClone(bankConnection);
+    view.current.selectPlugin(connection); await view.flush();
+    assert.notStrictEqual(view.current.plugin, connection);
+    assert.deepEqual(Object.keys(view.current.plugin).sort(), [...historyPluginFields].sort());
+    connection.title = 'Later connection update';
+    assert.equal(view.current.plugin.title, bankConnection.title);
+    assert.equal(view.streams.length, 0, 'selecting a plugin only refreshes its model status');
+    assert.equal(view.current.send(prompt), true); await view.flush();
+    assert.equal(view.streams.length, 1, prompt);
+    assert.equal(view.streams[0].request.plugin_connection_id, bankConnection.id);
+    assert.equal(view.streams[0].request.thinking, false);
+    assert.deepEqual(JSON.parse(JSON.stringify(view.streams[0].request.messages)), [{ role: 'user', content: prompt }]);
+    view.finishStream(); await view.flush();
+    assert.ok(view.historyPosts.length >= 1, prompt);
+    for (const { body } of view.historyPosts) {
+      assert.deepEqual(Object.keys(body.plugin).sort(), [...historyPluginFields].sort());
+      assert.equal(body.plugin.id, bankConnection.id);
+      assert.equal(body.plugin.connection_kind, 'bank_demo');
+      assert.equal(body.plugin.builtin_service_id, bankConnection.builtin_service_id);
+    }
+    assert.equal(view.current.historyError, '', prompt);
+    assert.equal(view.current.conversation.messages.at(-1).status, 'complete', prompt);
+    assert.equal(view.current.conversation.messages.at(-1).content, 'fixture answer');
+    assert.equal(view.current.conversation.messages.at(-1).bankCommand, undefined);
+    assert.equal(view.calls.some(call => call.path.startsWith('/v1/banking/') || call.path.startsWith('/v1/plugins/')), false, prompt);
+  }
 });
 
-test('a selected bank never turns a third-party source request into a debit from the signed-in user',async t=>{
- const view=harness({historyFetch:cloudHistory,bankFetch:bankFixture()});t.after(view.close);await view.flush();
+test('a complete remote connection keeps its chat identity while history excludes connection metadata', async t => {
+  const connection = { ...bankConnection, card_url: 'https://example.invalid/card', endpoint_url: 'https://example.invalid/mcp', name: 'remote', title: 'Remote plugin', connection_kind: 'remote_mcp', builtin_service_id: null, owner_name: 'Publisher' };
+  const view = harness({ historyFetch: cloudHistory, historySave: strictPluginHistory }); t.after(view.close);
+  await view.flush(); view.grantConsent(); view.current.selectPlugin(connection); await view.flush();
+  assert.equal(view.current.send('What can you do?'), true); await view.flush();
+  assert.equal(view.streams.length, 1);
+  assert.equal(view.streams[0].request.plugin_connection_id, connection.id);
+  assert.equal(view.streams[0].request.thinking, false);
+  view.finishStream(); await view.flush();
+  assert.equal(view.current.historyError, '');
+  assert.deepEqual(view.historyPosts[0].body.plugin, { id: connection.id, title: connection.title, endpoint_url: connection.endpoint_url, connection_kind: 'remote_mcp', builtin_service_id: null });
+  assert.equal(view.calls.some(call => call.path.startsWith('/v1/banking/') || call.path.startsWith('/v1/plugins/')), false);
+});
+
+test('bank chat saves history before the model and displays its saved proposal without confirming',async t=>{
+ const gate=deferred();let first=true;
+ const view=harness({historyFetch:cloudHistory,historySave:(id,body)=>{if(first){first=false;return gate.promise;}return strictPluginHistory(id,body);}});t.after(view.close);
+ await view.flush();view.grantConsent();view.current.selectPlugin(bankConnection);await view.flush();
+ assert.equal(view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK'),true);await view.flush();assert.equal(view.streams.length,0);
+ const firstPost=view.historyPosts[0];assert.equal(firstPost.body.plugin.connection_kind,'bank_demo');assert.equal(firstPost.body.messages.at(-1).bankCommand,undefined);
+ gate.resolve(json({id:firstPost.id,...firstPost.body,revision:1,updated_at:user.created_at}));await view.flush();
+ assert.equal(view.streams.length,1);assert.deepEqual(view.ordering,['history:POST','chat:POST']);
+ const invocationId='55555555-5555-4555-8555-555555555555';
+ view.finishToolStream({invocation_id:invocationId,connection_id:bankConnectionId,tool_name:'bank_transfer',arguments:{to_bank_id:'bochk',recipient:'demo_chen',amount_minor:50000}});await view.flush();
+ const answer=view.current.conversation.messages.at(-1);assert.equal(answer.status,'tool');assert.equal(answer.toolProposalId,invocationId);
+ assert.equal(view.historyPosts.at(-1).body.messages.at(-1).toolProposalId,invocationId);
+ assert.equal(view.streams.length,1,'a proposal does not automatically continue the model');
+ view.current.resumeTool(answer.id,invocationId);await view.flush();
+ assert.equal(view.streams.length,2);assert.deepEqual([...view.streams[1].request.tool_invocation_ids],[invocationId]);
+ assert.equal(view.streams[1].request.plugin_connection_id,bankConnectionId);
+ assert.equal('tool_result' in view.streams[1].request,false);
+ assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
+});
+
+test('only an explicit legacy bank retry reuses its old preparation key and payload',async t=>{
+ const conversationId='66666666-6666-4666-8666-666666666666',answerId='77777777-7777-4777-8777-777777777777';
+ const original={id:conversationId,title:'Legacy transfer',revision:1,updated_at:user.created_at,plugin:history.chatPluginSnapshot(bankConnection),messages:[{id:user.id,role:'user',content:'Transfer HKD 500 from HSBC to Chen at BOCHK',status:'complete'},{id:answerId,role:'assistant',content:'',status:'error',errorCode:'NETWORK_ERROR',bankCommand:true}]};
+ const attempts=[];let fail=true;
+ const ordinary=bankFixture();const view=harness({historyFetch:()=>json({items:[{id:conversationId,title:original.title,revision:1,updated_at:user.created_at}],next_cursor:null}),historyDetail:()=>json(original),bankFetch:bankFixture({prepare:async(body,options)=>{attempts.push(body);if(fail){fail=false;throw Error('lost response');}return ordinary('/v1/plugins/invocations',{...options,body:JSON.stringify(body)});}})});t.after(view.close);await view.flush();
+ await view.current.openConversation(conversationId);await view.flush();assert.equal(attempts.length,0);
+ view.current.retry();await view.flush();assert.equal(view.current.conversation.messages.at(-1).status,'error');view.current.retry();await view.flush();
+ assert.equal(attempts[0].idempotency_key,answerId);
+ assert.deepEqual(attempts[0],attempts[1]);assert.equal(view.current.conversation.messages.filter(m=>m.role==='user').length,1);assert.equal(view.current.conversation.messages.at(-1).status,'tool');assert.equal(view.streams.length,0);
+ assert.equal(view.calls.some(call=>call.path.endsWith('/confirm')),false);
+});
+
+test('a model clarification and a short follow-up retain the selected bank and conversation context',async t=>{
+ const view=harness({historyFetch:cloudHistory,historySave:strictPluginHistory});t.after(view.close);await view.flush();view.grantConsent();
+ view.current.selectPlugin(bankConnection);await view.flush();view.current.send('帮我转给我朋友200港币');await view.flush();
+ view.finishStream(0,'请告诉我收款人和收款银行。');await view.flush();
+ view.current.send('陈小明的中银账户');await view.flush();
+ assert.equal(view.streams.length,2);assert.equal(view.streams[1].request.plugin_connection_id,bankConnectionId);
+ assert.deepEqual(JSON.parse(JSON.stringify(view.streams[1].request.messages)),[{role:'user',content:'帮我转给我朋友200港币'},{role:'assistant',content:'请告诉我收款人和收款银行。'},{role:'user',content:'陈小明的中银账户'}]);
+ assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
+});
+
+test('bank words without a selected plugin never auto-select a connection or prepare a transfer',async t=>{
+ const view=harness({historyFetch:cloudHistory});t.after(view.close);await view.flush();view.grantConsent();
+ assert.equal(view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK'),true);await view.flush();
+ assert.equal(view.streams.length,1);assert.equal(view.streams[0].request.plugin_connection_id,undefined);
+ assert.equal(view.current.plugin,null);assert.equal(view.current.conversation.plugin,undefined);
+ assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
+});
+
+test('a late model bank proposal after account invalidation cannot publish or execute',async t=>{
+ const view=harness({historyFetch:cloudHistory});t.after(view.close);await view.flush();view.grantConsent();
+ view.current.selectPlugin(bankConnection);await view.flush();view.current.send('我卡里有多少钱');await view.flush();
+ await view.changeToken('q_'+'b'.repeat(43));await view.flush();
+ view.finishToolStream({invocation_id:'55555555-5555-4555-8555-555555555555',connection_id:bankConnectionId,tool_name:'bank_balance',arguments:{}});await view.flush();
+ assert.equal(view.current.items.length,0);assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
+});
+
+test('selecting a bank refreshes model availability without sending, and manual refresh can recover',async t=>{
+ let available=false;
+ const view=harness({historyFetch:cloudHistory,statusFetch:async()=>json({...configured,configured:available})});t.after(view.close);await view.flush();view.grantConsent();
+ assert.equal(view.current.statusPhase,'unconfigured');
  view.current.selectPlugin(bankConnection);await view.flush();
- view.current.send("Transfer 500 from Chen's account to my BOCHK account");await view.flush();
- assert.equal(view.calls.filter(c=>c.path==='/v1/plugins/invocations').length,0);assert.equal(view.streams.length,0);assert.equal(view.current.conversation.messages.at(-1).status,'complete');
+ assert.equal(view.calls.filter(call=>call.path==='/v1/ai/status').length,2);assert.equal(view.streams.length,0);
+ assert.equal(view.current.send('我卡里有多少钱'),false);assert.equal(view.current.messageError,'AI_NOT_CONFIGURED');
+ available=true;view.current.reconnect();await view.flush();
+ assert.equal(view.current.statusPhase,'ready');assert.equal(view.current.plugin.id,bankConnectionId);assert.equal(view.streams.length,0);
+ assert.equal(view.current.send('我卡里有多少钱'),true);await view.flush();assert.equal(view.streams.length,1);
+ assert.equal(view.current.messageError,'');
+});
+
+test('failed bank chat history keeps its exact pending snapshot until explicit replay succeeds',async t=>{
+ let failed=true;
+ const view=harness({historyFetch:cloudHistory,historySave:(id,body)=>failed?new Response('',{status:503}):strictPluginHistory(id,body)});t.after(view.close);await view.flush();view.grantConsent();
+ view.current.selectPlugin(bankConnection);await view.flush();view.current.send('我卡里有多少钱');await view.flush();
+ const original=structuredClone(view.historyPosts[0]);
+ assert.equal(view.streams.length,0);assert.equal(view.current.send('我卡里有多少钱'),false);
+ failed=false;await view.current.retryHistory();await view.flush();
+ assert.deepEqual(view.historyPosts[1],original);assert.equal(view.streams.length,0);
+ view.current.retry();await view.flush();assert.equal(view.streams.length,1);
+ assert.equal(view.current.conversation.messages.filter(message=>message.role==='user').length,1);
+ assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
 });

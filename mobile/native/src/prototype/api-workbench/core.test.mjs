@@ -144,3 +144,91 @@ test("remote HTTP and cancellation fail before any credential-bearing request", 
   await assert.rejects(workbenchRequest({ ...options, baseUrl: "https://q.example", signal: controller.signal }), { code: "CANCELLED" });
   assert.equal(calls, 0);
 });
+
+test("non-JSON HTTP failures retain their status and never run the success decoder", async () => {
+  for (const [status, code] of [[401, "UNAUTHORIZED"], [429, "RATE_LIMITED"], [404, "REQUEST_FAILED"], [501, "REQUEST_FAILED"], [503, "REQUEST_FAILED"]]) {
+    let decodes = 0;
+    await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/banking/wallet", decode: () => { decodes++; },
+      transport: async () => new Response("<html>PRIVATE_GATEWAY_DETAIL</html>", { status }),
+    }), error => error instanceof WorkbenchError && error.status === status && error.code === code && !error.message.includes("PRIVATE_GATEWAY_DETAIL"));
+    assert.equal(decodes, 0);
+  }
+  await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/video/jobs", decode: decodeJob,
+    transport: async () => Response.json({ error: { code: "VIDEO_CONNECTION_NOT_FOUND" } }, { status: 404 }),
+  }), error => error.status === 404 && error.code === "VIDEO_CONNECTION_NOT_FOUND" && isSafeSubmissionRejection(error));
+  await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/banking/wallet", decode: value => value,
+    transport: async () => new Response("not JSON", { status: 200 }),
+  }), { code: "INVALID_RESPONSE", status: 0 });
+});
+
+test("structured authentication and rate-limit codes take precedence over generic HTTP fallbacks", async () => {
+  for (const [status, code] of [[401, "INVALID_CREDENTIALS"], [401, "UNAUTHORIZED"], [429, "AI_BUSY"], [429, "AI_RATE_LIMITED"]]) {
+    await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/auth/login", method: "POST",
+      body: { handle: "synthetic", password: "test-only" }, decode: () => assert.fail("HTTP error reached decoder"),
+      transport: async () => Response.json({ error: { code, message: "PRIVATE_ERROR_DETAIL" } }, { status }),
+    }), error => error instanceof WorkbenchError && error.status === status && error.code === code && error.message === code);
+  }
+  for (const [status, code] of [[401, "UNAUTHORIZED"], [429, "RATE_LIMITED"]]) {
+    for (const payload of [{}, { error: { code: "invalid code" } }, { error: { code: 123 } }]) {
+      await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/auth/login", decode: value => value,
+        transport: async () => Response.json(payload, { status }),
+      }), { status, code });
+    }
+  }
+});
+
+test("successful response-body deadlines and caller cancellation keep their distinct outcomes", async () => {
+  for (const cancellation of [false, true]) {
+    const caller = new AbortController();
+    let calls = 0, decodes = 0;
+    await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/banking/wallet", signal: caller.signal,
+      timeoutMs: cancellation ? 1000 : 5, decode: () => { decodes++; },
+      transport: async () => {
+        calls++;
+        return { status: 200, ok: true, json: () => {
+          if (cancellation) caller.abort();
+          return new Promise(() => {}); // Deliberately ignores the request signal.
+        } };
+      },
+    }), { code: cancellation ? "CANCELLED" : "REQUEST_TIMEOUT", status: 0 });
+    assert.equal(calls, 1);
+    assert.equal(decodes, 0);
+  }
+});
+
+test("known HTTP failures survive error-body deadlines, cancellation, and broken streams", async () => {
+  for (const [status, code] of [[401, "UNAUTHORIZED"], [429, "RATE_LIMITED"], [404, "REQUEST_FAILED"], [503, "REQUEST_FAILED"]]) {
+    for (const bodyFailure of ["timeout", "cancel", "network"]) {
+      const caller = new AbortController();
+      await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/banking/wallet", signal: caller.signal,
+        timeoutMs: bodyFailure === "timeout" ? 5 : 1000, decode: () => assert.fail("HTTP error reached decoder"),
+        transport: async () => ({ status, ok: false, json: () => {
+          if (bodyFailure === "cancel") caller.abort();
+          if (bodyFailure === "network") return Promise.reject(new TypeError("PRIVATE_STREAM_DETAIL"));
+          return new Promise(() => {});
+        } }),
+      }), error => error instanceof WorkbenchError && error.code === code && error.status === status && !error.message.includes("PRIVATE_STREAM_DETAIL"));
+    }
+  }
+});
+
+test("body interruption after a submitted POST preserves the original recovery key without retry", async () => {
+  for (const cancellation of [false, true]) {
+    const memory = storage(), store = createPendingStore(memory.adapter), caller = new AbortController();
+    await store.save(intent);
+    let calls = 0, submitted;
+    await assert.rejects(workbenchRequest({ baseUrl: "https://q.example", path: "/v1/video/jobs", method: "POST", body: intent.request,
+      signal: caller.signal, timeoutMs: cancellation ? 1000 : 5, decode: decodeJob,
+      transport: async (_url, request) => {
+        calls++; submitted = JSON.parse(request.body);
+        return { status: 200, ok: true, json: () => {
+          if (cancellation) caller.abort();
+          return new Promise(() => {});
+        } };
+      },
+    }), error => error.code === (cancellation ? "CANCELLED" : "REQUEST_TIMEOUT") && !isSafeSubmissionRejection(error));
+    assert.equal(calls, 1);
+    assert.deepEqual(submitted, intent.request);
+    assert.deepEqual(await createPendingStore(memory.adapter).read(owner), intent);
+  }
+});

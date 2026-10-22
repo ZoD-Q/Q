@@ -94,6 +94,20 @@ impl Harness {
             .unwrap()
             .to_owned()
     }
+    async fn json(
+        &self,
+        method: &str,
+        path: &str,
+        token: &str,
+        body: Option<Value>,
+        expected: StatusCode,
+    ) -> Value {
+        let response = self.request(method, path, Some(token), body).await;
+        let status = response.status();
+        let value = read_json(response).await;
+        assert_eq!(status, expected, "{value}");
+        value
+    }
     async fn finish(self) {
         self.state.pool.close().await;
         sqlx::query(&format!("DROP SCHEMA {} CASCADE", self.schema))
@@ -110,6 +124,137 @@ async fn read_json(response: Response) -> Value {
 fn snapshot(revision: i64) -> Value {
     json!({"request_id":Uuid::new_v4(),"expected_revision":revision,"title":"Saved","messages":[{"id":"message-1","role":"user","content":"persistent text","status":"complete"},{"id":"message-2","role":"assistant","content":"","status":"pending"}]})
 }
+
+#[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; no external bank or model requests"]
+async fn bank_connection_display_projection_saves_before_balance_proposal_and_confirmation() {
+    let h = Harness::new().await;
+    let token = h.register("history_bank").await;
+    assert!(h.state.ai.is_none());
+    assert!(h.state.plugins.is_none());
+    let wallet = h
+        .json(
+            "POST",
+            "/v1/banking/connect",
+            &token,
+            Some(json!({"bank_ids":["hsbc"]})),
+            StatusCode::OK,
+        )
+        .await;
+    let account = &wallet["accounts"][0];
+    let connection_id = account["connection_id"].as_str().unwrap();
+    let connection = h
+        .json(
+            "GET",
+            &format!("/v1/plugins/connections/{connection_id}"),
+            &token,
+            None,
+            StatusCode::OK,
+        )
+        .await;
+    // The catalog returns the full connection DTO, not the history display type.
+    for field in ["card_url", "status", "auth_status"] {
+        assert!(connection.get(field).is_some());
+    }
+    let conversation_id = Uuid::new_v4();
+    let assistant_id = Uuid::new_v4();
+    let path = format!("/v1/ai/conversations/{conversation_id}");
+    let mut body = json!({
+        "request_id":Uuid::new_v4(),"expected_revision":0,"title":"查询汇丰余额",
+        "messages":[
+            {"id":Uuid::new_v4(),"role":"user","content":"查询余额","status":"complete"},
+            {"id":assistant_id,"role":"assistant","content":"","status":"pending","bankCommand":true}
+        ],
+        "plugin":connection,
+    });
+    let rejected = h
+        .json(
+            "POST",
+            &path,
+            &token,
+            Some(body.clone()),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    assert_eq!(rejected["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        rejected["error"]["message"],
+        "Invalid history plugin display metadata."
+    );
+    h.json("GET", &path, &token, None, StatusCode::NOT_FOUND)
+        .await;
+
+    let display = json!({
+        "id":connection["id"],"title":connection["title"],
+        "endpoint_url":connection["endpoint_url"],
+        "connection_kind":connection["connection_kind"],
+        "builtin_service_id":connection["builtin_service_id"],
+    });
+    assert_eq!(display.as_object().unwrap().len(), 5);
+    body["plugin"] = display.clone();
+    body["request_id"] = json!(Uuid::new_v4());
+    let saved = h
+        .json("POST", &path, &token, Some(body.clone()), StatusCode::OK)
+        .await;
+    assert_eq!(saved["revision"], 1);
+    assert_eq!(saved["plugin"], display);
+    assert_eq!(saved["messages"][1]["id"], json!(assistant_id));
+    assert_eq!(saved["messages"][1]["bankCommand"], true);
+    assert_eq!(
+        h.json("POST", &path, &token, Some(body), StatusCode::OK)
+            .await,
+        saved
+    );
+    let proposal = h
+        .json(
+            "POST",
+            "/v1/plugins/invocations",
+            &token,
+            Some(json!({
+                "connection_id":connection_id,"tool_name":"bank_balance",
+                "arguments":{},"idempotency_key":assistant_id,
+            })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(proposal["status"], "awaiting_confirmation");
+    assert_eq!(proposal["connection_id"], connection["id"]);
+    assert!(proposal["result"].is_null());
+    let result = h
+        .json(
+            "POST",
+            &format!(
+                "/v1/plugins/invocations/{}/confirm",
+                proposal["id"].as_str().unwrap()
+            ),
+            &token,
+            Some(json!({"confirmed":true})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(result["status"], "succeeded");
+    assert_eq!(
+        result["result"]["structuredContent"]["kind"],
+        "bank_balance"
+    );
+    assert_eq!(
+        result["result"]["structuredContent"]["balance_minor"],
+        account["balance_minor"]
+    );
+    assert_eq!(
+        h.json("GET", "/v1/banking/wallet", &token, None, StatusCode::OK)
+            .await,
+        wallet
+    );
+    let transfer_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM bank_demo_transactions WHERE kind='transfer'")
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(transfer_count, 0);
+    h.finish().await;
+}
+
 #[tokio::test]
 #[ignore = "requires dedicated TEST_DATABASE_URL"]
 async fn durable_history_is_owner_scoped_versioned_bounded_and_erased() {

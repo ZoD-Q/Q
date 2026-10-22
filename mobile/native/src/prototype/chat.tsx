@@ -100,7 +100,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
       style={{ width: "100%", maxWidth: 690, alignSelf: "center", gap: 10 }}
     >
       {bankPlugin ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}><Action kind="ghost" label={text("填写转账", "Fill transfer")} disabled={controller.busy} onPress={() => setBankForm(true)} /><Action kind="ghost" label={text("查询余额", "Check balance")} disabled={controller.busy} onPress={() => suggestion(text("查询余额", "Show balance"))} /></View> : null}
-      {controller.plugin && <View style={{ gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><Action kind="ghost" label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View><Type size={11} muted>{bankPlugin ? text('银行插件 · 模拟港币。明确的转账指令直接准备工具提案，确认后才记账。', 'Bank plugin · Simulated HKD. Transfer commands prepare a tool proposal; only confirmation posts it.') : text('插件对话关闭深度思考；执行工具前会请你确认。', 'Plugin chat uses standard mode and asks before executing tools.')}</Type></View>}
+      {controller.plugin && <View style={{ gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><Action kind="ghost" label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View><Type size={11} muted>{bankPlugin ? text('DeepSeek 理解你的请求并选择银行工具，确认后执行。当前使用模拟港币。', 'DeepSeek understands your request and selects bank tools, which run after confirmation. Funds are simulated HKD.') : text('插件对话关闭深度思考；执行工具前会请你确认。', 'Plugin chat uses standard mode and asks before executing tools.')}</Type></View>}
       <View
         style={{
           backgroundColor: colors.bg,
@@ -227,7 +227,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
       {controller.historyError ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}><Type size={13} color={colors.danger}>{text("聊天记录尚未同步，请重试；版本冲突时请重新登录加载服务器记录。", "History is not synced. Retry; for a version conflict, sign in again to load server history.")} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /><Action kind="ghost" label={text("重载云端版本（替换本机未保存内容）", "Reload cloud version (replace unsaved changes)")} disabled={controller.busy || controller.historyBusy} onPress={controller.reloadCloud} /></View> : null}
       {controller.messageError ? <View accessibilityLiveRegion="polite"><Type size={13} color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type></View> : null}
       {controller.authBusy ? <Type size={11} muted style={{ textAlign: "center" }}>{text("正在恢复登录…", "Restoring session…")}</Type> : null}
-      {!bankPlugin && controller.statusPhase !== "ready" ? (
+      {controller.statusPhase !== "ready" ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
           <Type size={11} muted>{controller.statusBusy
             ? text("正在检查 Q 对话配置…", "Checking Q chat configuration…")
