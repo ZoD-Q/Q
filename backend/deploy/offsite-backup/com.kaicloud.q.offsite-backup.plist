@@ -3,11 +3,7 @@
 <plist version="1.0"><dict>
 <key>Label</key><string>com.kaicloud.q.offsite-backup</string>
 <key>ProgramArguments</key><array>
-<string>PYTHON_ABSOLUTE_PATH</string><string>/Users/kai/Library/Application Support/Q/offsite-backup/pull.py</string>
-<string>--destination</string><string>/Users/kai/Desktop/异地备份</string>
-<string>--identity</string><string>/Users/kai/.ssh/id_ed25519_gitlab_kai</string>
-<string>--recipient</string><string>/Users/kai/.ssh/id_ed25519_gitlab_kai.pub</string>
-<string>--age</string><string>AGE_ABSOLUTE_PATH</string>
+<string>/Users/kai/Library/Application Support/Q/offsite-backup/Q Offsite Backup.app/Contents/MacOS/QBackupLauncher</string>
 </array>
 <key>RunAtLoad</key><true/><key>StartInterval</key><integer>3600</integer>
 <key>ProcessType</key><string>Background</string><key>Umask</key><integer>63</integer>
