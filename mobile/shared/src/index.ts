@@ -1,5 +1,8 @@
 /** Public aliases generated from contracts/openapi.json; run npm run api:generate after changing it. */
 import type { components } from './generated';
+export type InsuranceStatus = components['schemas']['InsuranceStatus'];
+export type InsuranceInquiryRequest = components['schemas']['InsuranceInquiryRequest'];
+export type InsuranceConversationRequest = components['schemas']['InsuranceConversationRequest'];
 export type { paths, operations } from './generated';
 export type ThemeName = components['schemas']['ThemeName'];
 export type Locale = components['schemas']['Locale'];

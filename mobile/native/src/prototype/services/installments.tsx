@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useFinancialPreview } from './preview-state';
+import { splitPayments } from './preview-math';
 import { Pressable, View } from "react-native";
 import {
   ArrowRight,
@@ -72,12 +74,14 @@ function money(value: number) {
 }
 export function InstallmentsPage() {
   const { colors, phone, text, notify } = useDesign();
-  const [selectedId, setSelectedId] = useState("course");
-  const [periods, setPeriods] = useState(3);
+  const { installment, setInstallment } = useFinancialPreview();
+  const [selectedId, setSelectedId] = useState(installment?.serviceId ?? "course");
+  const [periods, setPeriods] = useState(installment?.periods ?? 3);
   const [detail, setDetail] = useState<Service | null>(null);
   const [confirm, setConfirm] = useState(false);
   const selected = services.find((item) => item.id === selectedId)!;
-  const each = selected.price / periods;
+  const payments = splitPayments(selected.price * 100, periods);
+  const each = payments[0] / 100;
   return (
     <Page
       title={text("分期", "Installments")}
@@ -86,6 +90,11 @@ export function InstallmentsPage() {
         "Sample services and amounts. Preview a payment plan.",
       )}
     >
+      {installment ? <View style={{ gap: 12 }}>
+        <Type weight="500">{text('已保存的分期预览', 'Saved payment preview')}</Type>
+        <Row title={text(...services.find(item => item.id === installment.serviceId)!.name)} subtitle={text(`${installment.periods} 期 · 本次会话有效`, `${installment.periods} payments · this session only`)} onPress={() => { setSelectedId(installment.serviceId); setPeriods(installment.periods); setConfirm(true); }} />
+        <Action kind="ghost" label={text('移除预览', 'Remove preview')} onPress={() => setInstallment(null)} />
+      </View> : null}
       <View>
         {services.map((item) => {
           const active = item.id === selectedId;
@@ -248,7 +257,7 @@ export function InstallmentsPage() {
         </View>
         <Divider />
         <View>
-          {Array.from({ length: periods }, (_, i) => (
+          {payments.map((amount, i) => (
             <View
               key={i}
               style={{
@@ -270,7 +279,7 @@ export function InstallmentsPage() {
                     )}
               </Type>
               <Type mono size={14}>
-                {money(each)} Q
+                {money(amount / 100)} Q
               </Type>
             </View>
           ))}
@@ -285,6 +294,7 @@ export function InstallmentsPage() {
           icon={Check}
           label={text("保存预览", "Save preview")}
           onPress={() => {
+            setInstallment({ serviceId: selectedId, periods });
             setConfirm(false);
             notify(
               text(

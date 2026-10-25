@@ -8,6 +8,10 @@ export default function Index() {
     view === "creators" ? "creators" :
     view === "keys" ? "keys" :
     view === "plugins" ? "plugins" :
-    view === "plugin-workbench" ? "plugin-workbench" : "chat";
+    view === "plugin-workbench" ? "plugin-workbench" :
+    view === "installments" ? "installments" :
+    view === "insurance" ? "insurance" :
+    view === "finance" ? "finance" :
+    view === "profile" ? "profile" : "chat";
   return <PrototypeApp key={page} initialPage={page} />;
 }

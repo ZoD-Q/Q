@@ -79,6 +79,7 @@ export function createAccountController(deps: Dependencies) {
       emit({ error: failure(error) });
       if (unauthorized(error) && token) {
         emit({ session: null });
+        deps.store.invalidateToken(token);
         try { await deps.store.removeToken(token); }
         catch { if (current(version)) emit({ error: 'STORAGE_ERROR' }); }
       }
@@ -163,6 +164,7 @@ export function createAccountController(deps: Dependencies) {
       emit({ error: failure(error) });
       if (unauthorized(error)) {
         emit({ session: null });
+        deps.store.invalidateToken(session.token);
         await deps.store.removeToken(session.token).catch(() => { if (current(version)) emit({ error: 'STORAGE_ERROR' }); });
       }
       return false;

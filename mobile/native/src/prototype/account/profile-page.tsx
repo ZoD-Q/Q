@@ -4,9 +4,9 @@ import { router } from 'expo-router';
 import { Check, ChevronRight, Leaf, Orbit, Sparkles, Waves } from 'lucide-react-native';
 import type { AvatarName, ThemeName } from '@xiaoq/shared';
 import { Action, Divider, Input, Page, Row, Sheet, Type, useDesign } from '../design';
-import { chatErrorMessage } from '../ai-chat/messages';
 import { revokeAiConsent } from '../ai-chat/consent';
 import { openPrivacyPolicy, openSupportEmail, SUPPORT_EMAIL } from '../privacy';
+import { accountErrorMessage } from './messages';
 import { useQAccount } from './account-state';
 import { DeletionSettings } from './deletion-settings';
 
@@ -73,7 +73,7 @@ function ProfileEditor() {
           <Action kind="ghost" label={user ? text('编辑', 'Edit') : text('登录', 'Sign in')} onPress={edit} disabled={account.loading} />
         </View>
         {account.loading ? <Type muted>{text('正在读取账号…', 'Loading account…')}</Type> : null}
-        {account.error ? <View accessibilityLiveRegion="polite"><Type color={colors.danger} selectable>{chatErrorMessage(account.error, text)}</Type>
+        {account.error ? <View accessibilityLiveRegion="polite"><Type color={colors.danger} selectable>{accountErrorMessage(account.error, text)}</Type>
           <Action kind="ghost" label={text('重试', 'Retry')} onPress={() => void account.refresh()} />
         </View> : null}
         {account.logoutPending ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}>
@@ -109,18 +109,18 @@ function ProfileEditor() {
       </View>
       <Input label={text('昵称', 'Name')} value={name} onChangeText={setName} maxLength={40} editable={!account.profileBusy} />
       <Input label={text('简介', 'Bio')} value={bio} onChangeText={setBio} maxLength={160} multiline editable={!account.profileBusy} />
-      {account.error ? <Type color={colors.danger} selectable>{chatErrorMessage(account.error, text)}</Type> : null}
+      {account.error ? <Type color={colors.danger} selectable>{accountErrorMessage(account.error, text)}</Type> : null}
       <Action label={account.profileBusy ? text('正在保存…', 'Saving…') : text('保存', 'Save')} disabled={!name.trim() || account.profileBusy} onPress={() => void save()} />
     </Sheet>
     <Sheet visible={sheet === 'theme'} title={text('外观', 'Appearance')} onClose={close}>
       {themes.map(([id, zh, en], index) => <Row key={id} title={text(zh, en)} last={index === themes.length - 1}
         right={theme === id ? <Check size={18} color={colors.accent} /> : undefined} onPress={() => void changeTheme(id)} />)}
-      {account.error ? <Type color={colors.danger}>{chatErrorMessage(account.error, text)}</Type> : null}
+      {account.error ? <Type color={colors.danger}>{accountErrorMessage(account.error, text)}</Type> : null}
     </Sheet>
     <Sheet visible={sheet === 'language'} title={text('语言', 'Language')} onClose={close}>
       {([['zh', '中文'], ['en', 'English']] as const).map(([id, label], index) => <Row key={id} title={label} last={index === 1}
         right={locale === id ? <Check size={18} color={colors.accent} /> : undefined} onPress={() => void changeLocale(id)} />)}
-      {account.error ? <Type color={colors.danger}>{chatErrorMessage(account.error, text)}</Type> : null}
+      {account.error ? <Type color={colors.danger}>{accountErrorMessage(account.error, text)}</Type> : null}
     </Sheet>
   </>;
 }

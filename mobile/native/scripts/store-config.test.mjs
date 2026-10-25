@@ -201,11 +201,14 @@ test('native guard is idempotent, first, and always runs independently of bundli
 test('actual native validation phase rejects stale Debug fixture identity even when bundling is skipped', () => {
   const envDirectory = mkdtempSync(join(tmpdir(), 'q-native-api-guard-'));
   const nativeRoot = fileURLToPath(new URL('../', import.meta.url));
-  const base = { ...process.env, ...iosApplication, SRCROOT: envDirectory, PROJECT_DIR: join(nativeRoot, 'ios'),
-    NODE_BINARY: process.execPath, EXPO_NO_DOTENV: '1', Q_STORE_BUILD: '0', EAS_BUILD_PROFILE: 'development',
+  // Git Bash accepts forward-slash Windows paths; keep the actual native guard under test.
+  const shellPath = value => value.replaceAll('\\', '/');
+  const base = { ...process.env, ...iosApplication, SRCROOT: shellPath(envDirectory), PROJECT_DIR: shellPath(join(nativeRoot, 'ios')),
+    NODE_BINARY: shellPath(process.execPath), EXPO_NO_DOTENV: '1', Q_STORE_BUILD: '0', EAS_BUILD_PROFILE: 'development',
     CONFIGURATION: 'Debug', PLATFORM_NAME: 'iphonesimulator', WRAPPER_EXTENSION: 'app', SKIP_BUNDLING: '1',
     Q_LOCAL_API_TEST: '0', EXPO_PUBLIC_API_URL: '', PRODUCT_BUNDLE_IDENTIFIER: identity.iosBundleIdentifier };
-  const run = (overrides = {}) => spawnSync('/bin/bash', ['-c', SHELL_SCRIPT], { env: { ...base, ...overrides }, encoding: 'utf8' });
+  const bash = process.env.Q_TEST_BASH || (process.platform === 'win32' ? 'bash' : '/bin/bash');
+  const run = (overrides = {}) => spawnSync(bash, ['-c', SHELL_SCRIPT], { env: { ...base, ...overrides }, encoding: 'utf8' });
   try {
     assert.equal(run().status, 0);
     writeFileSync(join(envDirectory, '.xcode.env.local'), 'export EXPO_PUBLIC_API_URL=http://127.0.0.1:57637\n');

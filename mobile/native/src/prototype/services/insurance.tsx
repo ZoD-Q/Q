@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFinancialPreview } from './preview-state';
 import { Pressable, View } from "react-native";
 import {
   ArrowRight,
@@ -59,8 +60,9 @@ const plans = [
 ];
 export function InsurancePage() {
   const { colors, text, phone, notify } = useDesign();
-  const [scene, setScene] = useState<Scene>("everyday");
-  const [selected, setSelected] = useState("simple");
+  const { insurance, setInsurance } = useFinancialPreview();
+  const [scene, setScene] = useState<Scene>(insurance?.scene ?? "everyday");
+  const [selected, setSelected] = useState(insurance?.planId ?? "simple");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
   const [review, setReview] = useState(false);
@@ -68,7 +70,7 @@ export function InsurancePage() {
   const plan = plans.find((item) => item.id === selected)!;
   const unit = (value: string, index: number) =>
     index === 2
-      ? text(`${value} Q / 天`, `${value} Q / day`)
+      ? scene === 'home' ? text(`${value} Q / 次`, `${value} Q / incident`) : scene === 'travel' ? text(`${value} Q / 次延误`, `${value} Q / delay`) : text(`${value} Q / 天`, `${value} Q / day`)
       : text(`${value} 万 Q`, `${Number(value) * 10000} Q`);
   return (
     <Page
@@ -78,6 +80,11 @@ export function InsurancePage() {
         "Coverage and premiums are fictional examples, unavailable for purchase.",
       )}
     >
+      {insurance ? <View style={{ gap: 12 }}>
+        <Type weight="500">{text('已保存的保障预览', 'Saved coverage preview')}</Type>
+        <Row title={text(...scenes.find(item => item.id === insurance.scene)!.label)} subtitle={text('仅为方案收藏，不是保单 · 本次会话有效', 'Saved example, not a policy · this session only')} onPress={() => { setScene(insurance.scene); setSelected(insurance.planId); setReview(false); setAcknowledged(false); setDetails(true); }} />
+        <Action kind="ghost" label={text('移除预览', 'Remove preview')} onPress={() => setInsurance(null)} />
+      </View> : null}
       <Tabs
         items={scenes.map((item) => ({
           id: item.id,
@@ -191,10 +198,11 @@ export function InsurancePage() {
               onPress={() => setAcknowledged((value) => !value)}
             />
             <Action
-              label={text("完成预览", "Finish preview")}
+              label={text("保存保障预览", "Save coverage preview")}
               disabled={!acknowledged}
               icon={Check}
               onPress={() => {
+                setInsurance({ scene, planId: selected });
                 setDetails(false);
                 notify(
                   text(

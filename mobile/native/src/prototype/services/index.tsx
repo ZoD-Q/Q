@@ -1,10 +1,10 @@
 import type { BankAccount } from "../banking/client";
+import { FinancePage } from "./finance";
 import { PluginsPage } from "./plugins";
 import { WalletPage } from "./wallet";
 import { KeysPage } from "./keys";
-import { FinancePage } from "./finance";
-import { InstallmentsPage } from "./installments";
-import { InsurancePage } from "./insurance";
+import { FinancialCatalogPage } from "../financial-catalog/page";
+import { InsuranceDashboard } from "../insurance/page";
 export function ServicePage({
   page,
   onOpenWorkbench,
@@ -30,8 +30,8 @@ export function ServicePage({
     case "finance":
       return <FinancePage />;
     case "installments":
-      return <InstallmentsPage />;
+      return <FinancialCatalogPage key={page} category={page} />;
     case "insurance":
-      return <InsurancePage />;
+      return <InsuranceDashboard />;
   }
 }
