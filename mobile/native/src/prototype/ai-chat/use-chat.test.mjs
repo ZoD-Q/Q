@@ -10,6 +10,7 @@ import { registerHooks } from 'node:module';
 import { createAiStatusMonitor } from './status-monitor.ts';
 import { createAiConsentGate, createAiPermission } from './consent.ts';
 import { createSessionStore } from '../../services/session-core.ts';
+import { getMascotPresentation } from './mascot-state.ts';
 const resolver = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
   return next(specifier, context);
@@ -187,6 +188,45 @@ test('rechecking public status does not cancel an answer or invalidate the sessi
   assert.equal(view.current.busy, true);
   assert.equal(view.streams[0].signal.aborted, false);
   assert.equal(view.calls.filter(call => call.path === '/v1/me').length, 1);
+});
+
+test('mascot follows actual stream events and late events cannot revive a stopped answer', async t => {
+  const view = harness(); t.after(view.close); await view.flush(); view.grantConsent();
+  const presentation = () => getMascotPresentation({
+    phase: view.current.phase,
+    message: view.current.conversation?.messages.at(-1),
+    statusPhase: view.current.statusPhase,
+  });
+  assert.equal(view.current.send('state fixture'), true); await view.flush();
+  assert.equal(presentation().title.zh, '正在准备回答');
+  const active = view.streams[0];
+  active.onEvent({ type: 'status', phase: 'thinking' }); await view.flush();
+  assert.equal(presentation().title.zh, '思考中');
+  active.onEvent({ type: 'delta', text: 'preserved partial' }); await view.flush();
+  assert.equal(presentation().state, 'streaming');
+  view.current.stop(); await view.flush();
+  assert.equal(active.signal.aborted, true);
+  assert.equal(presentation().state, 'paused');
+  active.onEvent({ type: 'delta', text: 'late text' });
+  active.onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'stop' });
+  await view.flush();
+  assert.equal(presentation().state, 'paused');
+  assert.equal(view.current.conversation.messages.at(-1).content, 'preserved partial');
+  view.current.newConversation(); await view.flush();
+  active.onEvent({ type: 'status', phase: 'thinking' }); await view.flush();
+  assert.equal(view.current.conversation, null);
+  assert.equal(presentation().state, 'ready');
+});
+
+test('mascot completion follows successful done and is cleared on a new conversation', async t => {
+  const view = harness(); t.after(view.close); await view.flush(); view.grantConsent();
+  assert.equal(view.current.send('completion fixture'), true); await view.flush();
+  view.finishStream(); await view.flush();
+  const completed = getMascotPresentation({ phase: view.current.phase, message: view.current.conversation.messages.at(-1) });
+  assert.equal(completed.state, 'complete');
+  assert.equal(completed.busy, false);
+  view.current.newConversation(); await view.flush();
+  assert.equal(getMascotPresentation({ phase: view.current.phase, message: view.current.conversation?.messages.at(-1) }).state, 'ready');
 });
 
 test('temporary session restore failure preserves the existing identity and last known service config', async t => {
