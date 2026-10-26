@@ -21,6 +21,7 @@ import tarfile
 import tempfile
 import time
 import types
+import urllib.error
 import urllib.request
 
 BASE = "https://q.kaicloudpay.com/plugins/beauty/"
@@ -306,11 +307,11 @@ def api_health():
         require(response.status == 200, "Existing Q API is not healthy")
 
 
-def route_health(commit):
+def route_health(commit, *, timeout=5):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     url = "http://127.0.0.1/plugins/beauty/health"
     request = urllib.request.Request(url, headers={"Host": "q.kaicloudpay.com"})
-    with opener.open(request, timeout=5) as response:
+    with opener.open(request, timeout=timeout) as response:
         require(response.status == 200 and response.geturl() == url,
                 "Gallery Nginx route is not healthy")
         body = response.read(4097)
@@ -318,6 +319,26 @@ def route_health(commit):
         "status": "ok", "service": "beauty-mcp", "source_commit": commit,
         "photo_count": 300, "public_base": BASE,
     }, "Gallery Nginx route serves the wrong release")
+
+
+def wait_for_route(commit, *, timeout=20):
+    # Nginx reload returns before every old worker has stopped accepting requests.
+    # Retry only transient read failures, never deployment actions or bad identity.
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, "Gallery Nginx route did not become ready before the deadline")
+        try:
+            route_health(commit, timeout=min(5, remaining))
+            return
+        except urllib.error.HTTPError as error:
+            if error.code not in (404, 502, 503, 504):
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            pass
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, "Gallery Nginx route did not become ready before the deadline")
+        time.sleep(min(0.25, remaining))
 
 
 def expected_health(files, commit):
@@ -455,14 +476,7 @@ def restore(destination, state, internal=False):
     command("systemctl", "reload", "nginx")
     if state["previous_target"] is not None and state["services"]["q-beauty.service"]["active"]:
         previous_commit = Path(state["previous_target"]).name
-        for attempt in range(10):
-            try:
-                route_health(previous_commit)
-                break
-            except Exception:
-                if attempt == 9:
-                    raise
-                time.sleep(1)
+        wait_for_route(previous_commit)
     api_health()
     print(f"Rollback restored configuration and service state from {destination}")
 
@@ -566,7 +580,7 @@ def install(files, commit):
         )
         command("nginx", "-t")
         command("systemctl", "reload", "nginx")
-        route_health(commit)
+        wait_for_route(commit)
         api_health()
         require(API_CURRENT.resolve(strict=True) == api_target, "Q API release changed")
         command("systemctl", "start", "q-beauty-health.timer")

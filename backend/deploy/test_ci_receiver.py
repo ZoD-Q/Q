@@ -3,14 +3,16 @@
 import hashlib
 import io
 import json
+import os
 import tarfile
 import unittest
 import tempfile
 from pathlib import Path
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 import stat
 import sys
+import urllib.error
 from unittest.mock import patch
 import ci_receiver as receiver
 from test_package_release import elf_fixture
@@ -84,6 +86,10 @@ class RequestTests(unittest.TestCase):
                 with self.assertRaises(receiver.Refused): receiver.validate_request(r)
         r = request(); r['path'] = '/etc/shadow'
         with self.assertRaises(receiver.Refused): receiver.validate_request(r)
+        for field in ('branch_token', 'private_token', 'credential_path', 'branches_url'):
+            r = request(); r[field] = 'caller-must-not-control-server-credentials'
+            with self.subTest(field=field), self.assertRaises(receiver.Refused):
+                receiver.validate_request(r)
 
     def test_duplicate_json_keys(self):
         with self.assertRaises(receiver.Refused): receiver.json_load('{"version":1,"version":1}')
@@ -96,6 +102,13 @@ class RequestTests(unittest.TestCase):
 
 
 class AuthTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        token_path = patch.object(receiver, 'BRANCH_READ_TOKEN', Path(temporary.name) / 'absent.token')
+        token_path.start()
+        self.addCleanup(token_path.stop)
+
     def authorize(self, j, branch=None):
         branch = branch or dict(name='main', protected=True, commit=dict(id=SHA))
         responses = iter([j, [branch]])
@@ -120,6 +133,203 @@ class AuthTests(unittest.TestCase):
     def test_redirect_rejected(self):
         with self.assertRaises(receiver.Refused):
             receiver.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://other.invalid')
+
+    def test_absent_server_token_preserves_the_job_token_transport(self):
+        branch = dict(name='main', protected=True, commit=dict(id=SHA))
+        with patch.object(receiver, 'fetch_json', side_effect=[job(), [branch]]) as fetch:
+            receiver.authorize(request(), fetch)
+        self.assertEqual([call.args for call in fetch.call_args_list], [
+            (receiver.JOB_URL, request()['job_token']),
+            (receiver.BRANCHES_URL, request()['job_token']),
+        ])
+        self.assertTrue(all(not call.kwargs for call in fetch.call_args_list))
+
+    def test_live_job_validation_precedes_private_credential_access(self):
+        for changes in ({'status': 'success'}, {'id': 999}, {'tag': True},
+                        {'pipeline': {'id': 12, 'project_id': 198, 'ref': 'main', 'sha': SHA}}):
+            with self.subTest(changes=changes), \
+                    patch.object(receiver, 'branch_read_token') as secret, \
+                    patch.object(receiver, 'fetch_json', return_value={**job(), **changes}) as fetch:
+                with self.assertRaises(receiver.Refused):
+                    receiver.authorize(request(), fetch)
+                self.assertEqual(fetch.call_count, 1)
+                secret.assert_not_called()
+
+    def test_server_token_is_sent_only_as_private_header_to_fixed_branches_get(self):
+        observed = []
+        values = iter([job(), [dict(name='main', protected=True, commit=dict(id=SHA))]])
+        class Response(io.BytesIO):
+            status = 200
+        def open_request(request, timeout):
+            observed.append((request.full_url, request.get_method(),
+                             {key.lower(): value for key, value in request.header_items()}))
+            self.assertEqual(timeout, 15)
+            return Response(json.dumps(next(values)).encode())
+        with patch.object(receiver, 'branch_read_token', return_value='synthetic-private-token'), \
+                patch.object(receiver.urllib.request, 'build_opener',
+                             return_value=SimpleNamespace(open=open_request)):
+            receiver.authorize(request())
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(observed[0][:2], (receiver.JOB_URL, 'GET'))
+        self.assertEqual(observed[0][2]['job-token'], 'synthetic-job-token')
+        self.assertNotIn('private-token', observed[0][2])
+        self.assertEqual(observed[1][:2], (receiver.BRANCHES_URL, 'GET'))
+        self.assertEqual(observed[1][2]['private-token'], 'synthetic-private-token')
+        self.assertNotIn('job-token', observed[1][2])
+        with patch.object(receiver.urllib.request, 'build_opener') as network:
+            for url in (receiver.JOB_URL, receiver.BRANCHES_URL.replace('/197/', '/198/'),
+                        'https://elsewhere.invalid/branches', 'http://127.0.0.1:18787/health'):
+                with self.subTest(url=url), self.assertRaisesRegex(receiver.Refused, 'credential_target_refused'):
+                    receiver.fetch_json(url, 'synthetic-private-token', private_token=True)
+            network.assert_not_called()
+
+    def test_private_read_does_not_bypass_current_or_protected_branch_checks(self):
+        for branch in (dict(name='main', protected=False, commit=dict(id=SHA)),
+                       dict(name='main', protected=True, commit=dict(id='b' * 40)),
+                       dict(name='other', protected=True, commit=dict(id=SHA))):
+            with self.subTest(branch=branch), \
+                    patch.object(receiver, 'branch_read_token', return_value='synthetic-private-token'), \
+                    patch.object(receiver, 'fetch_json', side_effect=[job(), [branch]]) as fetch:
+                with self.assertRaisesRegex(receiver.Refused, 'main_advanced_or_unprotected'):
+                    receiver.authorize(request(), fetch)
+
+    def test_expired_private_token_fails_without_falling_back_or_retrying(self):
+        error = urllib.error.HTTPError(receiver.BRANCHES_URL, 401, 'secret response',
+                                       {'X-Secret': 'never-log'}, io.BytesIO(b'never-log-body'))
+        with patch.object(receiver, 'branch_read_token', return_value='synthetic-private-token'), \
+                patch.object(receiver, 'fetch_json', side_effect=[job(), error]) as fetch:
+            with self.assertRaisesRegex(receiver.Refused, '^gitlab_branches_http_401$'):
+                receiver.authorize(request(), fetch)
+            self.assertEqual(fetch.call_count, 2)
+
+
+class BranchTokenTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.path = Path(self.temporary.name) / 'test-only.token'
+        location = patch.object(receiver, 'BRANCH_READ_TOKEN', self.path)
+        location.start()
+        self.addCleanup(location.stop)
+
+    def write(self, data=b'synthetic-project-token\n', mode=0o600):
+        self.path.unlink(missing_ok=True)
+        self.path.write_bytes(data)
+        self.path.chmod(mode)
+
+    @contextmanager
+    def root_file(self, owner=0, opened_owner=0, change_inode=False, opened_mode=None):
+        real_lstat, real_fstat = Path.lstat, os.fstat
+        def pathname(path, *args, **kwargs):
+            info = real_lstat(path, *args, **kwargs)
+            if path == self.path:
+                values = list(info); values[4] = owner
+                return os.stat_result(values)
+            return info
+        def descriptor(fd):
+            values = list(real_fstat(fd)); values[4] = opened_owner
+            if change_inode: values[1] += 1
+            if opened_mode is not None: values[0] = stat.S_IFREG | opened_mode
+            return os.stat_result(values)
+        # Only test files are touched; directory trust is separately checked below.
+        with patch.object(Path, 'lstat', pathname), patch.object(receiver.os, 'fstat', descriptor), \
+                patch.object(receiver, 'trusted', side_effect=lambda path, **kwargs: path):
+            yield
+
+    def test_optional_absent_and_valid_single_line_file(self):
+        self.assertIsNone(receiver.branch_read_token())
+        for data in (b'synthetic-project-token', b'synthetic-project-token\n'):
+            self.write(data)
+            with self.root_file():
+                self.assertEqual(receiver.branch_read_token(), 'synthetic-project-token')
+
+    def test_rejects_owner_mode_symlink_directory_and_fifo(self):
+        for mode in (0o644, 0o660, 0o400, 0o1600):
+            self.write(mode=mode)
+            with self.subTest(mode=mode), self.root_file(), \
+                    self.assertRaisesRegex(receiver.Refused, '^branch_read_token_permissions$'):
+                receiver.branch_read_token()
+        self.write()
+        with self.root_file(owner=123), self.assertRaisesRegex(receiver.Refused, 'permissions'):
+            receiver.branch_read_token()
+        self.path.unlink()
+        for kind in ('symlink', 'directory', 'fifo'):
+            if kind == 'symlink': self.path.symlink_to(self.path.parent / 'missing-target')
+            elif kind == 'directory': self.path.mkdir()
+            else: os.mkfifo(self.path, 0o600)
+            with self.subTest(kind=kind), self.root_file(), \
+                    self.assertRaisesRegex(receiver.Refused, 'permissions'):
+                receiver.branch_read_token()
+            if kind == 'directory': self.path.rmdir()
+            else: self.path.unlink()
+
+    def test_opened_identity_and_permissions_are_revalidated(self):
+        self.write()
+        for options, code in (({'change_inode': True}, 'changed'),
+                              ({'opened_owner': 123}, 'permissions'),
+                              ({'opened_mode': 0o644}, 'permissions')):
+            with self.subTest(options=options), self.root_file(**options), \
+                    self.assertRaisesRegex(receiver.Refused, '^branch_read_token_' + code + '$'):
+                receiver.branch_read_token()
+
+    def test_untrusted_parent_and_read_errors_are_fixed_diagnostics(self):
+        self.write()
+        with self.root_file(), patch.object(receiver, 'trusted', side_effect=receiver.Refused('untrusted_parent')), \
+                patch.object(receiver.os, 'open') as opened:
+            with self.assertRaisesRegex(receiver.Refused, '^branch_read_token_permissions$'):
+                receiver.branch_read_token()
+            opened.assert_not_called()
+        with self.root_file(), patch.object(receiver.os, 'open', side_effect=PermissionError('SECRET-path')):
+            with self.assertRaisesRegex(receiver.Refused, '^branch_read_token_unreadable$'):
+                receiver.branch_read_token()
+
+    def test_empty_oversized_or_header_unsafe_contents_are_rejected(self):
+        for data in (b'', b'\n', b' ', b'\tsecret', b'secret\r\n', b'secret\nnext',
+                     b'secret\n\n', b'secret\x00', b'\xff', b'x' * 4097):
+            self.write(data)
+            with self.subTest(size=len(data)), self.root_file(), \
+                    self.assertRaisesRegex(receiver.Refused, '^branch_read_token_invalid$'):
+                receiver.branch_read_token()
+
+
+class AuthorizationDiagnosticTests(unittest.TestCase):
+    def test_stage_and_status_are_preserved_without_http_body_or_exception_text(self):
+        for url, stage in ((receiver.JOB_URL, 'job'), (receiver.BRANCHES_URL, 'branches')):
+            for status in (401, 403, 404, 429, 500, 502):
+                error = urllib.error.HTTPError(url, status, 'SECRET-message',
+                                               {'X-Secret': 'SECRET-header'}, io.BytesIO(b'SECRET-body'))
+                with self.subTest(stage=stage, status=status), \
+                        patch.object(receiver, 'fetch_json', side_effect=error) as fetch:
+                    with self.assertRaisesRegex(receiver.Refused, f'^gitlab_{stage}_http_{status}$'):
+                        receiver.authorization_json(fetch, url, 'synthetic-token')
+                    self.assertEqual(fetch.call_count, 1)
+
+    def test_network_json_redirect_and_unknown_errors_are_sanitized(self):
+        for error, code in ((urllib.error.URLError('SECRET-host'), 'unreachable'),
+                            (TimeoutError('SECRET-timeout'), 'timeout'),
+                            (ValueError('SECRET-json'), 'invalid_json'),
+                            (RecursionError('SECRET-json-depth'), 'invalid_json'),
+                            (receiver.Refused('redirect_refused'), 'redirect_refused'),
+                            (receiver.Refused('SECRET-unexpected'), 'invalid_response')):
+            with self.subTest(code=code), patch.object(receiver, 'fetch_json', side_effect=error) as fetch:
+                with self.assertRaisesRegex(receiver.Refused, '^gitlab_job_' + code + '$'):
+                    receiver.authorization_json(fetch, receiver.JOB_URL, 'synthetic-token')
+
+    def test_main_never_emits_unlisted_refusal_text(self):
+        output = io.StringIO()
+        with patch.object(receiver.os, 'geteuid', return_value=0), \
+                patch.object(receiver.os, 'umask'), patch.dict(receiver.os.environ, {}), \
+                patch.object(receiver.sys, 'argv', ['receiver']), \
+                patch.object(receiver.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO())), \
+                patch.object(receiver.sys, 'stdout', output), \
+                patch.object(receiver.signal, 'signal'), patch.object(receiver.signal, 'alarm'), \
+                patch.object(receiver, 'read_header', return_value=request()), \
+                patch.object(receiver, 'authorize', side_effect=receiver.Refused('SECRET-token-value')), \
+                patch.object(receiver, 'read_archive') as archive:
+            self.assertEqual(receiver.main(), 1)
+            archive.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue()),
+                         {'status': 'error', 'code': 'deployment_failed_requires_operator'})
 
 
 class ArtifactTests(unittest.TestCase):

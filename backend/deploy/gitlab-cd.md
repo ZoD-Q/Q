@@ -18,8 +18,25 @@
 - main 必须受保护；`staging/api`、`staging/admin` 受保护且只允许 Maintainer 发布。
 - 新增专用 `Q_STAGING_SSH_KEY_B64`（Variable 类型，Masked and hidden，Protected，Environment scope `staging/*`，关闭 Expand variable reference）。它是专用 qdeploy 私钥的 base64 单行值，不是个人 SSH 密钥。不能提交、打印到日志或放进制品。
 - 禁止 MR 流水线访问 protected variables/runners；普通测试无需这些资源。流水线变量最低角色设为 Maintainer，避免覆盖预定义变量。
-- 保留既有共享 Runner；无业务数据库凭据进入检查任务。服务器使用当前作业的短期 `CI_JOB_TOKEN` 向固定 GitLab API 核验 project 197、作业名称、running 状态、pipeline、SHA、main 及当前受保护分支；不创建长期 GitLab API token。
+- 保留既有共享 Runner；无业务数据库凭据进入检查任务。服务器必须使用当前作业的短期 `CI_JOB_TOKEN` 向固定 GitLab `/job` 核验 project 197、作业名称、running 状态、pipeline、SHA 与 main。旧 GitLab 的当前分支查询可使用下节单独授权、短有效期的项目只读凭据；它不能替代作业身份校验。
 - 关闭 Auto DevOps，保留 Pipelines must succeed；不启用自动回退或自动合并。旧 GitLab 版本若不支持所需 API 或环境权限，先停止启用并升级/调整经过审核的实现。
+
+## GitLab 18.2.8 的可选只读分支凭据
+
+本实例 Help 页面已核对为 GitLab Enterprise Edition `18.2.8-ee`，项目为私有。GitLab 18.2 系列的分支 API 没有开放 Job Token，18.4 的列表路由才明确允许 `job_token_allowed`；不能将新版文档的权限直接套用旧实例。参见官方 [18.2 分支实现](https://gitlab.com/gitlab-org/gitlab/-/blob/v18.2.0-ee/lib/api/branches.rb) 与 [18.4 分支实现](https://gitlab.com/gitlab-org/gitlab/-/blob/v18.4.0-ee/lib/api/branches.rb)。`/job` 继续支持 Job Token，并保留完整的实时身份绑定。
+
+接收器可读取固定文件 `/etc/q/gitlab-branch-read.token`。文件不存在时保持原有 Job Token 分支查询路径；文件存在但权限、内容、读取或远端认证失败时立即拒绝，不自动回退。文件必须是 root 拥有、权限恰好 `0600` 的普通文件，所有父目录必须由 root 拥有且不能由其他用户写入；拒绝符号链接、特殊文件、空内容、超长内容和换行注入。只允许一个末尾换行，打开后再次校验文件身份和权限。
+
+这份凭据只用于 `GET https://gitlab.kai.com/api/v4/projects/197/repository/branches?search=%5Emain%24` 的 `PRIVATE-TOKEN` 请求头；接收器不会把它发送给 `/job`、其他项目或其他 URL，不跟随重定向，也不传给子进程、Runner、业务容器或回执。调用方协议不增加凭据、文件路径或地址字段。每次先验证 live Job Token，之后才读取该文件；当前 main 必须仍受保护且当前提交与请求一致，这些校验没有例外。
+
+2026-10-26，经用户明确批准，已创建仅限 Q 项目的 Reporter / `read_api` 令牌，有效期至 **2026-11-25**；受限文件已安装为 root:root `0600`，固定分支查询实际返回 HTTP 200，确认 `main` 仍受保护且版本为当时的 `08aaee4`。临时交接副本已清除。**新版接收器尚未安装，真实 CI 发布仍待验收**，这次只读查询不等于 CI 已打通。后续安装或轮换步骤：
+
+1. 在项目 197 创建专用 **Project Access Token**，角色仅 **Reporter**、scope 仅 **read_api**，设置满足维护窗口的短有效期，例如 7 天，并安排到期前轮换；不要使用个人 PAT、管理员令牌、`api` 或写权限。`read_api` 在 GitLab 层覆盖该项目可访问的只读 API，不是只针对分支的 scope；仅请求固定分支地址是本接收器施加的限制，授权时必须说明这一区别。
+2. 源码通过开发分支检查和 MR 人工审核后，由运维更新已审核的接收器与客户端。将令牌通过受控输入写入服务器 `/etc/q` 内的临时普通文件，设为 root:root `0600`，在持有 `/run/lock/q-ci-deploy.lock` 时原子替换固定文件。内容不要进入命令行参数、Shell 历史、环境配置、CI 变量、日志、截图、源码或构建制品；不得覆盖 `/etc/q/deploy.env`。
+3. 在仍运行的、已授权的 main 作业中执行 `--check`，核对安全诊断、固定项目和当前 main；成功不等于业务部署已完成。已结束作业的 Job Token 已失效，不能拿它验证新凭据。实际部署继续人工触发，并记录最新提交的结果。
+4. 轮换时创建新的同等最小权限、短有效期项目令牌，以相同方式原子替换并核对所有权/权限；完成授权的 `--check` 后撤销旧令牌，安全清除受控临时副本。令牌过期或撤销会让发布检查失败；不要因此扩大权限、公开仓库或跳过当前 main/保护检查。
+
+这里不安装新依赖、不升级 GitLab、不修改仓库可见性，也不使用 OIDC 签发时的保护声明替代当前分支状态查询。接收器更新和真实流水线验收须使用人工审核后的源码继续完成。
 
 ## 安装与更新服务器入口
 
@@ -32,6 +49,8 @@
 ## 失败与恢复
 
 客户端与作业不自动重试。接收器在副作用之前记录持久 pending receipt；结果未知、失败或重复制品不一致都会停止后续发布，避免重复执行业务。记录位于 `/var/lib/q/ci-deploy/`，仅 root 可读。
+
+非零退出时，客户端只从完整、有界、字段精确的错误 JSON 中输出白名单诊断码，例如 `gitlab_job_http_401`、`gitlab_branches_http_403` 或 `branch_read_token_permissions`；不打印原始 stderr、HTTP 正文、请求头或任意异常内容。错误仍标为 `Deployment outcome is unknown`，不生成成功回执，不自动重试，也不因为某个诊断码看似属于检查阶段就推断写操作一定没有执行。`--check` 成功只表示 readiness，服务器本来不会为它生成部署 receipt。
 
 没有新增迁移、SQLx 历史未变且当前配置与链接仍归本次发布所有时，API 启动失败可以恢复原应用版本。存在待执行迁移、迁移历史无法确认或运维同时修改配置时不自动回退，不恢复数据库备份。运维先核对容器、健康、配置、`_sqlx_migrations` 和 receipt，再决定修复前进或经独立确认的恢复；保留失败记录至受限审计目录后才能解除部署阻塞，不能直接反复点击 Retry。
 

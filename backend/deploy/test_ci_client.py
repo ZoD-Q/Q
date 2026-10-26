@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import ci_receiver as receiver
 from test_package_release import elf_fixture
 
 spec = importlib.util.spec_from_file_location('ci_client', Path(__file__).with_name('ci_client.py'))
@@ -271,6 +272,55 @@ class ClientTests(unittest.TestCase):
                         'import time; time.sleep(5)'):
             with self.subTest(program=program), self.assertRaisesRegex(client.ClientError, 'unknown'):
                 client.exchange([sys.executable, '-c', program], b'{}\n', {}, .2)
+
+    def test_error_allowlist_matches_receiver_without_accepting_arbitrary_codes(self):
+        self.assertEqual(client.RECEIVER_ERROR_CODES, receiver.PUBLIC_ERROR_CODES)
+        for data in (
+            {'status': 'error', 'code': 'SECRET-token-value'},
+            {'status': 'error', 'code': 'gitlab_job_http_403_SECRET'},
+            {'status': 'error', 'code': ['gitlab_job_http_403']},
+            {'status': 'error', 'code': 'gitlab_job_http_403', 'secret': 'SECRET-extra'},
+            {'status': 'success', 'code': 'gitlab_job_http_403'},
+        ):
+            self.assertEqual(client.receiver_failure(json.dumps(data).encode()), client.UNKNOWN)
+        for raw in (b'not-json SECRET', b'\xff', b'x' * (client.MAX_RESPONSE + 1),
+                    b'[' * 2000 + b']' * 2000,
+                    b'{"status":"error","code":"SECRET","code":"job_mismatch"}'):
+            self.assertEqual(client.receiver_failure(raw), client.UNKNOWN)
+
+    def test_nonzero_receiver_reply_preserves_safe_code_but_stays_unknown(self):
+        program = ('import sys,json;sys.stdin.buffer.read();'
+                   'print(json.dumps({"status":"error","code":"gitlab_branches_http_401"}),flush=True);'
+                   'sys.stderr.write("SECRET-response-headers-and-body");sys.exit(1)')
+        with patch.object(client.subprocess, 'Popen', wraps=subprocess.Popen) as start:
+            with self.assertRaises(client.ClientError) as raised:
+                client.exchange([sys.executable, '-B', '-c', program], b'{}\n', {}, 5)
+        message = str(raised.exception)
+        self.assertIn(client.UNKNOWN, message)
+        self.assertIn('Receiver diagnostic: gitlab_branches_http_401.', message)
+        self.assertNotIn('SECRET', message)
+        self.assertEqual(start.call_count, 1)
+
+    def test_early_refusal_drains_diagnostic_without_resending_a_partial_archive(self):
+        program = ('import sys,json;sys.stdin.buffer.readline();sys.stdin.close();'
+                   'print(json.dumps({"status":"error","code":"job_not_running"}),flush=True);'
+                   'sys.exit(1)')
+        with patch.object(client.subprocess, 'Popen', wraps=subprocess.Popen) as start:
+            with self.assertRaises(client.ClientError) as raised:
+                client.exchange([sys.executable, '-B', '-c', program],
+                                b'{}\n' + b'x' * (1024 * 1024), {}, 5)
+        self.assertIn(client.UNKNOWN, str(raised.exception))
+        self.assertIn('Receiver diagnostic: job_not_running.', str(raised.exception))
+        self.assertEqual(start.call_count, 1)
+
+    def test_sanitized_failure_never_creates_a_success_receipt_or_retries(self):
+        error = client.ClientError(client.receiver_failure(
+            b'{"status":"error","code":"server_command_failed"}'))
+        with patch.object(client, 'exchange', side_effect=error) as exchange:
+            with self.assertRaisesRegex(client.ClientError, 'unknown'):
+                client.run('api', False, self.repo, self.env)
+            exchange.assert_called_once()
+        self.assertFalse((self.repo / 'backend/.local/ci-deploy/api-receipt.json').exists())
 
 
 if __name__ == '__main__':

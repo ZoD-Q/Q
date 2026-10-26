@@ -2,6 +2,9 @@
 # Human MR merge remains required; no automatic deployment or merge.
 workflow:
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_PROJECT_ID == "197" && $CI_COMMIT_BRANCH == "main" && $CI_DEFAULT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true" && $Q_MONITOR_SCHEDULE == "1"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_OPEN_MERGE_REQUESTS && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
       when: never
@@ -10,6 +13,7 @@ workflow:
     - when: never
 
 stages:
+  - monitor
   - verify
   - package
   - deploy
@@ -27,7 +31,14 @@ variables:
   CARGO_BUILD_JOBS: "2"
   EXPO_NO_TELEMETRY: "1"
 
+.code-validation:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - when: on_success
+
 source-check:
+  extends: .code-validation
   stage: verify
   image: alpine:3.22
   before_script:
@@ -44,6 +55,7 @@ source-check:
       git diff --check "$base" "$CI_COMMIT_SHA"
 
 web-check:
+  extends: .code-validation
   stage: verify
   image: node:24-bookworm
   cache:
@@ -75,6 +87,7 @@ web-check:
       junit: web/test-results/junit.xml
 
 mobile-check:
+  extends: .code-validation
   stage: verify
   image: node:24-bookworm
   cache:
@@ -100,6 +113,7 @@ mobile-check:
     - npm --prefix mobile run export:web
 
 backend-check:
+  extends: .code-validation
   stage: verify
   image: rust:1-bookworm
   parallel:
@@ -172,6 +186,7 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
 
 deploy-check:
+  extends: .code-validation
   stage: verify
   image: python:3.13-bookworm
   script:
@@ -181,6 +196,7 @@ deploy-check:
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy -p 'test_*.py'
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/beauty-gallery -p 'test_*.py'
     - Q_AGE_BIN=/usr/bin/age PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/offsite-backup -p 'test_*.py'
+    - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/monitor -p 'test_*.py'
     - PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
 
 # Automatic only for protected main; other permitted branches retain optional packaging.
@@ -191,6 +207,8 @@ package-release:
     - docker
     - linux
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
       when: on_success
       allow_failure: false
@@ -284,3 +302,35 @@ deploy-staging-admin:
   script:
     - python3 backend/deploy/ci_client.py --component admin --check
     - python3 backend/deploy/ci_client.py --component admin
+
+# Only this job runs in an explicitly enabled protected-main monitor schedule.
+# No artifact API lookups: unrelated successful pipelines cannot erase monitor history.
+q-external-monitor:
+  stage: monitor
+  image: python:3.13-bookworm
+  interruptible: false
+  timeout: 3 minutes
+  retry: 0
+  resource_group: q-external-monitor
+  dependencies: []
+  environment:
+    name: monitoring
+    action: verify
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_PROJECT_ID == "197" && $CI_COMMIT_BRANCH == "main" && $CI_DEFAULT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true" && $Q_MONITOR_SCHEDULE == "1"'
+    - when: never
+  cache:
+    key: q-external-monitor-state-v1-main
+    unprotect: false
+    policy: pull-push
+    when: always
+    paths:
+      - backend/.local/monitor-state/state.json
+  script:
+    - PYTHONDONTWRITEBYTECODE=1 python3 -I backend/deploy/monitor/monitor.py
+  artifacts:
+    when: always
+    access: developer
+    expire_in: 7 days
+    paths:
+      - backend/.local/monitor-report/result.json

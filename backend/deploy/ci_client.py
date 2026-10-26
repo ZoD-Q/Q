@@ -22,6 +22,34 @@ TIMEOUT = 20 * 60
 SHA = re.compile(r'[0-9a-f]{40}')
 UNKNOWN = ('Deployment outcome is unknown; inspect the server and this GitLab job before '
            'any manual retry. No request was retried.')
+RECEIVER_ERROR_CODES = frozenset({
+    'invalid_fields', 'invalid_version', 'invalid_action', 'invalid_component',
+    'invalid_sha', 'invalid_id', 'invalid_token', 'invalid_size', 'invalid_check_payload',
+    'invalid_digest', 'invalid_header', 'truncated_archive', 'trailing_input',
+    'archive_digest_mismatch', 'duplicate_json_key', 'redirect_refused',
+    'unexpected_http_status', 'response_too_large', 'credential_target_refused',
+    'job_mismatch', 'project_mismatch', 'ref_mismatch', 'commit_mismatch',
+    'job_not_running', 'job_name_mismatch', 'branch_unavailable',
+    'main_advanced_or_unprotected', 'branch_read_token_permissions',
+    'branch_read_token_unreadable', 'branch_read_token_changed', 'branch_read_token_invalid',
+    'untrusted_server_path', 'invalid_server_path', 'nonprivate_server_path', 'untrusted_parent',
+    'server_command_timeout', 'command_output_too_large', 'server_command_failed',
+    'receiver_not_bootstrapped', 'untrusted_lock', 'operator_reconciliation_required',
+    'operator_state_changed', 'duplicate_artifact_mismatch', 'release_already_exists',
+    'release_link_mismatch', 'health_mismatch', 'running_binary_mismatch', 'image_mismatch',
+    'api_container_missing', 'admin_target_mismatch', 'admin_artifact_mismatch',
+    'backup_policy_upgrade_required', 'backup_not_completed', 'backup_digest_mismatch',
+    'migration_downgrade_or_drift', 'migration_state_changed', 'schema_upgrade_requires_operator',
+    'receiver_timeout', 'invalid_invocation', 'deployment_failed_requires_operator',
+}) | frozenset(
+    f'gitlab_{stage}_{reason}'
+    for stage in ('job', 'branches')
+    for reason in ('unreachable', 'timeout', 'invalid_json', 'invalid_response',
+                   'redirect_refused', 'response_too_large', 'unexpected_status')
+) | frozenset(
+    f'gitlab_{stage}_http_{status}'
+    for stage in ('job', 'branches') for status in range(100, 600)
+)
 
 
 class ClientError(Exception):
@@ -137,6 +165,28 @@ def child_environment(env):
     return {key: env[key] for key in ('PATH', 'LANG', 'LC_ALL', 'TZ') if key in env}
 
 
+def receiver_failure(response):
+    """Append only an exact allowlisted code; it never proves a write did not run."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate response key')
+            result[key] = value
+        return result
+    try:
+        if len(response) > MAX_RESPONSE:
+            return UNKNOWN
+        data = json.loads(response, object_pairs_hook=unique)
+        if (isinstance(data, dict) and set(data) == {'status', 'code'}
+                and data['status'] == 'error' and isinstance(data['code'], str)
+                and data['code'] in RECEIVER_ERROR_CODES):
+            return UNKNOWN + ' Receiver diagnostic: ' + data['code'] + '.'
+    except (ValueError, UnicodeError, RecursionError):
+        pass
+    return UNKNOWN
+
+
 def exchange(command, payload, env, timeout=TIMEOUT):
     """Concurrent bounded pipe I/O; close stdin after exactly one framed payload."""
     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -161,7 +211,12 @@ def exchange(command, payload, env, timeout=TIMEOUT):
                     try:
                         offset += os.write(stream.fileno(), payload[offset:offset + 65536])
                     except BrokenPipeError:
-                        raise ClientError(UNKNOWN) from None
+                        # A receiver may reject the authenticated header before
+                        # the archive is sent. Drain its bounded diagnostic while
+                        # retaining an unknown outcome and never resending bytes.
+                        selector.unregister(stream)
+                        stream.close()
+                        continue
                     if offset == len(payload):
                         selector.unregister(stream)
                         stream.close()
@@ -177,7 +232,9 @@ def exchange(command, payload, env, timeout=TIMEOUT):
                         response.extend(block)
         remaining = deadline - time.monotonic()
         require(remaining > 0, UNKNOWN)
-        require(process.wait(timeout=remaining) == 0, UNKNOWN)
+        return_code = process.wait(timeout=remaining)
+        if return_code != 0 or offset != len(payload):
+            raise ClientError(receiver_failure(bytes(response)))
         return bytes(response)
     except (OSError, subprocess.TimeoutExpired):
         raise ClientError(UNKNOWN) from None
