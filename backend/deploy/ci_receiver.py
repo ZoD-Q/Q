@@ -23,9 +23,13 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 
 API = 'https://gitlab.kai.com/api/v4'
+JOB_URL = API + '/job'
+BRANCHES_URL = API + '/projects/197/repository/branches?search=%5Emain%24'
+BRANCH_READ_TOKEN = Path('/etc/q/gitlab-branch-read.token')
 CONFIG = Path('/etc/q/deploy.env')
 CURRENT = Path('/opt/q/current')
 RELEASES = Path('/opt/q/releases')
@@ -39,6 +43,36 @@ FIELDS = {'version', 'action', 'component', 'source_sha', 'pipeline_id', 'job_id
           'job_token', 'archive_size', 'archive_sha256'}
 CHILD_ENV = {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
              'HOME': '/root', 'LANG': 'C.UTF-8'}
+# Only fixed, non-sensitive diagnostics may leave the receiver. Keep the client
+# allowlist in sync; unknown exceptions remain an indeterminate deployment result.
+PUBLIC_ERROR_CODES = frozenset({
+    'invalid_fields', 'invalid_version', 'invalid_action', 'invalid_component',
+    'invalid_sha', 'invalid_id', 'invalid_token', 'invalid_size', 'invalid_check_payload',
+    'invalid_digest', 'invalid_header', 'truncated_archive', 'trailing_input',
+    'archive_digest_mismatch', 'duplicate_json_key', 'redirect_refused',
+    'unexpected_http_status', 'response_too_large', 'credential_target_refused',
+    'job_mismatch', 'project_mismatch', 'ref_mismatch', 'commit_mismatch',
+    'job_not_running', 'job_name_mismatch', 'branch_unavailable',
+    'main_advanced_or_unprotected', 'branch_read_token_permissions',
+    'branch_read_token_unreadable', 'branch_read_token_changed', 'branch_read_token_invalid',
+    'untrusted_server_path', 'invalid_server_path', 'nonprivate_server_path', 'untrusted_parent',
+    'server_command_timeout', 'command_output_too_large', 'server_command_failed',
+    'receiver_not_bootstrapped', 'untrusted_lock', 'operator_reconciliation_required',
+    'operator_state_changed', 'duplicate_artifact_mismatch', 'release_already_exists',
+    'release_link_mismatch', 'health_mismatch', 'running_binary_mismatch', 'image_mismatch',
+    'api_container_missing', 'admin_target_mismatch', 'admin_artifact_mismatch',
+    'backup_policy_upgrade_required', 'backup_not_completed', 'backup_digest_mismatch',
+    'migration_downgrade_or_drift', 'migration_state_changed', 'schema_upgrade_requires_operator',
+    'receiver_timeout', 'invalid_invocation', 'deployment_failed_requires_operator',
+}) | frozenset(
+    f'gitlab_{stage}_{reason}'
+    for stage in ('job', 'branches')
+    for reason in ('unreachable', 'timeout', 'invalid_json', 'invalid_response',
+                   'redirect_refused', 'response_too_large', 'unexpected_status')
+) | frozenset(
+    f'gitlab_{stage}_http_{status}'
+    for stage in ('job', 'branches') for status in range(100, 600)
+)
 
 
 class Refused(Exception):
@@ -113,10 +147,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise Refused('redirect_refused')
 
 
-def fetch_json(url, token=None):
+def fetch_json(url, token=None, *, private_token=False):
     headers = {'Accept': 'application/json'}
+    require(not private_token or (url == BRANCHES_URL and token is not None),
+            'credential_target_refused')
     if token is not None:
-        headers['JOB-TOKEN'] = token
+        require(url in (JOB_URL, BRANCHES_URL), 'credential_target_refused')
+        headers['PRIVATE-TOKEN' if private_token else 'JOB-TOKEN'] = token
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with opener.open(urllib.request.Request(url, headers=headers), timeout=15) as response:
         require(response.status == 200, 'unexpected_http_status')
@@ -125,8 +162,71 @@ def fetch_json(url, token=None):
     return json_load(data)
 
 
+def branch_read_token():
+    """Optional server-only credential; never supplied by the deployment request."""
+    try:
+        original = BRANCH_READ_TOKEN.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise Refused('branch_read_token_unreadable') from None
+    require(stat.S_ISREG(original.st_mode) and original.st_uid == 0
+            and stat.S_IMODE(original.st_mode) == 0o600, 'branch_read_token_permissions')
+    try:
+        # Also reject writable or symlinked parents, then verify the opened file
+        # rather than trusting an earlier pathname check during a rotation.
+        try:
+            trusted(BRANCH_READ_TOKEN, private=True)
+        except Refused:
+            raise Refused('branch_read_token_permissions') from None
+        descriptor = os.open(BRANCH_READ_TOKEN, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as source:
+            current = os.fstat(source.fileno())
+            require(stat.S_ISREG(current.st_mode) and current.st_uid == 0
+                    and stat.S_IMODE(current.st_mode) == 0o600, 'branch_read_token_permissions')
+            require((current.st_dev, current.st_ino) == (original.st_dev, original.st_ino),
+                    'branch_read_token_changed')
+            data = source.read(4098)
+    except OSError:
+        raise Refused('branch_read_token_unreadable') from None
+    # Permit one final newline from a protected-file installer, never embedded
+    # whitespace, controls or non-ASCII bytes that could become header content.
+    token = data[:-1] if data.endswith(b'\n') else data
+    require(1 <= len(token) <= 4096 and all(33 <= byte <= 126 for byte in token),
+            'branch_read_token_invalid')
+    return token.decode('ascii')
+
+
+def authorization_json(fetch, url, token, *, private_token=False):
+    require(url in (JOB_URL, BRANCHES_URL), 'credential_target_refused')
+    stage = 'gitlab_job' if url == JOB_URL else 'gitlab_branches'
+    try:
+        if private_token:
+            return fetch(url, token, private_token=True)
+        return fetch(url, token)
+    except urllib.error.HTTPError as error:
+        status = error.code
+        code = f'{stage}_http_{status}' if type(status) is int and 100 <= status < 600 else f'{stage}_unexpected_status'
+        raise Refused(code) from None
+    except urllib.error.URLError:
+        raise Refused(f'{stage}_unreachable') from None
+    except TimeoutError:
+        raise Refused(f'{stage}_timeout') from None
+    except (ValueError, UnicodeError, RecursionError):
+        raise Refused(f'{stage}_invalid_json') from None
+    except Refused as error:
+        reason = {
+            'redirect_refused': 'redirect_refused', 'response_too_large': 'response_too_large',
+            'unexpected_http_status': 'unexpected_status', 'duplicate_json_key': 'invalid_json',
+            'credential_target_refused': 'invalid_response',
+        }.get(str(error), 'invalid_response')
+        raise Refused(f'{stage}_{reason}') from None
+
+
 def authorize(r, fetch=fetch_json):
-    job = fetch(API + '/job', r['job_token'])
+    job = authorization_json(fetch, JOB_URL, r['job_token'])
+    require(isinstance(job, dict) and isinstance(job.get('pipeline'), dict)
+            and isinstance(job.get('commit'), dict), 'gitlab_job_invalid_response')
     pipeline = job.get('pipeline', {})
     require(job.get('id') == r['job_id'] and pipeline.get('id') == r['pipeline_id'], 'job_mismatch')
     require(pipeline.get('project_id') == 197, 'project_mismatch')
@@ -134,9 +234,15 @@ def authorize(r, fetch=fetch_json):
     require(job.get('commit', {}).get('id') == pipeline.get('sha') == r['source_sha'], 'commit_mismatch')
     require(job.get('status') == 'running', 'job_not_running')
     require(job.get('name') == 'deploy-staging-' + r['component'], 'job_name_mismatch')
-    branches = fetch(API + '/projects/197/repository/branches?search=%5Emain%24', r['job_token'])
+    # Validate the live job completely before opening the optional server token.
+    # It supplements only the current/protected branch read, never job identity.
+    private = branch_read_token()
+    branches = authorization_json(fetch, BRANCHES_URL,
+                                  private if private is not None else r['job_token'],
+                                  private_token=private is not None)
     require(isinstance(branches, list) and len(branches) == 1, 'branch_unavailable')
     branch = branches[0]
+    require(isinstance(branch, dict) and isinstance(branch.get('commit'), dict), 'branch_unavailable')
     require(branch.get('name') == 'main' and branch.get('protected') is True and
             branch.get('commit', {}).get('id') == r['source_sha'], 'main_advanced_or_unprotected')
 
@@ -579,7 +685,9 @@ def main():
         print(json.dumps(result, sort_keys=True), flush=True)
         return 0
     except Exception as error:
-        code = str(error) if isinstance(error, Refused) else 'deployment_failed_requires_operator'
+        code = str(error) if isinstance(error, Refused) else ''
+        if code not in PUBLIC_ERROR_CODES:
+            code = 'deployment_failed_requires_operator'
         print(json.dumps({'status': 'error', 'code': code}), flush=True)
         return 1
     finally:

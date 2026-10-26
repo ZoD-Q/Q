@@ -373,7 +373,48 @@ class TransactionTests(unittest.TestCase):
                 INSTALL.route_health.reset_mock()
                 INSTALL.restore(state_path.parent, json.loads(state_path.read_text()))
             self.assertEqual(INSTALL.previous_target(), str(INSTALL.ROOT / "releases" / old_commit))
-            INSTALL.route_health.assert_called_once_with(old_commit)
+            INSTALL.route_health.assert_called_once()
+            self.assertEqual(INSTALL.route_health.call_args.args, (old_commit,))
+            self.assertGreater(INSTALL.route_health.call_args.kwargs["timeout"], 0)
+
+
+class RouteReadinessTests(unittest.TestCase):
+    def transient(self, status):
+        return INSTALL.urllib.error.HTTPError("http://127.0.0.1/plugins/beauty/health", status, "pending reload", {}, None)
+
+    def test_install_waits_for_old_nginx_workers_before_marking_complete(self):
+        with installation_fixture():
+            INSTALL.route_health.side_effect = [self.transient(404), self.transient(502), None]
+            with patch.object(INSTALL, "command", return_value=SimpleNamespace(stdout="disabled\n")), patch.object(INSTALL.time, "sleep"):
+                INSTALL.install(files_fixture(), SHA)
+            self.assertEqual(INSTALL.route_health.call_count, 3)
+            state = json.loads(next(INSTALL.BACKUPS.glob("*/state.json")).read_text())
+            self.assertTrue(state["complete"])
+            self.assertEqual(INSTALL.previous_target(), str(INSTALL.ROOT / "releases" / SHA))
+
+    def test_transient_failures_have_one_shared_deadline(self):
+        now = [0.0]
+        def sleep(seconds):
+            now[0] += seconds
+        with patch.object(INSTALL.time, "monotonic", side_effect=lambda: now[0]), patch.object(INSTALL.time, "sleep", side_effect=sleep), patch.object(INSTALL, "route_health", side_effect=self.transient(404)) as health:
+            with self.assertRaisesRegex(ValueError, "before the deadline"):
+                INSTALL.wait_for_route(SHA, timeout=0.6)
+        self.assertEqual(now[0], 0.6)
+        self.assertEqual(health.call_count, 3)
+        self.assertLess(health.call_args.kwargs["timeout"], 0.11)
+
+    def test_wrong_release_redirects_and_authorization_errors_fail_immediately(self):
+        for error in (ValueError("Gallery Nginx route serves the wrong release"), ValueError("Local health endpoint must not redirect"), self.transient(401), self.transient(403)):
+            with self.subTest(error=type(error).__name__), patch.object(INSTALL, "route_health", side_effect=error) as health, patch.object(INSTALL.time, "sleep") as sleep:
+                with self.assertRaises(type(error)):
+                    INSTALL.wait_for_route(SHA)
+                self.assertEqual(health.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_read_connection_failure_can_recover_without_repeating_installation(self):
+        with patch.object(INSTALL, "route_health", side_effect=[INSTALL.urllib.error.URLError("connection reset"), TimeoutError(), None]) as health, patch.object(INSTALL.time, "sleep"):
+            INSTALL.wait_for_route(SHA)
+        self.assertEqual(health.call_count, 3)
 
 
 class FileMutationTests(unittest.TestCase):
