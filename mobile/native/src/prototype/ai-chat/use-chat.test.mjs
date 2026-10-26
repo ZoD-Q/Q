@@ -10,6 +10,7 @@ import { registerHooks } from 'node:module';
 import { createAiStatusMonitor } from './status-monitor.ts';
 import { createAiConsentGate, createAiPermission } from './consent.ts';
 import { createSessionStore } from '../../services/session-core.ts';
+import { getMascotPresentation } from './mascot-state.ts';
 const resolver = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
   return next(specifier, context);
@@ -189,6 +190,79 @@ test('rechecking public status does not cancel an answer or invalidate the sessi
   assert.equal(view.current.busy, true);
   assert.equal(view.streams[0].signal.aborted, false);
   assert.equal(view.calls.filter(call => call.path === '/v1/me').length, 1);
+});
+
+test('mascot follows actual stream events and late events cannot revive a stopped answer', async t => {
+  const view = harness(); t.after(view.close); await view.flush(); view.grantConsent();
+  const presentation = () => getMascotPresentation({
+    phase: view.current.phase,
+    message: view.current.conversation?.messages.at(-1),
+    statusPhase: view.current.statusPhase,
+  });
+  assert.equal(view.current.send('state fixture'), true); await view.flush();
+  assert.equal(presentation().title.zh, '正在准备回答');
+  const active = view.streams[0];
+  active.onEvent({ type: 'status', phase: 'thinking' }); await view.flush();
+  assert.equal(presentation().title.zh, '思考中');
+  active.onEvent({ type: 'delta', text: 'preserved partial' }); await view.flush();
+  assert.equal(presentation().state, 'streaming');
+  view.current.stop(); await view.flush();
+  assert.equal(active.signal.aborted, true);
+  assert.equal(presentation().state, 'paused');
+  active.onEvent({ type: 'delta', text: 'late text' });
+  active.onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'stop' });
+  await view.flush();
+  assert.equal(presentation().state, 'paused');
+  assert.equal(view.current.conversation.messages.at(-1).content, 'preserved partial');
+  view.current.newConversation(); await view.flush();
+  active.onEvent({ type: 'status', phase: 'thinking' }); await view.flush();
+  assert.equal(view.current.conversation, null);
+  assert.equal(presentation().state, 'ready');
+});
+
+test('mascot completion follows successful done and is cleared on a new conversation', async t => {
+  const view = harness(); t.after(view.close); await view.flush(); view.grantConsent();
+  assert.equal(view.current.send('completion fixture'), true); await view.flush();
+  view.finishStream(); await view.flush();
+  const completed = getMascotPresentation({ phase: view.current.phase, message: view.current.conversation.messages.at(-1) });
+  assert.equal(completed.state, 'complete');
+  assert.equal(completed.busy, false);
+  view.current.newConversation(); await view.flush();
+  assert.equal(getMascotPresentation({ phase: view.current.phase, message: view.current.conversation?.messages.at(-1) }).state, 'ready');
+});
+
+test('mascot waits for the actual final history save before showing completion or sync recovery', async t => {
+  for (const failed of [false, true]) {
+    const finalSave = deferred();
+    let finalSnapshot;
+    const view = harness({
+      historyFetch: async () => json({ items: [], next_cursor: null }),
+      historySave: (id, body) => {
+        const snapshot = { id, ...body, revision: body.expected_revision + 1, updated_at: user.created_at };
+        if (body.messages.at(-1)?.status === 'complete') { finalSnapshot = snapshot; return finalSave.promise; }
+        return json(snapshot);
+      },
+    });
+    t.after(view.close); await view.flush(); view.grantConsent();
+    assert.equal(view.current.send('save state fixture'), true); await view.flush();
+    view.finishStream(); await view.flush();
+    assert.ok(finalSnapshot);
+    assert.equal(view.current.phase, 'responding');
+    assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+    const presentation = () => getMascotPresentation({
+      phase: view.current.phase,
+      message: view.current.conversation.messages.at(-1),
+      historyError: view.current.historyError,
+    });
+    assert.equal(presentation().title.zh, '正在保存回答');
+    assert.equal(presentation().busy, true);
+    finalSave.resolve(failed ? new Response('', { status: 503 }) : json(finalSnapshot));
+    await view.flush();
+    assert.equal(view.current.phase, 'idle');
+    assert.equal(presentation().state, failed ? 'error' : 'complete');
+    assert.equal(presentation().title.zh, failed ? '历史尚未同步' : '回答完成');
+    assert.equal(presentation().busy, false);
+  }
 });
 
 test('temporary session restore failure preserves the existing identity and last known service config', async t => {

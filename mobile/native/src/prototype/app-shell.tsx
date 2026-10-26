@@ -538,8 +538,8 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
               }}
             >
               {phone ? <QSymbol size={22} /> : null}
-              <Type size={phone ? 12 : 13} muted>
-                Q makes kai smile
+              <Type size={16} weight="500">
+                {text("小Q", "Q")}
               </Type>
             </Pressable>
           </View>
