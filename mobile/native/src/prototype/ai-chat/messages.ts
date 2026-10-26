@@ -13,6 +13,7 @@ export function chatErrorMessage(code: string, text: Translate) {
     case 'AI_RATE_LIMITED': case 'AI_BUSY': case 'RATE_LIMITED': return text('请求较多，请稍后再试。', 'Too many requests. Try again shortly.');
     case 'AI_TIMEOUT': case 'REQUEST_TIMEOUT': return text('等待回答超时。已收到的内容保留，可以手动重试。', 'The answer timed out. Received text is preserved; you can retry manually.');
     case 'MESSAGE_TOO_LONG': return text('单条消息最多 12,000 个字符，请缩短后发送。', 'A message can contain up to 12,000 characters. Shorten it and try again.');
+    case 'HISTORY_SAVE_FAILED': return text('这次回答因聊天记录同步失败而未开始。同步成功后，请重试回答。', 'This answer did not start because history sync failed. Retry the answer after sync succeeds.');
     case 'VALIDATION_ERROR': return text('输入内容不符合要求，请检查长度与格式。', 'Check the input length and format.');
     case 'INVALID_RESPONSE': case 'INCOMPLETE_RESPONSE': case 'AI_UPSTREAM_ERROR': return text('回答未完整返回。已收到的内容保留，请手动重试。', 'The answer did not finish. Received text is preserved; retry manually.');
     case 'RESPONSE_TOO_LARGE': return text('回答超出本次接收范围，已保留收到的部分。', 'The answer exceeded this session’s receive limit. Received text is preserved.');
@@ -35,5 +36,19 @@ export function chatStatusErrorMessage(code: string, text: Translate) {
     case 'INVALID_RESPONSE': return text('无法识别 Q 对话配置，请重试或更新应用。', 'Could not read the Q chat configuration. Retry or update the app.');
     case 'UNAUTHORIZED': return text('无法读取 Q 对话配置，请重试或联系支持。', 'Could not access the Q chat configuration. Retry or contact support.');
     default: return text('暂时无法检查 Q 对话配置，请检查网络后重试。', 'Could not check the Q chat configuration. Check your connection and retry.');
+  }
+}
+
+
+/** History failures describe storage state separately from model or network failures. */
+export function historyErrorMessage(code: string, text: Translate) {
+  switch (code) {
+    case 'VALIDATION_ERROR': return text('聊天记录未通过云端校验。请先复制未同步内容，再更新应用或联系支持。', 'Chat history failed server validation. Copy unsynced content before updating the app or contacting support.');
+    case 'AI_HISTORY_CONFLICT': case 'AI_HISTORY_REQUEST_REUSED': return text('本机记录与云端版本存在冲突。请先保留本机未保存内容，再选择重载云端版本。', 'Local history conflicts with the cloud version. Keep a copy of unsaved content before choosing Reload cloud version.');
+    case 'AI_HISTORY_LIMIT': return text('云端聊天数量已达上限，当前内容尚未保存。请保留当前内容，待容量问题处理后再同步。', 'The cloud conversation limit has been reached. This content is not saved yet. Keep it until the capacity issue is resolved, then sync again.');
+    case 'AI_HISTORY_TOO_LARGE': return text('这段聊天超过云端保存大小限制，当前更改尚未保存。请保留当前内容，并在新聊天中继续。', 'This conversation exceeds the cloud storage size limit. Current changes are not saved. Keep the content and continue in a new chat.');
+    case 'HISTORY_SAVE_PENDING': return text('上次保存结果尚未确认。请先重试同步以核查原请求，再继续回答。', 'The previous save is not confirmed. Retry sync to check the original request before continuing the answer.');
+    case 'UNAUTHORIZED': return text('登录已过期，聊天记录尚未同步。请保留当前未保存内容，再重新登录。', 'Your session expired and history is not synced. Keep unsaved content before signing in again.');
+    default: return text('聊天记录加载或保存结果尚未确认。请保留当前内容并重试同步，暂时不要关闭页面。', 'History loading or saving is not confirmed. Keep the current content and retry sync before closing this page.');
   }
 }

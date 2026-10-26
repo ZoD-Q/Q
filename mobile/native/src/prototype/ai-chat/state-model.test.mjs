@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { registerHooks } from 'node:module';
 import { buildContext, finishStatus, prepareRetry } from './state-model.ts';
+import { WorkbenchError } from '../api-workbench/core.ts';
 const resolver = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
   return next(specifier, context);
@@ -98,6 +99,85 @@ test('new history writes keep only plugin display fields and retries preserve th
   const remote = { id: display.id, title: 'Remote', endpoint_url: 'https://example.invalid/mcp', card_url: 'https://example.invalid/card', status: 'ready' };
   assert.deepEqual(chatPluginSnapshot(remote), { id: remote.id, title: remote.title, endpoint_url: remote.endpoint_url });
   assert.deepEqual(chatPluginSnapshot({ ...remote, connection_kind: 'remote_mcp', builtin_service_id: null }), { id: remote.id, title: remote.title, endpoint_url: remote.endpoint_url, connection_kind: 'remote_mcp', builtin_service_id: null });
+});
+
+test('an explicitly rejected history snapshot can be corrected without changing its CAS revision or message identities', async () => {
+  const { createHistoryWriter } = await import('./history.ts');
+  const calls = []; let sequence = 0;
+  const writer = createHistoryWriter(async (id, body) => {
+    calls.push(structuredClone(body));
+    if (!body.title.trim()) throw new WorkbenchError('VALIDATION_ERROR', 400);
+    return { id, ...body, revision: body.expected_revision + 1, updated_at: '2026-10-26T00:00:00Z' };
+  }, () => `request-${++sequence}`);
+  const conversation = { id: 'c', title: ' ', messages: [message('user-1', 'user', '你好')] };
+  writer.seed('c', 7);
+  await assert.rejects(writer.save(conversation), /VALIDATION_ERROR/);
+  assert.equal(writer.hasPending('c'), true);
+  await assert.rejects(writer.retry(conversation), /VALIDATION_ERROR/);
+  assert.deepEqual(calls[1], calls[0]); // Unchanged input never allocates another key.
+  conversation.title = '你好';
+  await assert.rejects(writer.save(conversation), /HISTORY_SAVE_PENDING/);
+  writer.seed('c', 99, true); // A summary refresh must not bypass the original CAS.
+  await writer.retry(conversation);
+  assert.equal(calls.length, 3);
+  assert.equal(sequence, 2);
+  assert.equal(calls[2].expected_revision, 7);
+  assert.notEqual(calls[2].request_id, calls[0].request_id);
+  assert.deepEqual(calls[2].messages, calls[0].messages);
+  assert.equal(calls[2].title, '你好');
+  assert.equal(writer.hasPending('c'), false);
+});
+
+test('uncertain history attempts stay immutable even if a later attempt receives validation or conflict errors', async () => {
+  const { createHistoryWriter } = await import('./history.ts');
+  const errors = [
+    new WorkbenchError('NETWORK_ERROR'), new WorkbenchError('REQUEST_TIMEOUT'),
+    new WorkbenchError('CANCELLED'), new WorkbenchError('UNAUTHORIZED', 401),
+    new WorkbenchError('RATE_LIMITED', 429), new WorkbenchError('REQUEST_FAILED', 503),
+    new WorkbenchError('AI_HISTORY_CONFLICT', 409), new WorkbenchError('AI_HISTORY_REQUEST_REUSED', 409),
+    new WorkbenchError('VALIDATION_ERROR', 0), new Error('VALIDATION_ERROR'),
+  ];
+  for (const failure of errors) {
+    const calls = []; let sequence = 0;
+    const writer = createHistoryWriter(async (id, body) => {
+      calls.push(structuredClone(body));
+      if (calls.length === 1) throw failure;
+      if (calls.length === 2) throw new WorkbenchError('VALIDATION_ERROR', 400);
+      return { id, ...body, revision: body.expected_revision + 1, updated_at: '2026-10-26T00:00:00Z' };
+    }, () => `request-${++sequence}`);
+    const original = { id: 'c', title: 'Original', messages: [message('u', 'user', '你好')] };
+    await assert.rejects(writer.save(original));
+    const corrected = { ...original, title: 'Corrected' };
+    await assert.rejects(writer.retry(corrected), /VALIDATION_ERROR/);
+    await writer.retry(corrected);
+    assert.deepEqual(calls, [calls[0], calls[0], calls[0]], failure.message);
+    assert.equal(sequence, 1);
+  }
+});
+
+test('a corrected validation rejection becomes immutable as soon as its result is unknown', async () => {
+  const { createHistoryWriter } = await import('./history.ts');
+  const calls = []; let sequence = 0;
+  const writer = createHistoryWriter(async (id, body) => {
+    calls.push(structuredClone(body));
+    if (calls.length === 1 || calls.length === 3) throw new WorkbenchError('VALIDATION_ERROR', 400);
+    if (calls.length === 2) throw new WorkbenchError('REQUEST_TIMEOUT');
+    return { id, ...body, revision: body.expected_revision + 1, updated_at: '2026-10-26T00:00:00Z' };
+  }, () => `request-${++sequence}`);
+  const conversation = { id: 'c', title: 'Original', messages: [message('u', 'user', '你好'), { ...message('a', 'assistant', '', 'error'), toolInvocationIds: ['11111111-1111-4111-8111-111111111111'] }] };
+  writer.seed('c', 4);
+  await assert.rejects(writer.save(conversation), /VALIDATION_ERROR/);
+  conversation.title = 'Corrected';
+  await assert.rejects(writer.retry(conversation), /REQUEST_TIMEOUT/);
+  conversation.title = 'Changed again';
+  await assert.rejects(writer.retry(conversation), /VALIDATION_ERROR/);
+  await writer.retry(conversation);
+  assert.equal(sequence, 2);
+  assert.notEqual(calls[0].request_id, calls[1].request_id);
+  assert.equal(calls[1].expected_revision, 4);
+  assert.deepEqual(calls[1].messages, calls[0].messages);
+  assert.deepEqual(calls[2], calls[1]);
+  assert.deepEqual(calls[3], calls[1]);
 });
 
 test('restored history interrupts unfinished streams and preserves tool metadata without running tools', async () => {

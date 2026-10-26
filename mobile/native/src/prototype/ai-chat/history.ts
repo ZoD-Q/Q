@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatPlugin, Conversation } from './state-model';
 import { decodePluginIdentity } from '../plugin-host/core';
+import { WorkbenchError } from '../api-workbench/core';
 
 export type HistorySummary = { id: string; title: string; revision: number; updated_at: string };
 export type HistoryDetail = HistorySummary & Conversation;
@@ -50,24 +51,51 @@ export function restoreHistory(detail: HistoryDetail): Conversation {
 }
 
 type SaveBody = Omit<Conversation, 'id'> & { request_id: string; expected_revision: number };
+function saveSnapshot(conversation: Conversation, revision: number, requestId: string): SaveBody {
+  return {
+    title: conversation.title,
+    messages: JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[],
+    ...(conversation.plugin ? { plugin: chatPluginSnapshot(conversation.plugin) } : {}),
+    request_id: requestId, expected_revision: revision,
+  };
+}
 /** One writer per conversation. An uncertain request blocks later writes until its exact replay succeeds. */
 export function createHistoryWriter(save: (id: string, body: SaveBody) => Promise<HistoryDetail>, newId: () => string) {
   const revisions = new Map<string, number>();
   const pending = new Map<string, SaveBody>();
   const queues = new Map<string, Promise<void>>();
+  const rejected = new Set<string>();
+  const uncertain = new Set<string>();
   const seed = (id: string, revision: number, replaceSnapshot = false) => { if (!pending.has(id) && (replaceSnapshot || !revisions.has(id))) revisions.set(id, revision); };
   const run = (conversation: Conversation, retry = false): Promise<HistoryDetail> => {
     const previous = queues.get(conversation.id) ?? Promise.resolve();
     const operation = previous.catch(() => {}).then(async () => {
       let body = pending.get(conversation.id);
       if (body && !retry) throw new Error('HISTORY_SAVE_PENDING');
-      if (!body) { body = { title: conversation.title, messages: JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[], ...(conversation.plugin ? { plugin: chatPluginSnapshot(conversation.plugin) } : {}), request_id: newId(), expected_revision: revisions.get(conversation.id) ?? 0 }; pending.set(conversation.id, body); }
-      const result = await save(conversation.id, body);
+      // A structured validation rejection proves no write occurred, unless an
+      // earlier attempt had an unknown outcome. Only an explicit retry may use
+      // corrected local content, retaining the original revision for CAS.
+      if (body && retry && rejected.has(conversation.id)) {
+        const corrected = saveSnapshot(conversation, body.expected_revision, body.request_id);
+        if (JSON.stringify(corrected) !== JSON.stringify(body)) {
+          body = { ...corrected, request_id: newId() };
+          pending.set(conversation.id, body); rejected.delete(conversation.id);
+        }
+      }
+      if (!body) { body = saveSnapshot(conversation, revisions.get(conversation.id) ?? 0, newId()); pending.set(conversation.id, body); }
+      let result: HistoryDetail;
+      try { result = await save(conversation.id, body); }
+      catch (error) {
+        if (error instanceof WorkbenchError && error.status === 400 && error.code === 'VALIDATION_ERROR' && !uncertain.has(conversation.id)) rejected.add(conversation.id);
+        else { uncertain.add(conversation.id); rejected.delete(conversation.id); }
+        throw error;
+      }
       revisions.set(conversation.id, result.revision); pending.delete(conversation.id);
+      rejected.delete(conversation.id); uncertain.delete(conversation.id);
       return result;
     });
     queues.set(conversation.id, operation.then(() => {}, () => {}));
     return operation;
   };
-  return { seed, discard: (id: string, revision: number) => { pending.delete(id); revisions.set(id, revision); }, drain: () => Promise.all(queues.values()), save: (c: Conversation) => run(c), retry: (c: Conversation) => run(c, true), hasPending: (id: string) => pending.has(id) };
+  return { seed, discard: (id: string, revision: number) => { pending.delete(id); rejected.delete(id); uncertain.delete(id); revisions.set(id, revision); }, drain: () => Promise.all(queues.values()), save: (c: Conversation) => run(c), retry: (c: Conversation) => run(c, true), hasPending: (id: string) => pending.has(id) };
 }
