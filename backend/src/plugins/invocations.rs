@@ -1,5 +1,6 @@
 //! Every invocation is first persisted as an immutable proposal. Only the authenticated
-//! confirmation endpoint can claim it once; model planning cannot execute business tools.
+//! confirmation endpoint can claim it once; a separate host policy allows only
+//! built-in read-only bank queries to run during opted-in model planning.
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -31,6 +32,8 @@ pub struct Invocation {
     pub connection_id: Uuid,
     pub connection_revision: i64,
     pub tool_name: String,
+    pub tool_title: Option<String>,
+    pub input_schema: Option<Value>,
     pub arguments: Value,
     pub status: String,
     pub result: Option<Value>,
@@ -56,7 +59,7 @@ struct StoredInvocation {
     expires_at: DateTime<Utc>,
 }
 const STORED: &str = "id,connection_id,connection_revision,request_fingerprint,tool_name,arguments,tool_snapshot,schema_fingerprint,status,expires_at";
-const VIEW: &str = "i.id,i.connection_id,i.connection_revision,i.tool_name,i.arguments,i.status,i.result,i.error_code,i.created_at,i.updated_at,i.expires_at,i.connection_snapshot->>'title' AS connection_title,i.connection_snapshot->>'card_url' AS card_url,i.connection_snapshot->>'endpoint_url' AS endpoint_url,i.connection_snapshot->>'owner_name' AS owner_name,COALESCE(i.connection_snapshot->>'connection_kind','remote_mcp') AS connection_kind,i.connection_snapshot->>'builtin_service_id' AS builtin_service_id";
+const VIEW: &str = "i.id,i.connection_id,i.connection_revision,i.tool_name,i.tool_snapshot->>'title' AS tool_title,i.tool_snapshot->'inputSchema' AS input_schema,i.arguments,i.status,i.result,i.error_code,i.created_at,i.updated_at,i.expires_at,i.connection_snapshot->>'title' AS connection_title,i.connection_snapshot->>'card_url' AS card_url,i.connection_snapshot->>'endpoint_url' AS endpoint_url,i.connection_snapshot->>'owner_name' AS owner_name,COALESCE(i.connection_snapshot->>'connection_kind','remote_mcp') AS connection_kind,i.connection_snapshot->>'builtin_service_id' AS builtin_service_id";
 
 async fn expire(state: &AppState, user: Uuid) -> ApiResult<()> {
     sqlx::query("UPDATE plugin_invocations SET status=CASE WHEN status='running' THEN 'unknown' ELSE 'expired' END,error_code=CASE WHEN status='running' THEN 'PLUGIN_RESULT_UNKNOWN' ELSE 'PLUGIN_PROPOSAL_EXPIRED' END,updated_at=now() WHERE user_id=$1 AND ((status='running' AND execution_deadline<now()) OR (status='awaiting_confirmation' AND expires_at<now()))")
@@ -307,7 +310,7 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
         serde_json::from_value(proposal.tool_snapshot.clone()).map_err(|_| ApiError::internal())?;
     protocol::validate_arguments(&tool, &proposal.arguments).map_err(super::mcp_error)?;
     if connection.bank_service_id()?.is_some() {
-        return confirm_bank(state, user, &connection, &proposal, &tool).await;
+        return confirm_bank(state, user, &connection, &proposal, &tool, false).await;
     }
     let bearer = oauth::bearer_for(state, &connection).await?;
     let runtime = runtime(state)?;
@@ -378,12 +381,45 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
 }
 
 /// Internal demo tools and their receipt commit together. There is no remote dispatch window.
+/// Only host-owned built-in bank reads qualify. Remote annotations and tool names
+/// never grant authority; this entry point cannot execute a transfer.
+pub(crate) async fn execute_trusted_readonly_owned(
+    state: &AppState,
+    user: Uuid,
+    id: Uuid,
+) -> ApiResult<Option<Invocation>> {
+    let proposal = stored(state, user, id).await?;
+    let connection = store::owned(state, user, proposal.connection_id).await?;
+    if connection.bank_service_id()?.is_none()
+        || !matches!(
+            proposal.tool_name.as_str(),
+            "bank_balance" | "bank_transactions"
+        )
+    {
+        return Ok(None);
+    }
+    connection.usable()?;
+    let tools = store::load_tools_for_user(state, user, proposal.connection_id).await?;
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == proposal.tool_name)
+        .ok_or_else(changed)?;
+    if fingerprint(&json!(tool))? != proposal.schema_fingerprint {
+        return Err(changed());
+    }
+    protocol::validate_arguments(tool, &proposal.arguments).map_err(super::mcp_error)?;
+    Ok(Some(
+        confirm_bank(state, user, &connection, &proposal, tool, true).await?,
+    ))
+}
+
 async fn confirm_bank(
     state: &AppState,
     user: Uuid,
     connection: &store::StoredConnection,
     proposal: &StoredInvocation,
     tool: &Tool,
+    automatic: bool,
 ) -> ApiResult<Invocation> {
     let mut tx = state.pool.begin().await?;
     // Account deletion takes identity -> connection -> invocation. Use the same order,
@@ -423,6 +459,18 @@ async fn confirm_bank(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(not_found)?;
+    // Repeat policy against the locked immutable invocation, not model metadata.
+    if automatic
+        && (!matches!(
+            locked.tool_name.as_str(),
+            "bank_balance" | "bank_transactions"
+        ) || locked.tool_name != proposal.tool_name
+            || locked.schema_fingerprint != proposal.schema_fingerprint
+            || fingerprint(&locked.tool_snapshot)? != locked.schema_fingerprint
+            || fingerprint(&json!(tool))? != locked.schema_fingerprint)
+    {
+        return Err(changed());
+    }
     if locked.status != "awaiting_confirmation" {
         tx.commit().await?;
         return get_invocation(state, user, proposal.id).await;
@@ -460,8 +508,9 @@ async fn confirm_bank(
     } else {
         "succeeded"
     };
-    sqlx::query("UPDATE plugin_invocations SET status=$3,result=$4,error_code=NULL,confirmed_at=now(),execution_deadline=NULL,updated_at=now() WHERE id=$1 AND user_id=$2")
-        .bind(proposal.id).bind(user).bind(status).bind(result).execute(&mut *tx).await?;
+    // Automatic reads are not a user confirmation; do not fabricate that audit timestamp.
+    sqlx::query("UPDATE plugin_invocations SET status=$3,result=$4,error_code=NULL,confirmed_at=CASE WHEN $5 THEN NULL ELSE now() END,execution_deadline=NULL,updated_at=now() WHERE id=$1 AND user_id=$2")
+        .bind(proposal.id).bind(user).bind(status).bind(result).bind(automatic).execute(&mut *tx).await?;
     tx.commit().await?;
     get_invocation(state, user, proposal.id).await
 }
@@ -493,4 +542,205 @@ pub async fn cancel(
     sqlx::query("UPDATE plugin_invocations SET status='cancelled',updated_at=now() WHERE id=$1 AND user_id=$2 AND status='awaiting_confirmation'")
         .bind(id).bind(auth.user_id).execute(&state.pool).await?;
     Ok(Json(get_invocation(&state, auth.user_id, id).await?))
+}
+
+#[cfg(test)]
+mod automatic_tests {
+    use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use sqlx::{PgPool, postgres::PgPoolOptions};
+    use tower::ServiceExt;
+
+    async fn post(state: &AppState, path: &str, token: Option<&str>, body: Value) -> Value {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        let response = crate::app(state.clone(), vec![])
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap()
+    }
+    #[tokio::test]
+    #[ignore = "requires isolated TEST_DATABASE_URL; no external provider"]
+    async fn trusted_readonly_rechecks_locked_policy_expiry_revision_and_account_and_serializes_claims()
+     {
+        let url = std::env::var("TEST_DATABASE_URL").unwrap();
+        let admin = PgPool::connect(&url).await.unwrap();
+        let schema = format!("q_auto_policy_{}", Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA {schema}"))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let path = format!("SET search_path TO {schema}");
+        let pool = PgPoolOptions::new()
+            .max_connections(6)
+            .after_connect(move |c, _| {
+                let path = path.clone();
+                Box::pin(async move {
+                    sqlx::query(&path).execute(c).await?;
+                    Ok(())
+                })
+            })
+            .connect(&url)
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let state = AppState::new(pool).await.unwrap();
+        let auth = post(
+            &state,
+            "/v1/auth/register",
+            None,
+            json!({"handle":"auto_policy","password":"LocalQaPassword!","display_name":"Policy"}),
+        )
+        .await;
+        let user = Uuid::parse_str(auth["user"]["id"].as_str().unwrap()).unwrap();
+        let wallet = post(
+            &state,
+            "/v1/banking/connect",
+            auth["token"].as_str(),
+            json!({"bank_ids":["hsbc"]}),
+        )
+        .await;
+        let connection =
+            Uuid::parse_str(wallet["accounts"][0]["connection_id"].as_str().unwrap()).unwrap();
+        let proposal = prepare_invocation(
+            &state,
+            user,
+            connection,
+            "bank_balance".into(),
+            json!({}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            execute_trusted_readonly_owned(&state, Uuid::new_v4(), proposal.id)
+                .await
+                .is_err()
+        );
+        let (left, right) = tokio::join!(
+            execute_trusted_readonly_owned(&state, user, proposal.id),
+            execute_trusted_readonly_owned(&state, user, proposal.id)
+        );
+        let left = left.unwrap().unwrap();
+        let right = right.unwrap().unwrap();
+        assert_eq!(left.id, right.id);
+        assert_eq!(left.result, right.result);
+        assert_eq!(left.status, "succeeded");
+        let confirmation: Option<DateTime<Utc>> =
+            sqlx::query_scalar("SELECT confirmed_at FROM plugin_invocations WHERE id=$1")
+                .bind(proposal.id)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert!(
+            confirmation.is_none(),
+            "Automatic reads must not claim user confirmation"
+        );
+        // A fixture-only insert trigger creates an already-expired immutable
+        // proposal without weakening the production UPDATE protection.
+        sqlx::raw_sql("CREATE FUNCTION expire_auto_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.expires_at=clock_timestamp()-interval '1 second'; RETURN NEW; END $$; CREATE TRIGGER expire_auto_fixture BEFORE INSERT ON plugin_invocations FOR EACH ROW EXECUTE FUNCTION expire_auto_fixture()")
+            .execute(&state.pool).await.unwrap();
+        let proposal = prepare_invocation(
+            &state,
+            user,
+            connection,
+            "bank_balance".into(),
+            json!({}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        sqlx::query("DROP TRIGGER expire_auto_fixture ON plugin_invocations")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            execute_trusted_readonly_owned(&state, user, proposal.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "expired"
+        );
+        let proposal = prepare_invocation(
+            &state,
+            user,
+            connection,
+            "bank_balance".into(),
+            json!({}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE plugin_connections SET revision=revision+1 WHERE id=$1")
+            .bind(connection)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert!(
+            execute_trusted_readonly_owned(&state, user, proposal.id)
+                .await
+                .is_err()
+        );
+        let proposal = prepare_invocation(
+            &state,
+            user,
+            connection,
+            "bank_balance".into(),
+            json!({}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            sqlx::query("UPDATE plugin_invocations SET tool_name='bank_transfer' WHERE id=$1")
+                .bind(proposal.id)
+                .execute(&state.pool)
+                .await
+                .is_err(),
+            "Database forbids replacing the stored read with a transfer"
+        );
+        let proposal = prepare_invocation(
+            &state,
+            user,
+            connection,
+            "bank_balance".into(),
+            json!({}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE identities SET status='suspended' WHERE id=$1")
+            .bind(user)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert!(
+            execute_trusted_readonly_owned(&state, user, proposal.id)
+                .await
+                .is_err()
+        );
+        let transfers: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM bank_demo_transactions WHERE kind='transfer'")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(transfers, 0);
+        state.pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+            .execute(&admin)
+            .await
+            .unwrap();
+        admin.close().await;
+    }
 }

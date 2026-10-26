@@ -67,6 +67,10 @@ function failure(code: string): MascotPresentation {
       return copy('paused', '暂时无法续答', 'Cannot continue yet',
         '请查看插件提示；工具不会自动重新执行。',
         'Review the plugin notice. Tools will not run again automatically.');
+    case 'PLUGIN_CONTINUATION_FAILED':
+      return copy('paused', '暂时无法继续回答', 'Could not continue the answer',
+        '结果已保留。请点击“继续回答”重试，无需重新执行工具。',
+        'The result is preserved. Select Continue answer to retry without running the tool again.');
     case 'MESSAGE_TOO_LONG': case 'VALIDATION_ERROR': case 'EMPTY_MESSAGE':
       return copy('paused', '请检查输入', 'Check your message',
         '调整文字内容或长度后再发送。', 'Review the message content or length, then send again.');
@@ -79,9 +83,20 @@ function failure(code: string): MascotPresentation {
 
 /** Presentation only: never starts, retries, or interprets configuration as live health. */
 export function getMascotPresentation(input: MascotPresentationInput): MascotPresentation {
+  const message = input.message?.role === 'assistant' ? input.message : undefined;
+  // The request now awaits the final history write before becoming idle. A
+  // terminal message means receiving ended, even while phase still looks active.
+  if (input.phase !== 'idle' && message && ['complete', 'incomplete', 'error', 'cancelled'].includes(message.status)) {
+    return copy('thinking', '正在保存回答', 'Saving the answer',
+      '本次接收已结束，正在同步记录。', 'Receiving has ended. Syncing the conversation record.', true);
+  }
+  // Waiting with a tool message also covers reading a saved result; only the
+  // responding phase here indicates the tool-turn record is being finalized.
+  if (input.phase === 'responding' && message?.status === 'tool') return copy('thinking', '正在保存对话', 'Saving the conversation',
+    '正在同步这一步的记录。', 'Syncing the record for this step.', true);
   // Public configuration checks and old errors must not replace a live request.
   if (input.phase === 'waiting') return copy('thinking', '正在准备回答', 'Preparing an answer',
-    '正在保存问题并等待服务响应。', 'Saving your question and waiting for the service.', true);
+    '正在处理请求，请稍候。', 'Working on the request. Please wait.', true);
   if (input.phase === 'thinking') return copy('thinking', '思考中', 'Thinking',
     '小Q正在梳理你的问题。', 'Q is working through your question.', true);
   if (input.phase === 'responding') return copy('streaming', '正在回答', 'Answering',
@@ -98,7 +113,6 @@ export function getMascotPresentation(input: MascotPresentationInput): MascotPre
   // displayed answer completed; surface its recovery before any old outcome.
   if (input.historyError) return failure('HISTORY_SAVE_PENDING');
 
-  const message = input.message?.role === 'assistant' ? input.message : undefined;
   if (message) {
     if (message.errorCode === 'INTERRUPTED') return interrupted();
     // The card owns live invocation status; this message alone cannot prove that

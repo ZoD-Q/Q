@@ -19,7 +19,7 @@ const noop = () => {};
 const design = { ...Object.fromEntries(['Action', 'Choice', 'IconAction', 'Input', 'Page', 'Row', 'Sheet', 'Tabs', 'Type'].map(name => [name, name])), useDesign: () => ({ colors: {}, text: zh => zh, phone: false }) };
 const react = { useEffect: noop, useRef: value => ({ current: value }), useState: value => [typeof value === 'function' ? value() : value, noop] };
 const jsx = (type, props) => ({ type, props });
-const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown', 'ChevronRight', 'Lightbulb', 'Paperclip', 'Plus', 'Search', 'SlidersHorizontal', 'SquarePen', 'Square', 'RotateCcw', 'RefreshCw'].map(name => [name, name]));
+const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown', 'ChevronRight', 'Lightbulb', 'Paperclip', 'Plus', 'Search', 'SlidersHorizontal', 'SquarePen', 'Square', 'RotateCcw', 'RefreshCw', 'X'].map(name => [name, name]));
 
 /** Inspect actual component action wiring; native layout is verified separately. */
 function component(path, imports) {
@@ -34,6 +34,7 @@ function component(path, imports) {
   return module.exports;
 }
 function nodes(tree, result = []) {
+  if (tree?.type === 'Sheet' && !tree.props.visible) return result;
   if (Array.isArray(tree)) { tree.forEach(child => nodes(child, result)); return result; }
   if (tree && typeof tree === 'object') { result.push(tree); nodes(tree.props?.children, result); }
   return result;
@@ -71,7 +72,7 @@ test('selected-bank chat keeps model availability and its working refresh action
   for (const statusPhase of ['unconfigured', 'error']) {
     controller.statusPhase = statusPhase;
     let tree = render();
-    assert.equal(statusSheet(tree).props.visible, false);
+    assert.equal(statusSheet(tree), undefined, 'closed sheets are excluded from visible controls');
     const notice = tree.find(node => node.type === 'Pressable' && node.props.testID === 'chat-notice');
     assert.ok(notice, `${statusPhase}: a discoverable notice opens status details`);
     assert.equal(notice.props.accessibilityRole, 'button');
@@ -85,9 +86,11 @@ test('selected-bank chat keeps model availability and its working refresh action
     assert.equal(check.props.disabled, false);
     assert.equal(check.props.onPress, controller.reconnect);
     check.props.onPress();
-    assert.ok(tree.some(node => node.type === 'Type' && typeof node.props.children === 'string' && node.props.children.includes('DeepSeek 理解你的请求')));
+    assert.equal(tree.some(node => node.type === 'Type' && typeof node.props.children === 'string' && /DeepSeek 理解你的请求|插件对话关闭深度思考/.test(node.props.children)), false);
+    assert.equal(tree.some(node => node.type === 'Action' && ['查询余额', '填写转账'].includes(node.props.label)), false);
+    assert.ok(tree.some(node => node.type === 'IconAction' && node.props.label === '移除插件'));
     sheet.props.onClose();
-    assert.equal(statusSheet(render()).props.visible, false);
+    assert.equal(statusSheet(render()), undefined);
   }
   assert.equal(checks, 2);
   controller.statusPhase = 'ready'; controller.status = { configured: true };
@@ -100,22 +103,36 @@ test('selected-bank chat keeps model availability and its working refresh action
   const historyNotice = failed.find(node => node.type === 'Pressable' && node.props.testID === 'chat-notice');
   assert.ok(historyNotice, 'a failed history sync remains discoverable outside the sheet');
   assert.match(historyNotice.props.accessibilityLabel, /记录尚未同步/);
-  assert.equal(statusSheet(failed).props.visible, false);
+  assert.equal(statusSheet(failed), undefined);
   historyNotice.props.onPress();
   failed = render();
   const sheet = statusSheet(failed);
   assert.equal(sheet.props.visible, true, 'the history notice opens status details');
   const details = nodes(sheet);
-  const notice = details.find(node => node.type === 'Type' && Array.isArray(node.props.children) && node.props.children.includes('VALIDATION_ERROR'));
-  assert.ok(notice, 'history error retains its stable diagnostic code');
-  assert.equal(notice.props.children[0], messages.historyErrorMessage('VALIDATION_ERROR', zh => zh));
-  assert.doesNotMatch(notice.props.children[0], /重新登录|检查网络/);
+  const notice = details.find(node => node.type === 'Type' && node.props.children === messages.historyErrorMessage('VALIDATION_ERROR', zh => zh));
+  assert.ok(notice, 'history recovery stays readable without a machine code');
+  assert.doesNotMatch(notice.props.children, /重新登录|检查网络|VALIDATION_ERROR/);
   const sync = details.find(node => node.type === 'Action' && node.props.label === '重试同步');
   const reload = details.find(node => node.type === 'Action' && node.props.label === '重载云端版本（替换未保存内容）');
   assert.ok(sync, 'sync recovery stays available within status details');
   assert.ok(reload, 'cloud reload stays available within status details');
   sync.props.onPress(); reload.props.onPress();
   assert.equal(syncs, 1); assert.equal(reloads, 1);
+  sheet.props.onClose();
+  assert.equal(statusSheet(render()), undefined);
+
+  let resumes = 0;
+  controller.historyError = ''; controller.session = { token: 'fixture', user: { handle: 'fixture' } }; controller.resumeTool = () => { resumes++; };
+  controller.conversation = { id: 'c', title: 'Query', plugin: bank, messages: [{ id: 'u', role: 'user', content: '查询余额', status: 'complete' }, { id: 'tool', role: 'assistant', content: '', status: 'tool', toolProposalId: bank.id }] };
+  controller.busy = true; controller.phase = 'waiting';
+  const pendingCard = render().find(node => node.type === 'ChatProposal');
+  assert.equal(pendingCard.props.disabled, true); assert.equal(pendingCard.props.onContinue, undefined);
+  controller.busy = false; controller.phase = 'idle'; controller.toolResumeTarget = { conversationId: 'c', messageId: 'tool', invocationId: bank.id };
+  const recovering = render();
+  recovering.find(node => node.type === 'Action' && node.props.label === '继续回答').props.onPress(); assert.equal(resumes, 1);
+  controller.conversation.messages.push({ id: 'reply', role: 'assistant', content: '模拟余额 HK$100,000。', status: 'complete', toolInvocationIds: [bank.id] });
+  const answeredCard = render().find(node => node.type === 'ChatProposal');
+  assert.equal(answeredCard.props.mediaOnly, true); assert.equal(answeredCard.props.onContinue, undefined);
 });
 
 test('completed bank errors can continue with the model but never repeat confirmation', () => {

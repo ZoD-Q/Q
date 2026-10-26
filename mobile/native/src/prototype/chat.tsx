@@ -23,6 +23,7 @@ import {
   Square,
   RotateCcw,
   ChevronRight,
+  X,
 } from "lucide-react-native";
 import {
   Action,
@@ -38,7 +39,7 @@ import {
 import { Reveal, selectionFeedback } from "./motion";
 
 import type { Conversation } from "./ai-chat/state-model";
-import { MODEL_NAMES } from "./ai-chat/state-model";
+import { MODEL_NAMES, toolResultIsAnswered } from "./ai-chat/state-model";
 import type { ChatController } from "./ai-chat/use-chat";
 import { ChatAuthSheet } from "./ai-chat/auth-sheet";
 import { chatErrorMessage, chatStatusErrorMessage, historyErrorMessage } from "./ai-chat/messages";
@@ -139,8 +140,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
           </Pressable>
         </View>
       ) : null}
-      {bankPlugin ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}><Action kind="ghost" label={text("填写转账", "Fill transfer")} disabled={controller.busy} onPress={() => setBankForm(true)} /><Action kind="ghost" label={text("查询余额", "Check balance")} disabled={controller.busy} onPress={() => suggestion(text("查询余额", "Show balance"))} /></View> : null}
-      {controller.plugin && <View style={{ gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><Action kind="ghost" label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View><Type size={11} muted>{bankPlugin ? text('DeepSeek 理解你的请求并选择银行工具，确认后执行。当前使用模拟港币。', 'DeepSeek understands your request and selects bank tools, which run after confirmation. Funds are simulated HKD.') : text('插件对话关闭深度思考；执行工具前会请你确认。', 'Plugin chat uses standard mode and asks before executing tools.')}</Type></View>}
+      {controller.plugin && <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingLeft: 12, gap: 4, borderRadius: 16, backgroundColor: colors.soft }}><Type size={13} color={colors.accent}>{controller.plugin.title}</Type><IconAction icon={X} label={text('移除插件', 'Remove plugin')} disabled={controller.busy} onPress={() => controller.selectPlugin(null)} /></View>}
       <View
         style={{
           backgroundColor: colors.surface,
@@ -367,7 +367,8 @@ export function ChatPage({ controller, onOpenPlugins }: {
               gap: 28,
             }}
           >
-            {conversation!.messages.map((message) => (
+            {conversation!.messages.map((message) => toolResultIsAnswered(conversation!, message.id) && message.toolProposalId && controller.session && conversation?.plugin
+              ? <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} mediaOnly /> : (
               <Reveal
                 key={message.id}
                 style={{
@@ -395,13 +396,14 @@ export function ChatPage({ controller, onOpenPlugins }: {
                   </View>
                 ) : null}
                 {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
-                {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => controller.resumeTool(message.id, message.toolProposalId!) : undefined} />}
+                {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => { void controller.resumeTool(message.id, message.toolProposalId!); } : undefined} />}
+                {message.id === conversation?.messages.at(-1)?.id && message.id === controller.toolResumeTarget?.messageId && message.toolProposalId
+                  ? <Action kind="ghost" label={text('继续回答', 'Continue answer')} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onPress={() => { void controller.resumeTool(message.id, message.toolProposalId!); }} style={{ alignSelf: 'flex-start' }} /> : null}
                 {message.status === "cancelled" ? <Type size={13} muted>{message.errorCode === "INTERRUPTED" ? text("上次回答已中断，已收到的内容保留。", "The previous answer was interrupted. Received text is preserved.") : text("已停止接收，已收到的内容保留。", "Stopped receiving. The text received so far is preserved.")}</Type> : null}
                 {message.status === "error" ? <Type selectable size={13} color={colors.danger}>{chatErrorMessage(message.errorCode ?? "AI_UPSTREAM_ERROR", text)}</Type> : null}
                 {message.status === "incomplete" ? <Type size={13} muted>{message.finishReason === "length"
                   ? text("回答达到本次长度上限，内容未完整结束。", "The answer reached this request’s length limit and is incomplete.")
                   : text("供应商未完整返回本次回答。", "The provider did not complete this answer.")}</Type> : null}
-                {message.contextLimited ? <Type size={11} muted>{text("本次使用了最近的完整对话作为上下文。", "This answer used the most recent complete turns as context.")}</Type> : null}
                 {message.role === "assistant" && message.id === conversation?.messages.at(-1)?.id && ["error", "incomplete", "cancelled"].includes(message.status)
                   ? <Action kind="ghost" icon={RotateCcw} label={text("重试回答", "Retry answer")} onPress={controller.retry} disabled={controller.busy || controller.authBusy || controller.historyBusy} style={{ alignSelf: "flex-start" }} /> : null}
               </Reveal>
@@ -451,7 +453,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
         {controller.historyBusy ? <Type muted size={13}>{text("正在同步聊天记录…", "Syncing chat history…")}</Type> : null}
         {controller.historyUnavailable ? <Type muted size={13}>{text("当前服务器暂不支持云端历史，对话仅保留在本次会话。", "This server does not support cloud history yet. Chats are kept for this session only.")}</Type> : null}
         {controller.historyError ? <View style={{ gap: 12 }}>
-          <Type selectable color={colors.danger}>{historyErrorMessage(controller.historyError, text)} ({controller.historyError})</Type>
+          <Type selectable color={colors.danger}>{historyErrorMessage(controller.historyError, text)}</Type>
           <Action kind="ghost" label={text("重试同步", "Retry sync")} disabled={controller.historyBusy} onPress={() => { void controller.retryHistory(); }} />
           <Type muted size={13}>{text("如果发生版本冲突，可以重载云端记录；这会替换本机尚未保存的内容。", "For a version conflict, you can reload cloud history. This replaces unsaved changes on this device.")}</Type>
           <Action kind="ghost" label={text("重载云端版本（替换未保存内容）", "Reload cloud version (replace unsaved changes)")} disabled={controller.busy || controller.historyBusy} onPress={controller.reloadCloud} />
@@ -475,6 +477,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
         title={text("对话工具", "Chat tools")}
         onClose={() => setTools(false)}
       >
+        {bankPlugin ? <Row title={text('填写转账', 'Fill a transfer')} onPress={() => { setTools(false); setBankForm(true); }} /> : null}
         <Row
           icon={Paperclip}
           title={text("添加文件", "Attach a file")}
@@ -547,7 +550,7 @@ export function HistoryPage({
       }
     >
       {controller.historyUnavailable ? <Type size={13} muted>{text("当前仅显示本次会话的记录。云端历史需要后端升级。", "Only this session’s chats are shown. Cloud history requires a server update.")}</Type> : null}
-      {controller.historyError ? <><Type color={colors.danger}>{historyErrorMessage(controller.historyError, text)} ({controller.historyError})</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /></> : null}
+      {controller.historyError ? <><Type color={colors.danger}>{historyErrorMessage(controller.historyError, text)}</Type><Action kind="ghost" label={text("重试同步", "Retry sync")} onPress={() => { void controller.retryHistory(); }} /></> : null}
       <Action kind="ghost" label={controller.historyBusy ? text("正在加载…", "Loading…") : text("刷新历史", "Refresh history")} disabled={controller.historyBusy} onPress={() => { void controller.loadHistory(); }} />
       <Input
         label={text("搜索对话", "Search conversations")}

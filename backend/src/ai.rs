@@ -78,6 +78,8 @@ pub struct ChatRequest {
     pub plugin_connection_id: Option<Uuid>,
     #[serde(default)]
     pub tool_invocation_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub automatic_readonly_tools: bool,
 }
 
 impl ChatRequest {
@@ -91,6 +93,7 @@ impl ChatRequest {
                 != self.tool_invocation_ids.len()
             || (self.plugin_connection_id.is_none() && !self.tool_invocation_ids.is_empty())
             || (self.plugin_connection_id.is_some() && self.thinking)
+            || (self.automatic_readonly_tools && self.plugin_connection_id.is_none())
         {
             return Err(ApiError::validation(
                 "Plugin mode requires thinking disabled and at most eight distinct saved invocation IDs.",
@@ -154,11 +157,13 @@ pub struct ModelInfo {
 #[derive(Serialize)]
 pub struct AiStatus {
     configured: bool,
+    automatic_readonly_tools: bool,
     models: [ModelInfo; 2],
 }
 pub async fn status(State(state): State<AppState>) -> Json<AiStatus> {
     Json(AiStatus {
         configured: state.ai.is_some(),
+        automatic_readonly_tools: true,
         models: [
             ModelInfo {
                 id: ChatModel::Flash,
@@ -705,11 +710,23 @@ mod tests {
             thinking: false,
             plugin_connection_id: None,
             tool_invocation_ids: Vec::new(),
+            automatic_readonly_tools: false,
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: "Hello".into(),
             }],
         }
+    }
+    #[test]
+    fn automatic_readonly_requires_plugin_and_is_backwards_compatible() {
+        let mut request = request();
+        assert!(request.validate().is_ok());
+        request.automatic_readonly_tools = true;
+        assert!(request.validate().is_err());
+        request.plugin_connection_id = Some(Uuid::new_v4());
+        assert!(request.validate().is_ok());
+        request.thinking = true;
+        assert!(request.validate().is_err());
     }
     fn chunk(delta: Value, finish: Value) -> String {
         format!(

@@ -31,6 +31,41 @@ test('an independent configuration check cannot replace an actively arriving ans
   }
 });
 
+test('a terminal message still awaiting persistence is saving, not a live text stream', () => {
+  for (const status of ['complete', 'incomplete', 'error', 'cancelled']) {
+    const result = present(answer(status), { phase: 'responding', messageError: 'AI_BUSY' });
+    assert.equal(result.state, 'thinking');
+    assert.equal(result.title.zh, '正在保存回答');
+    assert.equal(result.busy, true);
+    assert.doesNotMatch(result.detail.zh, /正在接收|运行正常|系统正常/);
+  }
+  assert.equal(present(answer('complete')).state, 'complete');
+  assert.equal(present(answer('error')).state, 'error');
+  const failedSave = present(answer('complete'), { historyError: 'REQUEST_FAILED' });
+  assert.equal(failedSave.title.zh, '历史尚未同步');
+});
+
+test('a tool result read and a tool-turn save remain distinct from completion', () => {
+  const tool = answer('tool', { content: '', toolProposalId: 'saved-result', finishReason: 'tool_calls' });
+  const reading = present(tool, { phase: 'waiting', messageError: 'PLUGIN_CONTINUATION_FAILED' });
+  assert.equal(reading.title.zh, '正在准备回答');
+  assert.equal(reading.detail.zh, '正在处理请求，请稍候。');
+  assert.equal(reading.busy, true);
+  const saving = present(tool, { phase: 'responding' });
+  assert.equal(saving.title.zh, '正在保存对话');
+  assert.equal(saving.busy, true);
+  assert.equal(present(tool).title.zh, '查看插件状态');
+});
+
+test('failed plugin continuation preserves the result and directs the explicit answer recovery', () => {
+  const result = present(answer('tool', { toolProposalId: 'saved-result' }), { messageError: 'PLUGIN_CONTINUATION_FAILED' });
+  assert.equal(result.state, 'paused');
+  assert.equal(result.title.zh, '暂时无法继续回答');
+  assert.match(result.detail.zh, /继续回答/);
+  assert.match(result.detail.zh, /无需重新执行工具/);
+  assert.equal(result.busy, false);
+});
+
 test('idle configuration is not presented as provider uptime or successful generation', () => {
   const result = getMascotPresentation({ phase: 'idle', statusPhase: 'ready', hasSession: true });
   assert.equal(result.state, 'ready');

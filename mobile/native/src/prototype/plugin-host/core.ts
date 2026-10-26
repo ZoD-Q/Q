@@ -47,7 +47,7 @@ export type PluginConnection = {
 export type PluginTool = { name: string; title?: string | null; description: string; inputSchema: JsonObject; outputSchema?: unknown; annotations?: unknown; _meta?: unknown };
 export type Candidate = { candidate_id: string; card_url: string; endpoint_url: string; name: string; title: string; description: string; version: string; owner_name?: string | null };
 export type Discovery = { discovery_id: string; expires_at: string; candidates: Candidate[] };
-export type PluginInvocation = { id: string; connection_id: string; connection_revision: number; connection_title: string; card_url: string; endpoint_url: string; owner_name?: string | null; connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null; tool_name: string; arguments: JsonObject; status: string; result: unknown; error_code: string | null; created_at: string; updated_at: string; expires_at: string };
+export type PluginInvocation = { id: string; connection_id: string; connection_revision: number; connection_title: string; card_url: string; endpoint_url: string; owner_name?: string | null; connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null; tool_name: string; tool_title?: string | null; input_schema?: JsonObject | null; arguments: JsonObject; status: string; result: unknown; error_code: string | null; created_at: string; updated_at: string; expires_at: string };
 export type ResourceLink = { type: 'resource_link'; uri: string; name: string; title?: string; description?: string; mimeType?: string };
 export type PluginContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string } | ResourceLink;
 export type PluginResult = { content: PluginContent[]; structuredContent?: unknown; isError?: boolean };
@@ -113,6 +113,7 @@ export function decodeDiscovery(value: unknown): Discovery {
 }
 export function decodeInvocation(value: unknown): PluginInvocation {
   if (!record(value) || !isUuid(value.id) || !isUuid(value.connection_id) || !Number.isSafeInteger(value.connection_revision) || !str(value.connection_title) || !str(value.card_url) || !str(value.endpoint_url) || !str(value.expires_at, 64) || !toolName(value.tool_name) || !record(value.arguments) || !str(value.status, 64) || !nullable(value.error_code) || !str(value.created_at, 64) || !str(value.updated_at, 64)) return fail();
+  if ((value.tool_title !== undefined && value.tool_title !== null && !str(value.tool_title)) || (value.input_schema !== undefined && value.input_schema !== null && !record(value.input_schema))) return fail();
   if (!['awaiting_confirmation', 'running', 'succeeded', 'tool_error', 'failed', 'unknown', 'cancelled', 'expired', 'input_required'].includes(value.status)) return fail();
   return { ...value, ...decodePluginIdentity(value), owner_name: normalizeOwnerName(value.owner_name) } as PluginInvocation;
 }

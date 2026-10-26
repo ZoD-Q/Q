@@ -40,7 +40,7 @@ const hookSource = ts.transpileModule(readFileSync(new URL('./use-chat.ts', impo
 function harness({ stored = token, statusFetch = async () => json(configured), meFetch = async () => json(user),
   historyFetch = async () => new Response('', { status: 404 }), historySave, historyDetail, bankFetch,
 } = {}) {
-  const slots = [], calls = [], timers = new Map(), streams = [], streamCompletions = [], historyPosts = [], ordering = [];
+  const slots = [], calls = [], timers = new Map(), streams = [], streamCompletions = [], streamFailures = [], historyPosts = [], ordering = [];
   let cursor = 0, dirty = true, visible = true, mounted = true, pendingEffects = [], result, now = 0, nextId = 0;
   const react = {
     useState(initial) {
@@ -96,6 +96,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
       streams.push(options); ordering.push('chat:POST');
       return new Promise((resolve, reject) => {
         streamCompletions.push(resolve);
+        streamFailures.push(reject);
         options.signal.addEventListener('abort', () => reject(new stream.ChatError('CANCELLED')), { once: true });
       });
     } },
@@ -137,6 +138,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
       streams[index].onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'tool_calls' });
       streamCompletions[index]();
     },
+    failStream(index, code) { streamFailures[index](new stream.ChatError(code)); },
     async flush() { for (let i = 0; i < 80; i++) { await Promise.resolve(); if (dirty && mounted) render(); } },
     setVisible(value) { visible = value; if (mounted) render(); },
     advance(duration) {
@@ -227,6 +229,40 @@ test('mascot completion follows successful done and is cleared on a new conversa
   assert.equal(completed.busy, false);
   view.current.newConversation(); await view.flush();
   assert.equal(getMascotPresentation({ phase: view.current.phase, message: view.current.conversation?.messages.at(-1) }).state, 'ready');
+});
+
+test('mascot waits for the actual final history save before showing completion or sync recovery', async t => {
+  for (const failed of [false, true]) {
+    const finalSave = deferred();
+    let finalSnapshot;
+    const view = harness({
+      historyFetch: async () => json({ items: [], next_cursor: null }),
+      historySave: (id, body) => {
+        const snapshot = { id, ...body, revision: body.expected_revision + 1, updated_at: user.created_at };
+        if (body.messages.at(-1)?.status === 'complete') { finalSnapshot = snapshot; return finalSave.promise; }
+        return json(snapshot);
+      },
+    });
+    t.after(view.close); await view.flush(); view.grantConsent();
+    assert.equal(view.current.send('save state fixture'), true); await view.flush();
+    view.finishStream(); await view.flush();
+    assert.ok(finalSnapshot);
+    assert.equal(view.current.phase, 'responding');
+    assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+    const presentation = () => getMascotPresentation({
+      phase: view.current.phase,
+      message: view.current.conversation.messages.at(-1),
+      historyError: view.current.historyError,
+    });
+    assert.equal(presentation().title.zh, '正在保存回答');
+    assert.equal(presentation().busy, true);
+    finalSave.resolve(failed ? new Response('', { status: 503 }) : json(finalSnapshot));
+    await view.flush();
+    assert.equal(view.current.phase, 'idle');
+    assert.equal(presentation().state, failed ? 'error' : 'complete');
+    assert.equal(presentation().title.zh, failed ? '历史尚未同步' : '回答完成');
+    assert.equal(presentation().busy, false);
+  }
 });
 
 test('temporary session restore failure preserves the existing identity and last known service config', async t => {
@@ -468,13 +504,13 @@ test('a complete remote connection keeps its chat identity while history exclude
 
 test('bank chat saves history before the model and displays its saved proposal without confirming',async t=>{
  const gate=deferred();let first=true;
- const view=harness({historyFetch:cloudHistory,historySave:(id,body)=>{if(first){first=false;return gate.promise;}return strictPluginHistory(id,body);}});t.after(view.close);
+ const invocationId='55555555-5555-4555-8555-555555555555';
+ const view=harness({historyFetch:cloudHistory,bankFetch:async(path)=>{assert.equal(path,`/v1/plugins/invocations/${invocationId}`);return json(savedInvocation({id:invocationId}));},historySave:(id,body)=>{if(first){first=false;return gate.promise;}return strictPluginHistory(id,body);}});t.after(view.close);
  await view.flush();view.grantConsent();view.current.selectPlugin(bankConnection);await view.flush();
  assert.equal(view.current.send('Transfer HKD 500 from HSBC to Chen at BOCHK'),true);await view.flush();assert.equal(view.streams.length,0);
  const firstPost=view.historyPosts[0];assert.equal(firstPost.body.plugin.connection_kind,'bank_demo');assert.equal(firstPost.body.messages.at(-1).bankCommand,undefined);
  gate.resolve(json({id:firstPost.id,...firstPost.body,revision:1,updated_at:user.created_at}));await view.flush();
  assert.equal(view.streams.length,1);assert.deepEqual(view.ordering,['history:POST','chat:POST']);
- const invocationId='55555555-5555-4555-8555-555555555555';
  view.finishToolStream({invocation_id:invocationId,connection_id:bankConnectionId,tool_name:'bank_transfer',arguments:{to_bank_id:'bochk',recipient:'demo_chen',amount_minor:50000}});await view.flush();
  const answer=view.current.conversation.messages.at(-1);assert.equal(answer.status,'tool');assert.equal(answer.toolProposalId,invocationId);
  assert.equal(view.historyPosts.at(-1).body.messages.at(-1).toolProposalId,invocationId);
@@ -483,7 +519,7 @@ test('bank chat saves history before the model and displays its saved proposal w
  assert.equal(view.streams.length,2);assert.deepEqual([...view.streams[1].request.tool_invocation_ids],[invocationId]);
  assert.equal(view.streams[1].request.plugin_connection_id,bankConnectionId);
  assert.equal('tool_result' in view.streams[1].request,false);
- assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
+ assert.deepEqual(view.calls.filter(call=>call.path.startsWith('/v1/plugins/')).map(call=>[call.path,call.method]),[[`/v1/plugins/invocations/${invocationId}`,'GET']]);
 });
 
 test('only an explicit legacy bank retry reuses its old preparation key and payload',async t=>{
@@ -577,4 +613,121 @@ test('a rejected history snapshot preserves the prompt and accurate error withou
   assert.equal(view.streams.length, 1);
   assert.equal(view.current.conversation.messages.filter(message => message.role === 'user').length, 1);
   assert.equal(view.current.conversation.messages[0].content, '你好');
+});
+
+function savedInvocation(overrides = {}) {
+  return { ...bankConnection, id:'55555555-5555-4555-8555-555555555555', connection_id:bankConnectionId,
+    connection_title:bankConnection.title, connection_revision:1, tool_name:'bank_balance', arguments:{}, status:'succeeded',
+    result:{content:[{type:'text',text:'HK$100,000 demo balance'}],structuredContent:{kind:'bank_balance',mode:'demo',currency:'HKD',bank_id:'hsbc',balance_minor:10000000}},
+    error_code:null, expires_at:'2026-10-26T00:10:00Z', ...overrides };
+}
+function automaticHarness(options = {}) {
+  return harness({ historyFetch:cloudHistory, statusFetch:async()=>json({...configured,automatic_readonly_tools:true}),
+    bankFetch:async(path,options)=>{assert.equal(options.method,'GET');return json(savedInvocation({id:path.split('/').at(-1)}));}, ...options });
+}
+async function sendBalance(view) {
+  await view.flush(); view.grantConsent(); view.current.selectPlugin(bankConnection); await view.flush();
+  assert.equal(view.current.send('查询余额'),true); await view.flush();
+  assert.equal(view.streams.length,1);
+}
+function automaticProposal(id = savedInvocation().id) {
+  return {invocation_id:id,connection_id:bankConnectionId,tool_name:'bank_balance',arguments:{},automatic:true};
+}
+
+test('advertised trusted queries save the tool history, read its result, then answer once without confirming a tool',async t=>{
+  const view=automaticHarness();t.after(view.close);await sendBalance(view);
+  assert.equal(view.streams[0].request.automatic_readonly_tools,true);
+  const id=savedInvocation().id;view.finishToolStream(automaticProposal());await view.flush();
+  assert.equal(view.streams.length,2);assert.deepEqual([...view.streams[1].request.tool_invocation_ids],[id]);
+  assert.deepEqual(view.ordering.slice(0,6),['history:POST','chat:POST','history:POST',`/v1/plugins/invocations/${id}:GET`,'history:POST','chat:POST']);
+  const tool=view.current.conversation.messages.find(message=>message.toolProposalId===id);
+  await view.current.resumeTool(tool.id,id);await view.flush();assert.equal(view.streams.length,2);
+  view.finishStream(1,'你的汇丰模拟余额为 HK$100,000。');await view.flush();
+  assert.equal(view.current.conversation.messages.filter(message=>message.role==='user').length,1);
+  assert.equal(view.current.conversation.messages.at(-1).status,'complete');
+  assert.equal(stateModel.toolResultIsAnswered(view.current.conversation,tool.id),true);
+  assert.ok(view.calls.filter(call=>call.path.startsWith('/v1/plugins/')).every(call=>call.method==='GET'));
+});
+
+test('old servers never receive the opt-in field and ordinary proposals never silently continue',async t=>{
+  const view=harness({historyFetch:cloudHistory});t.after(view.close);await sendBalance(view);
+  assert.equal('automatic_readonly_tools' in view.streams[0].request,false);
+  const proposal=automaticProposal();delete proposal.automatic;view.finishToolStream(proposal);await view.flush();
+  assert.equal(view.streams.length,1);assert.equal(view.calls.some(call=>call.path.startsWith('/v1/plugins/')),false);
+});
+
+test('automatic continuation waits for the final history commit and cannot be duplicated by a premature callback',async t=>{
+  const gate=deferred();let held;
+  const view=automaticHarness({historySave:(id,body)=>{
+    if(!held&&body.messages.at(-1)?.toolProposalId){held={id,body};return gate.promise;}
+    return strictPluginHistory(id,body);
+  }});t.after(view.close);await sendBalance(view);view.finishToolStream(automaticProposal());await view.flush();
+  assert.equal(view.current.busy,true);assert.equal(view.streams.length,1);
+  const answer=view.current.conversation.messages.at(-1);await view.current.resumeTool(answer.id,answer.toolProposalId);await view.flush();
+  assert.equal(view.streams.length,1);assert.equal(view.calls.some(call=>call.path.startsWith('/v1/plugins/')),false);
+  gate.resolve(strictPluginHistory(held.id,held.body));await view.flush();assert.equal(view.streams.length,2);
+});
+
+test('failed final history storage stops automatic continuation and later sync requires an explicit continue action',async t=>{
+  let failure=true;
+  const view=automaticHarness({historySave:(id,body)=>failure&&body.messages.at(-1)?.toolProposalId
+    ?new Response('',{status:503}):strictPluginHistory(id,body)});t.after(view.close);await sendBalance(view);
+  view.finishToolStream(automaticProposal());await view.flush();assert.equal(view.streams.length,1);
+  const target=view.current.toolResumeTarget;assert.equal(target.invocationId,savedInvocation().id);
+  assert.ok(view.current.historyError);assert.equal(view.calls.some(call=>call.path.startsWith('/v1/plugins/')),false);
+  failure=false;await view.current.retryHistory();await view.flush();assert.equal(view.current.historyError,'');assert.equal(view.streams.length,1);
+  await view.current.resumeTool(target.messageId,target.invocationId);await view.flush();assert.equal(view.streams.length,2);
+});
+
+test('a failed saved-result read exposes explicit recovery, preserving the result without re-executing the tool',async t=>{
+  let reads=0;
+  const view=automaticHarness({bankFetch:async()=>{if(++reads===1)throw Error('offline');return json(savedInvocation());}});t.after(view.close);await sendBalance(view);
+  view.finishToolStream(automaticProposal());await view.flush();assert.equal(view.streams.length,1);
+  assert.equal(view.current.messageError,'PLUGIN_CONTINUATION_FAILED');
+  const target=view.current.toolResumeTarget;assert.ok(target);
+  await Promise.all([view.current.resumeTool(target.messageId,target.invocationId),view.current.resumeTool(target.messageId,target.invocationId)]);await view.flush();
+  assert.equal(reads,2);assert.equal(view.streams.length,2);assert.equal(view.current.toolResumeTarget,null);
+  assert.ok(view.calls.filter(call=>call.path.startsWith('/v1/plugins/')).every(call=>call.method==='GET'));
+});
+
+test('saved results must match the conversation and be completed before any automatic answer',async t=>{
+  for(const invalid of [
+    {id:'99999999-9999-4999-8999-999999999999'}, {connection_id:'99999999-9999-4999-8999-999999999999'},
+    {status:'unknown'}, {status:'running'}, {status:'awaiting_confirmation'}, {result:null},
+  ]){
+    const view=automaticHarness({bankFetch:async()=>json(savedInvocation(invalid))});t.after(view.close);await sendBalance(view);
+    view.finishToolStream(automaticProposal());await view.flush();assert.equal(view.streams.length,1,JSON.stringify(invalid));
+    assert.ok(view.current.toolResumeTarget);assert.equal(view.current.messageError,'PLUGIN_CONTINUATION_FAILED');
+  }
+});
+
+test('stop, leaving, a new chat and account changes cancel a delayed automatic result read',async t=>{
+  for(const action of ['stop','leave','new','account']){
+    const gate=deferred();const view=automaticHarness({bankFetch:()=>gate.promise});t.after(view.close);await sendBalance(view);
+    view.finishToolStream(automaticProposal());await view.flush();assert.equal(view.streams.length,1);assert.equal(view.current.busy,true);
+    if(action==='stop')view.current.stop();else if(action==='leave')view.setVisible(false);else if(action==='new')view.current.newConversation();else await view.changeToken('q_'+'b'.repeat(43));
+    await view.flush();gate.resolve(json(savedInvocation()));await view.flush();assert.equal(view.streams.length,1,action);
+  }
+});
+
+test('opening completed tool history never automatically calls the model or confirms an operation',async t=>{
+  const id='66666666-6666-4666-8666-666666666666',invocation=savedInvocation();
+  const detail={id,title:'Saved query',revision:1,updated_at:user.created_at,plugin:history.chatPluginSnapshot(bankConnection),messages:[{id:'u',role:'user',content:'balance',status:'complete'},{id:'a',role:'assistant',content:'',status:'tool',toolProposalId:invocation.id}]};
+  const view=automaticHarness({historyFetch:async()=>json({items:[{id,title:detail.title,revision:1,updated_at:user.created_at}],next_cursor:null}),historyDetail:async()=>json(detail)});t.after(view.close);await view.flush();view.grantConsent();
+  await view.current.openConversation(id);await view.flush();assert.equal(view.streams.length,0);assert.equal(view.calls.some(call=>call.path.startsWith('/v1/plugins/')),false);
+});
+
+test('automatic chains cannot exceed eight saved results and preserve factual fallback when a reply fails',async t=>{
+  const view=automaticHarness();t.after(view.close);await sendBalance(view);
+  for(let step=0;step<8;step++){
+    const id=`55555555-5555-4555-8555-${String(step+1).padStart(12,'0')}`;
+    view.finishToolStream(automaticProposal(id),step);await view.flush();assert.equal(view.streams.length,step+2);
+    assert.equal(view.streams[step+1].request.tool_invocation_ids.length,step+1);
+  }
+  view.failStream(8,'AI_TIMEOUT');await view.flush();
+  const conversation=view.current.conversation;assert.equal(conversation.messages.at(-1).status,'error');
+  assert.ok(conversation.messages.filter(message=>message.toolProposalId).every(message=>!stateModel.toolResultIsAnswered(conversation,message.id)));
+  view.current.retry();await view.flush();assert.equal(view.streams.length,10);assert.equal(view.streams[9].request.tool_invocation_ids.length,8);
+  view.finishToolStream(automaticProposal('55555555-5555-4555-8555-000000000009'),9);await view.flush();
+  assert.equal(view.streams.length,10);assert.equal(view.current.messageError,'PLUGIN_TURN_LIMIT');
 });

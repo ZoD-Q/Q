@@ -184,6 +184,7 @@ backend-check:
     - cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --lib trusted_readonly_rechecks -- --ignored
 
 deploy-check:
   extends: .code-validation

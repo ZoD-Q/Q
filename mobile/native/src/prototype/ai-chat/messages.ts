@@ -23,8 +23,9 @@ export function chatErrorMessage(code: string, text: Translate) {
     case 'CANCELLED': return text('已停止接收回答。', 'Stopped receiving the answer.');
     case 'PLUGIN_AUTH_REQUIRED': return text('插件需要授权，请到“我的连接”完成授权后继续。Q 登录仍然有效。', 'Authorize the plugin under My connections. Your Q session is still valid.');
     case 'PLUGIN_RECONFIRM_REQUIRED': return text('插件内容已变化，请到“我的连接”检查更新。', 'The plugin changed. Review its update under My connections.');
-    case 'PLUGIN_TURN_LIMIT': return text('这一轮已使用 8 次工具结果，请开始新的一轮。', 'This turn reached eight tool results. Start a new turn.');
-    case 'PLUGIN_RESULT_UNAVAILABLE': return text('这次工具结果尚不可用于续答，请先查询调用状态。', 'This tool result is not ready for continuation. Check the invocation status.');
+    case 'PLUGIN_TURN_LIMIT': return text('这次处理的步骤较多，请开始新的提问。', 'This request needed several steps. Please start a new question.');
+    case 'PLUGIN_RESULT_UNAVAILABLE': return text('结果还在处理中，请稍后查看。', 'The result is still being prepared. Check again shortly.');
+    case 'PLUGIN_CONTINUATION_FAILED': return text('结果已保留，暂时未能继续回答。请重试。', 'The result is kept, but the answer could not continue. Please retry.');
     default: return text('暂时无法连接 Q 服务，请检查网络或稍后重试。', 'Unable to reach Q. Check the connection or try again later.');
   }
 }
