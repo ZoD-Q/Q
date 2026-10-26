@@ -111,7 +111,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
   const module = { exports: {} };
   runInNewContext(hookSource, { module, exports: module.exports, require: name => {
     assert.ok(name in imports, `Unmocked module: ${name}`); return imports[name];
-  }, AbortController });
+  }, AbortController, Error });
   const render = () => {
     cursor = 0; dirty = false;
     result = module.exports.useChat(visible);
@@ -508,4 +508,33 @@ test('failed bank chat history keeps its exact pending snapshot until explicit r
  view.current.retry();await view.flush();assert.equal(view.streams.length,1);
  assert.equal(view.current.conversation.messages.filter(message=>message.role==='user').length,1);
  assert.equal(view.calls.some(call=>call.path.startsWith('/v1/banking/')||call.path.startsWith('/v1/plugins/')),false);
+});
+
+
+test('a rejected history snapshot preserves the prompt and accurate error without starting AI; explicit sync precedes answer retry', async t => {
+  let rejectSave = true;
+  const view = harness({ historyFetch: cloudHistory, historySave: (id, body) => rejectSave
+    ? new Response(JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'Invalid history snapshot.' } }), { status: 400 })
+    : strictPluginHistory(id, body) });
+  t.after(view.close);
+  await view.flush(); view.grantConsent(); view.current.selectPlugin(bankConnection); await view.flush();
+  assert.equal(view.current.send('你好'), true); await view.flush();
+  assert.equal(view.current.historyError, 'VALIDATION_ERROR');
+  assert.equal(view.current.conversation.messages[0].content, '你好');
+  assert.equal(view.current.conversation.messages.at(-1).errorCode, 'HISTORY_SAVE_FAILED');
+  assert.equal(view.streams.length, 0);
+  const original = structuredClone(view.historyPosts[0]);
+  assert.equal(view.current.send('你好'), false);
+  view.current.retry(); await view.flush();
+  assert.equal(view.streams.length, 0);
+  rejectSave = false; await view.current.retryHistory(); await view.flush();
+  assert.equal(view.historyPosts[1].id, original.id);
+  assert.equal(view.historyPosts[1].body.expected_revision, original.body.expected_revision);
+  assert.equal(view.historyPosts[1].body.messages[0].content, '你好');
+  assert.notEqual(view.historyPosts[1].body.request_id, original.body.request_id);
+  assert.equal(view.current.historyError, ''); assert.equal(view.streams.length, 0);
+  view.current.retry(); await view.flush();
+  assert.equal(view.streams.length, 1);
+  assert.equal(view.current.conversation.messages.filter(message => message.role === 'user').length, 1);
+  assert.equal(view.current.conversation.messages[0].content, '你好');
 });

@@ -62,6 +62,17 @@ test('selected-bank chat keeps model availability and its working refresh action
   assert.equal(checks, 2);
   controller.statusPhase = 'ready'; controller.status = { configured: true };
   assert.equal(nodes(ChatPage({ controller, onOpenPlugins: noop })).some(node => node.props?.label === '重新检查'), false);
+  let syncs = 0, reloads = 0;
+  controller.historyError = 'VALIDATION_ERROR'; controller.retryHistory = () => { syncs++; }; controller.reloadCloud = () => { reloads++; };
+  const failed = nodes(ChatPage({ controller, onOpenPlugins: noop }));
+  const notice = failed.find(node => node.type === 'Type' && Array.isArray(node.props.children) && node.props.children.includes('VALIDATION_ERROR'));
+  assert.ok(notice, 'history error retains its stable diagnostic code');
+  assert.equal(notice.props.children[0], messages.historyErrorMessage('VALIDATION_ERROR', zh => zh));
+  assert.doesNotMatch(notice.props.children[0], /重新登录|检查网络/);
+  failed.find(node => node.type === 'Action' && node.props.label === '重试同步').props.onPress();
+  failed.find(node => node.type === 'Action' && node.props.label === '重载云端版本（替换本机未保存内容）').props.onPress();
+  assert.equal(syncs, 1); assert.equal(reloads, 1);
+
 });
 
 test('completed bank errors can continue with the model but never repeat confirmation', () => {
