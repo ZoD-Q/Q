@@ -12,7 +12,7 @@ export class ChatError extends Error {
 const MODELS = ["deepseek-flash", "deepseek-v4-pro"] as const;
 const FINISH_REASONS = ["stop", "length", "content_filter", "tool_calls", "insufficient_system_resource", "aborted"] as const;
 const SAFE_CODES = new Set(["AI_AUTH_ERROR", "AI_QUOTA_EXCEEDED", "AI_UPSTREAM_ERROR", "AI_TIMEOUT", "AI_NOT_CONFIGURED", "AI_RATE_LIMITED", "AI_BUSY", "UNAUTHORIZED", "VALIDATION_ERROR"]);
-for (const code of ['PLUGIN_AUTH_REQUIRED', 'PLUGIN_OAUTH_NOT_CONFIGURED', 'PLUGIN_RECONFIRM_REQUIRED', 'PLUGIN_RESULT_UNAVAILABLE', 'PLUGIN_UNAVAILABLE', 'MCP_INVALID_INPUT', 'MCP_UNSUPPORTED', 'MCP_TIMEOUT', 'MCP_NETWORK_ERROR']) SAFE_CODES.add(code);
+for (const code of ['PLUGIN_AUTH_REQUIRED', 'PLUGIN_OAUTH_NOT_CONFIGURED', 'PLUGIN_RECONFIRM_REQUIRED', 'PLUGIN_RESULT_UNAVAILABLE', 'PLUGIN_UNAVAILABLE', 'PLUGIN_TURN_LIMIT', 'MCP_INVALID_INPUT', 'MCP_UNSUPPORTED', 'MCP_TIMEOUT', 'MCP_NETWORK_ERROR']) SAFE_CODES.add(code);
 const MAX_FRAME_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 type Model = (typeof MODELS)[number];
@@ -21,9 +21,9 @@ type Usage = { prompt_tokens: number; completion_tokens: number; total_tokens: n
 export type ChatEvent =
   | { type: "status"; phase: "thinking" | "responding" }
   | { type: "delta"; text: string }
-  | { type: "tool_proposal"; invocation_id: string; connection_id: string; tool_name: string; arguments: Record<string, unknown> }
+  | { type: "tool_proposal"; invocation_id: string; connection_id: string; tool_name: string; arguments: Record<string, unknown>; automatic?: boolean }
   | { type: "done"; model: Model; finish_reason: FinishReason; usage?: Usage };
-export type ChatRequest = { model: string; thinking: boolean; messages: { role: "user" | "assistant"; content: string }[]; plugin_connection_id?: string; tool_invocation_ids?: string[] };
+export type ChatRequest = { model: string; thinking: boolean; messages: { role: "user" | "assistant"; content: string }[]; plugin_connection_id?: string; tool_invocation_ids?: string[]; automatic_readonly_tools?: boolean };
 export type StreamChatOptions = {
   baseUrl: string;
   token: string;
@@ -49,7 +49,7 @@ function textLength(value: unknown, max: number): number | null {
   return length;
 }
 
-export function decodeAiStatus(value: unknown): { configured: boolean; models: { id: Model; name: string }[] } {
+export function decodeAiStatus(value: unknown): { configured: boolean; models: { id: Model; name: string }[]; automatic_readonly_tools?: boolean } {
   if (!record(value) || typeof value.configured !== "boolean" || !Array.isArray(value.models) || value.models.length > MODELS.length) return invalidResponse();
   const ids = new Set<string>();
   const models = value.models.map(item => {
@@ -57,7 +57,8 @@ export function decodeAiStatus(value: unknown): { configured: boolean; models: {
     ids.add(item.id);
     return { id: item.id, name: item.name };
   });
-  return { configured: value.configured, models };
+  if (value.automatic_readonly_tools !== undefined && typeof value.automatic_readonly_tools !== 'boolean') return invalidResponse();
+  return { configured: value.configured, models, ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
 }
 
 function validateRequest(value: ChatRequest): ChatRequest {
@@ -72,7 +73,8 @@ function validateRequest(value: ChatRequest): ChatRequest {
   if (messages[messages.length - 1].role !== "user") throw new ChatError("VALIDATION_ERROR");
   if (value.plugin_connection_id !== undefined && (!uuid(value.plugin_connection_id) || value.thinking)) throw new ChatError('VALIDATION_ERROR');
   if (value.tool_invocation_ids !== undefined && (!value.plugin_connection_id || !Array.isArray(value.tool_invocation_ids) || value.tool_invocation_ids.length > 8 || !value.tool_invocation_ids.every(uuid) || new Set(value.tool_invocation_ids).size !== value.tool_invocation_ids.length)) throw new ChatError('VALIDATION_ERROR');
-  return { model: value.model, thinking: value.thinking, messages, ...(value.plugin_connection_id ? { plugin_connection_id: value.plugin_connection_id, tool_invocation_ids: value.tool_invocation_ids ?? [] } : {}) };
+  if (value.automatic_readonly_tools !== undefined && (typeof value.automatic_readonly_tools !== 'boolean' || (value.automatic_readonly_tools && !value.plugin_connection_id))) throw new ChatError('VALIDATION_ERROR');
+  return { model: value.model, thinking: value.thinking, messages, ...(value.plugin_connection_id ? { plugin_connection_id: value.plugin_connection_id, tool_invocation_ids: value.tool_invocation_ids ?? [] } : {}), ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
 }
 
 function endpoint(baseUrl: string): string {
@@ -112,8 +114,9 @@ class ChatParser {
   private decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   private model: string;
   private pluginId?: string;
+  private automaticReadEnabled: boolean;
   private emit: (event: ChatEvent) => void;
-  constructor(model: string, emit: (event: ChatEvent) => void, pluginId?: string) { this.model = model; this.emit = emit; this.pluginId = pluginId; }
+  constructor(model: string, emit: (event: ChatEvent) => void, pluginId?: string, automaticReadEnabled = false) { this.model = model; this.emit = emit; this.pluginId = pluginId; this.automaticReadEnabled = automaticReadEnabled; }
   push(bytes: Uint8Array) {
     for (const byte of bytes) {
       if (this.finished) return;
@@ -173,7 +176,8 @@ class ChatParser {
     } else if (kind === 'tool_proposal') {
       if (!this.pluginId || value.connection_id !== this.pluginId || this.hasProposal || !uuid(value.invocation_id) || !uuid(value.connection_id) || typeof value.tool_name !== 'string' || !value.tool_name || textLength(value.tool_name, 128) === null || !record(value.arguments)) return invalidResponse();
       this.hasProposal = true;
-      this.emit({ type: 'tool_proposal', invocation_id: value.invocation_id, connection_id: value.connection_id, tool_name: value.tool_name, arguments: value.arguments });
+      if (value.automatic !== undefined && (typeof value.automatic !== 'boolean' || (value.automatic && !this.automaticReadEnabled))) return invalidResponse();
+      this.emit({ type: 'tool_proposal', invocation_id: value.invocation_id, connection_id: value.connection_id, tool_name: value.tool_name, arguments: value.arguments, ...(value.automatic === undefined ? {} : { automatic: value.automatic }) });
     } else if (kind === "done") {
       if ((!this.hasAnswer && !this.hasProposal) || (this.hasProposal && value.finish_reason !== 'tool_calls') || (!this.hasProposal && value.finish_reason === 'tool_calls') || !oneOf(value.model, MODELS) || value.model !== this.model || !oneOf(value.finish_reason, FINISH_REASONS)) return invalidResponse();
       const event: ChatEvent = { type: "done", model: value.model, finish_reason: value.finish_reason };
@@ -276,7 +280,7 @@ export async function streamChat(options: StreamChatOptions): Promise<void> {
       if (controller.signal.aborted) throw failure || new ChatError("CANCELLED");
       options.onEvent(event);
       if (controller.signal.aborted) throw failure || new ChatError("CANCELLED");
-    }, request.plugin_connection_id);
+    }, request.plugin_connection_id, request.automatic_readonly_tools === true);
     let bytes = 0;
     while (!parser.finished) {
       const chunk = await read();

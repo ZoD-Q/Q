@@ -14,7 +14,7 @@ export function BankProposalView({ invocation, busy, needsRefresh, onConfirm, on
 }) {
   const { colors, text } = useDesign();
   const proposal = bankTransferArguments(invocation);
-  if (!proposal) return <View style={{ gap: 10 }}><Type color={colors.danger}>{text('无法核对这笔转账参数，请取消并重新填写。', 'This transfer could not be verified. Cancel it and create a new proposal.')}</Type>{invocation.status === 'awaiting_confirmation' && <Action kind="ghost" label={text('取消此提案', 'Cancel proposal')} disabled={busy} onPress={onCancel} />}</View>;
+  if (!proposal) return <View style={{ gap: 10 }}><Type color={colors.danger}>{text('无法核对这笔转账，请取消后重新填写。', 'This transfer could not be verified. Cancel it and enter the details again.')}</Type>{invocation.status === 'awaiting_confirmation' && <Action style={{ minHeight: 48 }} kind="ghost" label={text('取消', 'Cancel')} disabled={busy} onPress={onCancel} />}</View>;
   const source = getBank(proposal.sourceBankId), destination = getBank(proposal.destinationBankId);
   const receipt = bankReceiptForInvocation(invocation);
   const failure = bankFailureForInvocation(invocation);
@@ -49,18 +49,17 @@ export function BankProposalView({ invocation, busy, needsRefresh, onConfirm, on
     {receipt ? <View style={{ gap: 8 }}>
       <Type selectable size={13}>{text('付款账户余额：', 'Source balance: ')}{formatHKD(receipt.source_balance_minor)}</Type>
       {receipt.destination_balance_minor !== null && <Type selectable size={13}>{text('收款账户余额：', 'Destination balance: ')}{formatHKD(receipt.destination_balance_minor)}</Type>}
-      <Type selectable size={11} muted>{text('回执：', 'Receipt: ')}{receipt.id}</Type>
-      <Type selectable size={11} muted>{receipt.created_at}</Type>
+      <Type selectable size={12} muted>{new Date(receipt.created_at).toLocaleString(text('zh-CN', 'en-US'))}</Type>
     </View> : invocation.status === 'awaiting_confirmation' && !needsRefresh ? <>
       <Type size={14} weight="600">{text(`确认转出 ${formatHKD(proposal.amountMinor)}`, `Confirm ${formatHKD(proposal.amountMinor)}`)}</Type>
       <SlideConfirm key={invocation.id} busy={busy} onConfirm={onConfirm} />
-      <Action kind="ghost" label={text('取消转账', 'Cancel transfer')} disabled={busy} onPress={onCancel} />
+      <Action style={{ minHeight: 48 }} kind="ghost" label={text('取消转账', 'Cancel transfer')} disabled={busy} onPress={onCancel} />
     </> : <View style={{ gap: 10 }}>
       <Type color={invocation.status === 'succeeded' ? colors.danger : colors.muted}>{needsRefresh
         ? text('确认结果尚未返回，请先查询，不要重新发起转账。', 'Confirmation has not returned. Check its status before another action.')
-        : failure ? text(...failureMessages[failure]) : invocation.status === 'succeeded' ? text('已完成状态的回执暂无法核对，请重新读取。', 'The completed receipt could not be verified. Read it again.')
+        : failure ? text(...failureMessages[failure]) : invocation.status === 'succeeded' ? text('暂时无法读取转账记录，请重新查看。', 'The transfer record could not be loaded. Check again.')
           : text(...(terminalLabel[invocation.status] ?? ['等待服务端结果', 'Waiting for the server']))}</Type>
-      {!failure && <Action kind="secondary" label={text('查询转账状态', 'Check transfer status')} disabled={busy} onPress={onRefresh} />}
+      {!failure && <Action style={{ minHeight: 48 }} kind="secondary" label={text('查询转账状态', 'Check transfer status')} disabled={busy} onPress={onRefresh} />}
     </View>}
   </View>;
 }

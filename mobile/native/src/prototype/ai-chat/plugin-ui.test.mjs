@@ -18,7 +18,7 @@ const noop = () => {};
 const design = { ...Object.fromEntries(['Action', 'Choice', 'IconAction', 'Input', 'Page', 'Row', 'Sheet', 'Tabs', 'Type'].map(name => [name, name])), useDesign: () => ({ colors: {}, text: zh => zh, phone: false }) };
 const react = { useEffect: noop, useRef: value => ({ current: value }), useState: value => [typeof value === 'function' ? value() : value, noop] };
 const jsx = (type, props) => ({ type, props });
-const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown', 'Lightbulb', 'Paperclip', 'Plus', 'Search', 'SlidersHorizontal', 'SquarePen', 'Square', 'RotateCcw', 'RefreshCw'].map(name => [name, name]));
+const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown', 'Lightbulb', 'Paperclip', 'Plus', 'Search', 'SlidersHorizontal', 'SquarePen', 'Square', 'RotateCcw', 'RefreshCw', 'X'].map(name => [name, name]));
 
 /** Inspect actual component action wiring; native layout is verified separately. */
 function component(path, imports) {
@@ -33,6 +33,7 @@ function component(path, imports) {
   return module.exports;
 }
 function nodes(tree, result = []) {
+  if (tree?.type === 'Sheet' && !tree.props.visible) return result;
   if (Array.isArray(tree)) { tree.forEach(child => nodes(child, result)); return result; }
   if (tree && typeof tree === 'object') { result.push(tree); nodes(tree.props?.children, result); }
   return result;
@@ -57,7 +58,9 @@ test('selected-bank chat keeps model availability and its working refresh action
     const tree = nodes(ChatPage({ controller, onOpenPlugins: noop }));
     const check = tree.find(node => node.type === 'Action' && node.props.label === '重新检查');
     assert.ok(check, statusPhase); check.props.onPress();
-    assert.ok(tree.some(node => node.type === 'Type' && typeof node.props.children === 'string' && node.props.children.includes('DeepSeek 理解你的请求')));
+    assert.equal(tree.some(node => node.type === 'Type' && typeof node.props.children === 'string' && /DeepSeek 理解你的请求|插件对话关闭深度思考/.test(node.props.children)), false);
+    assert.equal(tree.some(node => node.type === 'Action' && ['查询余额', '填写转账'].includes(node.props.label)), false);
+    assert.ok(tree.some(node => node.type === 'IconAction' && node.props.label === '移除插件'));
   }
   assert.equal(checks, 2);
   controller.statusPhase = 'ready'; controller.status = { configured: true };
@@ -65,13 +68,25 @@ test('selected-bank chat keeps model availability and its working refresh action
   let syncs = 0, reloads = 0;
   controller.historyError = 'VALIDATION_ERROR'; controller.retryHistory = () => { syncs++; }; controller.reloadCloud = () => { reloads++; };
   const failed = nodes(ChatPage({ controller, onOpenPlugins: noop }));
-  const notice = failed.find(node => node.type === 'Type' && Array.isArray(node.props.children) && node.props.children.includes('VALIDATION_ERROR'));
-  assert.ok(notice, 'history error retains its stable diagnostic code');
-  assert.equal(notice.props.children[0], messages.historyErrorMessage('VALIDATION_ERROR', zh => zh));
-  assert.doesNotMatch(notice.props.children[0], /重新登录|检查网络/);
+  const notice = failed.find(node => node.type === 'Type' && node.props.children === messages.historyErrorMessage('VALIDATION_ERROR', zh => zh));
+  assert.ok(notice, 'history recovery stays readable without a machine code');
+  assert.doesNotMatch(notice.props.children, /重新登录|检查网络|VALIDATION_ERROR/);
   failed.find(node => node.type === 'Action' && node.props.label === '重试同步').props.onPress();
   failed.find(node => node.type === 'Action' && node.props.label === '重载云端版本（替换本机未保存内容）').props.onPress();
   assert.equal(syncs, 1); assert.equal(reloads, 1);
+
+  let resumes = 0;
+  controller.historyError = ''; controller.session = { token: 'fixture', user: { handle: 'fixture' } }; controller.resumeTool = () => { resumes++; };
+  controller.conversation = { id: 'c', title: 'Query', plugin: bank, messages: [{ id: 'u', role: 'user', content: '查询余额', status: 'complete' }, { id: 'tool', role: 'assistant', content: '', status: 'tool', toolProposalId: bank.id }] };
+  controller.busy = true;
+  const pendingCard = nodes(ChatPage({ controller, onOpenPlugins: noop })).find(node => node.type === 'ChatProposal');
+  assert.equal(pendingCard.props.disabled, true); assert.equal(pendingCard.props.onContinue, undefined);
+  controller.busy = false; controller.toolResumeTarget = { conversationId: 'c', messageId: 'tool', invocationId: bank.id };
+  const recovering = nodes(ChatPage({ controller, onOpenPlugins: noop }));
+  recovering.find(node => node.type === 'Action' && node.props.label === '继续回答').props.onPress(); assert.equal(resumes, 1);
+  controller.conversation.messages.push({ id: 'reply', role: 'assistant', content: '模拟余额 HK$100,000。', status: 'complete', toolInvocationIds: [bank.id] });
+  const answeredCard = nodes(ChatPage({ controller, onOpenPlugins: noop })).find(node => node.type === 'ChatProposal');
+  assert.equal(answeredCard.props.mediaOnly, true); assert.equal(answeredCard.props.onContinue, undefined);
 
 });
 
