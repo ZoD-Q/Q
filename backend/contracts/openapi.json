@@ -724,7 +724,7 @@
             }
           }
         },
-        "description": " Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. The proposal is persisted but not executed. Send completed invocation IDs in a subsequent request to continue. Model receives bounded text/resource metadata, not image bytes."
+        "description": "Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. By default a proposal is persisted without execution. When automatic_readonly_tools is opted in after capability discovery, the host may complete only its trusted built-in balance/history reads and mark automatic=true; transfers and untrusted remote tools still await confirmation. Clients read the saved invocation and may continue once using completed invocation IDs, after durable history save. Images/resources are displayed natively; raw tool results are not client-supplied model context."
       }
     },
     "/v1/plugins/status": {
@@ -4500,6 +4500,10 @@
             "items": {
               "$ref": "#/components/schemas/AiModelInfo"
             }
+          },
+          "automatic_readonly_tools": {
+            "type": "boolean",
+            "description": "Host support for explicitly opted-in automatic trusted read-only plugin queries. Missing on older servers; clients must omit the request flag unless true."
           }
         }
       },
@@ -4561,9 +4565,13 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "automatic_readonly_tools": {
+            "type": "boolean",
+            "description": "Optional host opt-in, valid only with plugin_connection_id. The server may execute its trusted built-in bank balance/history reads before returning a saved proposal. Transfer and untrusted remote tools still require explicit confirmation; readOnlyHint alone never authorizes automatic execution."
           }
         },
-        "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection."
+        "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool."
       },
       "AiUsage": {
         "type": "object",
@@ -5098,6 +5106,17 @@
               "q.bank-demo.mox",
               "q.bank-demo.livi"
             ]
+          },
+          "tool_title": {
+            "type": "string",
+            "nullable": true,
+            "description": "Display-only title from the immutable prepared tool snapshot. Optional for older servers; not an authorization or execution policy."
+          },
+          "input_schema": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "Display-only input schema from the immutable prepared tool snapshot, used to label the saved arguments. Optional for older servers; labels cannot change permissions or omit actual arguments."
           }
         },
         "required": [
@@ -5282,6 +5301,10 @@
           "arguments": {
             "type": "object",
             "additionalProperties": true
+          },
+          "automatic": {
+            "type": "boolean",
+            "description": "True only when this opted-in request completed a trusted read-only invocation. Read the saved invocation by ID to verify result, owner and connection; never infer success or re-execute from this flag. Missing/false means no automatic execution."
           }
         },
         "required": [

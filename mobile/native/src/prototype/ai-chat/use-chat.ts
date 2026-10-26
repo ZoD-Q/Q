@@ -15,8 +15,9 @@ import { parseBankIntent } from '../banking/intent';
 import { getBank } from '../banking/catalog';
 import { decodeBankWallet } from '../banking/client';
 
-type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number };
+type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number; automaticInvocationId?: string };
 type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean };
+type ToolResumeTarget = { conversationId: string; messageId: string; invocationId: string };
 const errorCode = (error: unknown) => error instanceof ChatError || error instanceof WorkbenchError ? error.code
   : error instanceof Error && ['EMPTY_MESSAGE', 'MESSAGE_TOO_LONG'].includes(error.message) ? error.message : 'REQUEST_FAILED';
 
@@ -36,6 +37,7 @@ export function useChat(visible: boolean) {
   const [aiConsentOpen, setAiConsentOpen] = useState(false);
   const [consentGate] = useState(() => createAiConsentGate<ConsentRequest>());
   const [messageError, setMessageError] = useState('');
+  const [toolResumeTarget, setToolResumeTarget] = useState<ToolResumeTarget | null>(null);
   const [historyError, setHistoryError] = useState('');
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyUnavailable, setHistoryUnavailable] = useState(false);
@@ -60,6 +62,8 @@ export function useChat(visible: boolean) {
   const mounted = useRef(true);
   const shortRequests = useRef(new Set<AbortController>());
   const inflight = useRef<ActiveRequest | null>(null);
+  const continuation = useRef<({ key: string; controller: AbortController } & ToolResumeTarget) | null>(null);
+  const continuedInvocations = useRef(new Set<string>());
   const authLock = useRef(false);
   const pendingAuth = useRef<{ version: number; result: AuthResponse } | null>(null);
 
@@ -137,6 +141,12 @@ export function useChat(visible: boolean) {
     }));
   };
   const stop = () => {
+    if (continuation.current) {
+      const { conversationId, messageId, invocationId } = continuation.current;
+      if (mounted.current) setToolResumeTarget({ conversationId, messageId, invocationId });
+      continuation.current.controller.abort(); continuation.current = null;
+      if (mounted.current) setPhase('idle');
+    }
     const request = inflight.current;
     if (!request) return;
     inflight.current = null;
@@ -158,6 +168,8 @@ export function useChat(visible: boolean) {
     return generation.current;
   };
   const clearPrivateState = () => {
+    setToolResumeTarget(null);
+    continuedInvocations.current.clear();
     historyEpoch.current++; hydrated.current.clear(); historyOwner.current = ''; setHistoryCursor(null); setHistoryError(''); setHistoryBusy(false);
     historyReady.current = false; setHistoryUnavailable(false);
     updateItems(() => []); select(null); setDraft(''); setMessageError(''); setPlugin(null);
@@ -290,9 +302,9 @@ export function useChat(visible: boolean) {
     finally { if (isCurrent(version)) setAuthBusy(false); }
   };
 
-  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false) => {
+  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false, continuationKey?: string) => {
     const authenticated = sessionRef.current;
-    if (inflight.current || authBusy || historyBusy || historyAction.current) return false;
+    if (inflight.current || continuation.current || authBusy || historyBusy || historyAction.current) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
     if (!historyReady.current || historyOwner.current !== authenticated.token) return false;
     if (!status?.configured) { setMessageError(statusBusy ? 'AI_STATUS_CHECKING' : statusError || 'AI_NOT_CONFIGURED'); return false; }
@@ -322,13 +334,15 @@ export function useChat(visible: boolean) {
         return;
       }
       if (!current()) return;
-      await streamChat({ baseUrl: API_URL, token: authenticated.token, request: { model, thinking: selectedPlugin ? false : think, messages: context.messages, ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds } : {}) }, signal: request.controller.signal, transport: expoFetch,
+      if (continuationKey) { continuedInvocations.current.add(continuationKey); setToolResumeTarget(null); }
+      await streamChat({ baseUrl: API_URL, token: authenticated.token, request: { model, thinking: selectedPlugin ? false : think, messages: context.messages, ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds, ...(status.automatic_readonly_tools === true ? { automatic_readonly_tools: true } : {}) } : {}) }, signal: request.controller.signal, transport: expoFetch,
       onEvent: event => {
         if (!current()) return;
         if (event.type === 'status') setPhase(event.phase);
         if (event.type === 'delta') { setPhase('responding'); updateAnswer(request, message => ({ ...message, content: message.content + event.text, status: 'streaming' })); }
         if (event.type === 'tool_proposal') {
           if (event.connection_id !== selectedPlugin?.id) { request.controller.abort(); return; }
+          if (event.automatic === true && status.automatic_readonly_tools === true) request.automaticInvocationId = event.invocation_id;
           updateAnswer(request, message => ({ ...message, toolProposalId: event.invocation_id }));
         }
         if (event.type === 'done') updateAnswer(request, message => ({ ...message, status: event.finish_reason === 'tool_calls' && message.toolProposalId ? 'tool' : finishStatus(event.finish_reason, message.content), finishReason: event.finish_reason, usage: event.usage }));
@@ -343,10 +357,19 @@ export function useChat(visible: boolean) {
       }
       const code = errorCode(error);
       updateAnswer(request, message => ({ ...message, status: code === 'CANCELLED' ? 'cancelled' : 'error', errorCode: code }));
-    }).finally(() => {
+    }).finally(async () => {
       const final = list.current.find(item => item.id === request.conversationId);
-      if (final && sessionRef.current?.token === authenticated.token && !writers.current.get(authenticated.token)?.hasPending(final.id)) void persist(authenticated, final);
-      if (inflight.current === request) { inflight.current = null; if (mounted.current) setPhase('idle'); }
+      let saved = false;
+      if (final && sessionRef.current?.token === authenticated.token && !writers.current.get(authenticated.token)?.hasPending(final.id)) saved = await persist(authenticated, final);
+      const stillActive = inflight.current === request;
+      if (stillActive) { inflight.current = null; if (mounted.current) setPhase('idle'); }
+      if (stillActive && !saved && isCurrent(request.generation) && request.automaticInvocationId && final?.messages.at(-1)?.status === 'tool') {
+        setToolResumeTarget({ conversationId: request.conversationId, messageId: request.assistantId, invocationId: request.automaticInvocationId });
+      }
+      if (stillActive && saved && !request.controller.signal.aborted && isCurrent(request.generation)
+        && activeIdRef.current === request.conversationId && final?.messages.at(-1)?.status === 'tool' && request.automaticInvocationId) {
+        void resumeTool(request.assistantId, request.automaticInvocationId);
+      }
     });
     return true;
   };
@@ -356,7 +379,7 @@ export function useChat(visible: boolean) {
     if (!retryAnswer.bankCommand) return false;
     const intent = parseBankIntent(baseMessages.findLast(message => message.role === 'user')?.content ?? '');
     const authenticated = sessionRef.current;
-    if (inflight.current || authBusy || historyBusy || historyAction.current) return false;
+    if (inflight.current || continuation.current || authBusy || historyBusy || historyAction.current) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
     if (!historyReady.current || historyOwner.current !== authenticated.token) return false;
     if (writers.current.get(authenticated.token)?.hasPending(conversation.id)) { setHistoryError('HISTORY_SAVE_PENDING'); return false; }
@@ -470,11 +493,11 @@ export function useChat(visible: boolean) {
     if (start(pending.conversation, pending.messages, pending.invocationIds) && pending.clearDraft
       && draft.trim() === pending.messages.at(-1)?.content) setDraft('');
   };
-  const newConversation = () => { cancelAiSharing(); stop(); select(null); setDraft(''); setMessageError(''); };
+  const newConversation = () => { cancelAiSharing(); stop(); setToolResumeTarget(null); select(null); setDraft(''); setMessageError(''); };
   const openConversation = async (id: string, replaceLocal = false) => {
     if (historyAction.current) return;
     if (replaceLocal) historyAction.current = true;
-    cancelAiSharing(); stop(); select(id); setDraft(''); setMessageError('');
+    cancelAiSharing(); stop(); setToolResumeTarget(null); select(id); setDraft(''); setMessageError('');
     const account = sessionRef.current;
     if (!account) { historyAction.current = false; return; }
     if (historyCapabilities.current.get(account.token) === 'session') {
@@ -510,13 +533,45 @@ export function useChat(visible: boolean) {
     newConversation(); setPlugin(value ? chatPluginSnapshot(value) : null); if (value) setThink(false);
     statusMonitor.refresh();
   };
-  const resumeTool = (messageId: string, invocationId: string) => {
+  const resumeTool = async (messageId: string, invocationId: string) => {
+    const account = sessionRef.current;
     const conversation = list.current.find(item => item.id === activeIdRef.current);
     const message = conversation?.messages.at(-1);
-    if (!conversation || !conversation.plugin || !message || message.id !== messageId || message.toolProposalId !== invocationId || inflight.current) return;
+    if (!account || !visible || !hasAiConsent(account.token) || !conversation || !conversation.plugin || !message || message.id !== messageId || message.toolProposalId !== invocationId || inflight.current || continuation.current || historyAction.current) return;
+    const key = `${account.token}:${conversation.id}:${invocationId}`;
+    if (continuedInvocations.current.has(key)) return;
     const ids = [...(message.toolInvocationIds ?? []), invocationId];
-    if (ids.length > 8) { setMessageError('PLUGIN_TURN_LIMIT'); return; }
-    start(conversation, conversation.messages, ids);
+    if (ids.length > 8 || new Set(ids).size !== ids.length) { setMessageError('PLUGIN_TURN_LIMIT'); return; }
+    const version = generation.current;
+    const target = { conversationId: conversation.id, messageId, invocationId };
+    const pending = { ...target, key, controller: new AbortController() };
+    continuation.current = pending; setPhase('waiting'); setMessageError('');
+    const current = () => isCurrent(version) && visible && continuation.current === pending && !pending.controller.signal.aborted
+      && sessionRef.current?.token === account.token && activeIdRef.current === conversation.id && hasAiConsent(account.token);
+    try {
+      const writer = writers.current.get(account.token);
+      await writer?.drain();
+      if (!current()) return;
+      if (writer?.hasPending(conversation.id)) { setToolResumeTarget(target); setHistoryError('HISTORY_SAVE_PENDING'); return; }
+      // Read the saved result: neither UI callbacks nor the SSE hint authorize execution.
+      const invocation = await workbenchRequest({ baseUrl: API_URL, path: `/v1/plugins/invocations/${invocationId}`, token: account.token,
+        signal: pending.controller.signal, decode: decodeInvocation, transport: expoFetch });
+      if (!current()) return;
+      if (invocation.id !== invocationId || invocation.connection_id !== conversation.plugin.id
+        || !['succeeded', 'tool_error'].includes(invocation.status) || invocation.result == null) throw new WorkbenchError('PLUGIN_RESULT_UNAVAILABLE');
+      const latest = list.current.find(item => item.id === conversation.id);
+      if (latest?.messages.at(-1)?.id !== messageId) return;
+      continuation.current = null; setPhase('idle');
+      if (!start(latest, latest.messages, ids, false, key)) setToolResumeTarget(target);
+    } catch (error) {
+      if (!current()) return;
+      if (error instanceof WorkbenchError && error.status === 401) {
+        const nextVersion = invalidate(); applySession(null); clearPrivateState(); setAuthError('UNAUTHORIZED'); setAuthOpen(true);
+        await removeToken(account.token).catch(() => { if (isCurrent(nextVersion)) setAuthError('STORAGE_ERROR'); });
+      } else { setToolResumeTarget(target); setMessageError('PLUGIN_CONTINUATION_FAILED'); }
+    } finally {
+      if (continuation.current === pending) { continuation.current = null; if (mounted.current) setPhase('idle'); }
+    }
   };
 
   return {
@@ -526,7 +581,7 @@ export function useChat(visible: boolean) {
     historyError, historyBusy, historyUnavailable, historyCursor, loadHistory, retryHistory,
     reloadCloud: () => { if (activeIdRef.current && !historyBusy && !inflight.current) void openConversation(activeIdRef.current, true); },
     items, conversation: items.find(item => item.id === activeId) ?? null, activeId,
-    draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError,
+    draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError, toolResumeTarget,
     send, stop, retry, newConversation, openConversation,
     plugin, selectPlugin, resumeTool,
     aiConsentOpen, confirmAiSharing, cancelAiSharing,

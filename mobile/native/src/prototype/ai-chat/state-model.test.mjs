@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { registerHooks } from 'node:module';
-import { buildContext, finishStatus, prepareRetry } from './state-model.ts';
+import { buildContext, finishStatus, prepareRetry, toolResultIsAnswered } from './state-model.ts';
 import { WorkbenchError } from '../api-workbench/core.ts';
 const resolver = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
@@ -9,6 +9,16 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 } });
 test.after(() => resolver.deregister());
 const message = (id,role,content,status='complete') => ({id,role,content,status});
+test('saved tool data stays visible until its own result has a complete natural answer', () => {
+  const id='11111111-1111-4111-8111-111111111111';
+  const tool={...message('tool','assistant','','tool'),toolProposalId:id};
+  const answer={...message('answer','assistant','Balance is HK$100,000 (demo).'),toolInvocationIds:[id]};
+  const c={id:'c',title:'Balance',messages:[message('u','user','balance'),tool,answer]};
+  assert.equal(toolResultIsAnswered(c,'tool'),true);
+  for(const status of ['pending','streaming','error','incomplete','cancelled','tool']) assert.equal(toolResultIsAnswered({...c,messages:[tool,{...answer,status}]},'tool'),false,status);
+  assert.equal(toolResultIsAnswered({...c,messages:[tool,{...answer,content:' '}]},'tool'),false);
+  assert.equal(toolResultIsAnswered({...c,messages:[tool,{...answer,toolInvocationIds:[]}]},'tool'),false);
+});
 test('failed tool continuation retains its saved invocation IDs and preceding tool card', () => {
   const ids=['11111111-1111-4111-8111-111111111111'];
   const proposal={...message('tool','assistant','','tool'),toolProposalId:ids[0]};

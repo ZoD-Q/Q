@@ -245,7 +245,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. The proposal is persisted but not executed. Send completed invocation IDs in a subsequent request to continue. Model receives bounded text/resource metadata, not image bytes. */
+        /** @description Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. By default a proposal is persisted without execution. When automatic_readonly_tools is opted in after capability discovery, the host may complete only its trusted built-in balance/history reads and mark automatic=true; transfers and untrusted remote tools still await confirmation. Clients read the saved invocation and may continue once using completed invocation IDs, after durable history save. Images/resources are displayed natively; raw tool results are not client-supplied model context. */
         post: operations["aiChat"];
         delete?: never;
         options?: never;
@@ -1204,13 +1204,15 @@ export interface components {
         AiStatus: {
             configured: boolean;
             models: components["schemas"]["AiModelInfo"][];
+            /** @description Host support for explicitly opted-in automatic trusted read-only plugin queries. Missing on older servers; clients must omit the request flag unless true. */
+            automatic_readonly_tools?: boolean;
         };
         AiHistoryMessage: {
             /** @enum {string} */
             role: "user" | "assistant";
             content: string;
         };
-        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. */
+        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. */
         AiChatRequest: {
             model: components["schemas"]["AiModel"];
             thinking: boolean;
@@ -1219,6 +1221,8 @@ export interface components {
             /** Format: uuid */
             plugin_connection_id?: string;
             tool_invocation_ids?: string[];
+            /** @description Optional host opt-in, valid only with plugin_connection_id. The server may execute its trusted built-in bank balance/history reads before returning a saved proposal. Transfer and untrusted remote tools still require explicit confirmation; readOnlyHint alone never authorizes automatic execution. */
+            automatic_readonly_tools?: boolean;
         };
         AiUsage: {
             prompt_tokens: number;
@@ -1378,6 +1382,12 @@ export interface components {
             connection_kind: "remote_mcp" | "bank_demo";
             /** @enum {string|null} */
             builtin_service_id: null | "q.bank-demo.hsbc" | "q.bank-demo.hangseng" | "q.bank-demo.bochk" | "q.bank-demo.scb" | "q.bank-demo.bea" | "q.bank-demo.dbs" | "q.bank-demo.citi" | "q.bank-demo.icbc" | "q.bank-demo.ccb" | "q.bank-demo.ncb" | "q.bank-demo.citic" | "q.bank-demo.cmbwinglung" | "q.bank-demo.dahsing" | "q.bank-demo.fubon" | "q.bank-demo.chiyu" | "q.bank-demo.shacombank" | "q.bank-demo.bocom" | "q.bank-demo.za" | "q.bank-demo.mox" | "q.bank-demo.livi";
+            /** @description Display-only title from the immutable prepared tool snapshot. Optional for older servers; not an authorization or execution policy. */
+            tool_title?: string | null;
+            /** @description Display-only input schema from the immutable prepared tool snapshot, used to label the saved arguments. Optional for older servers; labels cannot change permissions or omit actual arguments. */
+            input_schema?: {
+                [key: string]: unknown;
+            } | null;
         };
         PluginOAuthStart: {
             /** Format: uuid */
@@ -1431,6 +1441,8 @@ export interface components {
             arguments: {
                 [key: string]: unknown;
             };
+            /** @description True only when this opted-in request completed a trusted read-only invocation. Read the saved invocation by ID to verify result, owner and connection; never infer success or re-execute from this flag. Missing/false means no automatic execution. */
+            automatic?: boolean;
         };
         SocialUser: {
             /** Format: uuid */

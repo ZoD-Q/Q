@@ -18,6 +18,13 @@ export interface ChatMessage {
 }
 export interface ChatPlugin { id: string; title: string; endpoint_url: string; connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null }
 export interface Conversation { id: string; title: string; messages: ChatMessage[]; plugin?: ChatPlugin }
+/** Keep the authoritative result visible unless a later complete answer consumed it. */
+export function toolResultIsAnswered(conversation: Conversation, messageId: string): boolean {
+  const index = conversation.messages.findIndex(message => message.id === messageId);
+  const invocationId = conversation.messages[index]?.toolProposalId;
+  return !!invocationId && conversation.messages.slice(index + 1).some(message => message.role === 'assistant'
+    && message.status === 'complete' && !!message.content.trim() && message.toolInvocationIds?.includes(invocationId));
+}
 export const MODEL_NAMES: Record<AiModel, string> = {
   'deepseek-flash': 'DeepSeek Flash',
   'deepseek-v4-pro': 'DeepSeek Pro',

@@ -307,3 +307,66 @@ test('the server public contract carries a 70KB answer in 8KiB delta frames with
   assert.equal(received, content);
   assert.equal(completed, true);
 });
+
+test('automatic read capability remains optional and only boolean status values are accepted', () => {
+  const legacy = { configured: true, models: [{ id: 'deepseek-flash', name: 'Flash' }] };
+  assert.deepEqual(decodeAiStatus(legacy), legacy);
+  assert.equal(Object.hasOwn(decodeAiStatus(legacy), 'automatic_readonly_tools'), false);
+  for (const enabled of [true, false]) {
+    assert.deepEqual(decodeAiStatus({ ...legacy, automatic_readonly_tools: enabled }), { ...legacy, automatic_readonly_tools: enabled });
+  }
+  for (const flag of ['true', 1, null, {}, []]) {
+    assert.throws(() => decodeAiStatus({ ...legacy, automatic_readonly_tools: flag }), error => error instanceof ChatError && error.code === 'INVALID_RESPONSE');
+  }
+});
+
+test('automatic reads are explicitly opted into on plugin requests and invalid flags never reach transport', async () => {
+  const fake = fixture([answer(), done()]);
+  await streamChat(options(fake.transport, { request: { ...request, plugin_connection_id: pluginId, automatic_readonly_tools: true } }));
+  assert.deepEqual(JSON.parse(fake.stats.init.body), { ...request, plugin_connection_id: pluginId, tool_invocation_ids: [], automatic_readonly_tools: true });
+  const legacy = fixture([answer(), done()]);
+  await streamChat(options(legacy.transport, { request: { ...request, plugin_connection_id: pluginId } }));
+  assert.equal(Object.hasOwn(JSON.parse(legacy.stats.init.body), 'automatic_readonly_tools'), false);
+  for (const fields of [
+    { automatic_readonly_tools: true },
+    ...['true', 1, null, {}, []].map(flag => ({ plugin_connection_id: pluginId, automatic_readonly_tools: flag })),
+  ]) {
+    const invalid = fixture([answer(), done()]);
+    await expectCode(streamChat(options(invalid.transport, { request: { ...request, ...fields } })), 'VALIDATION_ERROR');
+    assert.equal(invalid.stats.calls, 0);
+  }
+});
+
+test('automatic proposal markers survive streaming only after explicit opt-in while legacy proposals remain usable', async () => {
+  for (const marker of [undefined, false, true]) {
+    const event = { ...proposal, ...(marker === undefined ? {} : { automatic: marker }) };
+    const fake = fixture([frame('tool_proposal', event), done({ finish_reason: 'tool_calls' })]);
+    const events = [];
+    await streamChat(options(fake.transport, {
+      request: { ...request, plugin_connection_id: pluginId, ...(marker === true ? { automatic_readonly_tools: true } : {}) },
+      onEvent: value => events.push(value),
+    }));
+    assert.deepEqual(events[0], { type: 'tool_proposal', ...event });
+    assert.equal(events[1].finish_reason, 'tool_calls');
+  }
+  for (const optedIn of [undefined, false]) {
+    const events = [];
+    const fake = fixture([frame('tool_proposal', { ...proposal, automatic: true }), done({ finish_reason: 'tool_calls' })]);
+    await expectCode(streamChat(options(fake.transport, {
+      request: { ...request, plugin_connection_id: pluginId, ...(optedIn === undefined ? {} : { automatic_readonly_tools: optedIn }) },
+      onEvent: event => events.push(event),
+    })), 'INVALID_RESPONSE');
+    assert.equal(events.some(event => event.type === 'tool_proposal'), false);
+  }
+  const malformed = fixture([frame('tool_proposal', { ...proposal, automatic: 'true' })]);
+  await expectCode(streamChat(options(malformed.transport, { request: { ...request, plugin_connection_id: pluginId, automatic_readonly_tools: true } })), 'INVALID_RESPONSE');
+});
+
+test('a server tool-turn limit keeps its safe code and never exposes a remote error message', async () => {
+  const fake = fixture([frame('error', { code: 'PLUGIN_TURN_LIMIT', message: 'private upstream payload must not be shown' })]);
+  await assert.rejects(streamChat(options(fake.transport, { request: { ...request, plugin_connection_id: pluginId, automatic_readonly_tools: true } })), error => {
+    assert.equal(error.code, 'PLUGIN_TURN_LIMIT');
+    assert.equal(error.message, 'PLUGIN_TURN_LIMIT');
+    return error instanceof ChatError;
+  });
+});
