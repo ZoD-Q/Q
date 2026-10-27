@@ -9,6 +9,7 @@ import { SocialProvider } from "@/prototype/social";
 import { useReducedMotion } from "react-native-reanimated";
 
 import { FinancialPreviewProvider } from "@/prototype/services/preview-state";
+import { FinanceAdsProvider } from "@/prototype/finance-ads";
 function RootStack() {
   const { colors, theme } = useDesign();
   const reducedMotion = useReducedMotion();
@@ -34,6 +35,7 @@ export default function Layout() {
   return (
     <SafeAreaProvider>
       <DesignProvider>
+        <FinanceAdsProvider>
         <QAccountProvider>
           <SocialProvider>
             <VideoStudioProvider>
@@ -43,6 +45,7 @@ export default function Layout() {
             </VideoStudioProvider>
           </SocialProvider>
         </QAccountProvider>
+        </FinanceAdsProvider>
       </DesignProvider>
     </SafeAreaProvider>
   );

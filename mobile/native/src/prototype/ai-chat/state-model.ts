@@ -1,4 +1,5 @@
 import type { AiHistoryMessage, AiModel, AiFinishReason, AiUsage } from '@xiaoq/shared';
+import type { FinanceResult } from '../finance-agent/core';
 
 export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'incomplete' | 'cancelled' | 'error' | 'tool';
 export interface ChatMessage {
@@ -15,9 +16,12 @@ export interface ChatMessage {
   toolProposalId?: string;
   toolInvocationIds?: string[];
   bankCommand?: boolean;
+  /** Device-session data. Neither this message nor its result may enter cloud requests. */
+  localFinance?: true;
+  financeResult?: FinanceResult;
 }
 export interface ChatPlugin { id: string; title: string; endpoint_url: string; connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null }
-export interface Conversation { id: string; title: string; messages: ChatMessage[]; plugin?: ChatPlugin }
+export interface Conversation { id: string; title: string; messages: ChatMessage[]; plugin?: ChatPlugin; localOnly?: true }
 /** Keep the authoritative result visible unless a later complete answer consumed it. */
 export function toolResultIsAnswered(conversation: Conversation, messageId: string): boolean {
   const index = conversation.messages.findIndex(message => message.id === messageId);
@@ -32,12 +36,14 @@ export const MODEL_NAMES: Record<AiModel, string> = {
 const characters = (value: string) => Array.from(value).length;
 
 /** Send whole completed turns only. Never send partial answers or silently shorten a new prompt. */
-export function buildContext(messages: ChatMessage[]): { messages: AiHistoryMessage[]; limited: boolean } {
+export function buildContext(messages: ChatMessage[], guidance = ''): { messages: AiHistoryMessage[]; limited: boolean } {
+  if (messages.some(message => message.localFinance || message.financeResult)) throw new Error('LOCAL_FINANCE_PRIVATE');
   const current = messages.at(-1);
   if (!current || current.role !== 'user' || !current.content.trim()) throw new Error('EMPTY_MESSAGE');
-  const size = characters(current.content);
-  if (size > 12000) throw new Error('MESSAGE_TOO_LONG');
-  const selected: AiHistoryMessage[] = [{ role: 'user', content: current.content }];
+  const prompt = guidance ? `${guidance}\n\n${current.content}` : current.content;
+  const size = characters(prompt);
+  if (size > 12000) throw new Error(guidance ? 'FINANCE_MESSAGE_TOO_LONG' : 'MESSAGE_TOO_LONG');
+  const selected: AiHistoryMessage[] = [{ role: 'user', content: prompt }];
   let total = size;
   let limited = false;
   // A user/assistant pair is eligible only when the answer was fully completed.

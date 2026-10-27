@@ -14,14 +14,16 @@ import { bankIdForPlugin, bankTransferArguments, decodeInvocation, decodePluginC
 import { parseBankIntent } from '../banking/intent';
 import { getBank } from '../banking/catalog';
 import { decodeBankWallet } from '../banking/client';
+import { appendLocalFinanceTurn, financialAiTitle, isFinancialAiConversation, localFinanceHelp, type LocalFinanceTurn } from '../finance-agent/conversation';
+import { FINANCIAL_AI_GUIDANCE, respondToFinanceText } from '../finance-agent/intent';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number; automaticInvocationId?: string };
 type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean };
 type ToolResumeTarget = { conversationId: string; messageId: string; invocationId: string };
 const errorCode = (error: unknown) => error instanceof ChatError || error instanceof WorkbenchError ? error.code
-  : error instanceof Error && ['EMPTY_MESSAGE', 'MESSAGE_TOO_LONG'].includes(error.message) ? error.message : 'REQUEST_FAILED';
+  : error instanceof Error && ['EMPTY_MESSAGE', 'MESSAGE_TOO_LONG', 'FINANCE_MESSAGE_TOO_LONG', 'LOCAL_FINANCE_PRIVATE'].includes(error.message) ? error.message : 'REQUEST_FAILED';
 
-export function useChat(visible: boolean) {
+export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   const [session, setSession] = useState<AuthResponse | null>(null);
   const sessionRef = useRef<AuthResponse | null>(null);
   const [statusSnapshot, setStatusSnapshot] = useState(initialAiStatus);
@@ -56,9 +58,11 @@ export function useChat(visible: boolean) {
   const [draft, setDraft] = useState('');
   const [model, setModel] = useState<AiModel>('deepseek-flash');
   const [think, setThink] = useState(false);
+  const [financialAi, setFinancialAi] = useState(false);
   const [plugin, setPlugin] = useState<ChatPlugin | null>(null);
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'thinking' | 'responding'>('idle');
   const generation = useRef(0);
+  const [privacyEpoch, setPrivacyEpoch] = useState(0);
   const mounted = useRef(true);
   const shortRequests = useRef(new Set<AbortController>());
   const inflight = useRef<ActiveRequest | null>(null);
@@ -80,6 +84,7 @@ export function useChat(visible: boolean) {
     return writer;
   };
   const persist = async (account: AuthResponse, conversation: Conversation, retry = false) => {
+    if (conversation.localOnly || conversation.messages.some(message => message.localFinance || message.financeResult)) return false;
     const capability = historyCapabilities.current.get(account.token);
     if (capability === 'session') return true;
     if (capability !== 'cloud') return false;
@@ -159,6 +164,7 @@ export function useChat(visible: boolean) {
   };
   const invalidate = () => {
     generation.current++;
+    setPrivacyEpoch(value => value + 1);
     historyEpoch.current++; setHistoryBusy(false);
     consentGate.cancel(); setAiConsentOpen(false);
     stop();
@@ -176,7 +182,7 @@ export function useChat(visible: boolean) {
   };
   const applySession = (value: AuthResponse | null) => {
     if (sessionRef.current?.token !== value?.token) revokeAiConsent();
-    if (sessionRef.current && sessionRef.current.user.id !== value?.user.id) clearPrivateState();
+    if ((sessionRef.current?.user.id ?? null) !== (value?.user.id ?? null)) clearPrivateState();
     sessionRef.current = value; setSession(value);
     if (value && historyOwner.current !== value.token) {
       historyOwner.current = value.token; historyReady.current = false; setHistoryUnavailable(false);
@@ -303,6 +309,9 @@ export function useChat(visible: boolean) {
   };
 
   const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false, continuationKey?: string) => {
+    if (conversation.localOnly || baseMessages.some(message => message.localFinance || message.financeResult)) {
+      setMessageError('LOCAL_FINANCE_PRIVATE'); return false;
+    }
     const authenticated = sessionRef.current;
     if (inflight.current || continuation.current || authBusy || historyBusy || historyAction.current) return false;
     if (!authenticated) { setAuthOpen(true); return false; }
@@ -311,7 +320,7 @@ export function useChat(visible: boolean) {
     let context: ReturnType<typeof buildContext>;
     try {
       const lastUser = baseMessages.findLastIndex(message => message.role === 'user');
-      context = buildContext(baseMessages.slice(0, lastUser + 1));
+      context = buildContext(baseMessages.slice(0, lastUser + 1), (financialAi || isFinancialAiConversation(conversation)) && !conversation.plugin ? FINANCIAL_AI_GUIDANCE : '');
     }
     catch (error) { setMessageError(errorCode(error)); return false; }
     if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft })) {
@@ -376,6 +385,7 @@ export function useChat(visible: boolean) {
   // Legacy bank commands may already have prepared a proposal before losing the response.
   // Only their explicit retry reuses the original identity; all new messages use the model.
   const recoverBankCommand = (conversation: Conversation, baseMessages: ChatMessage[], retryAnswer: ChatMessage) => {
+    if (conversation.localOnly || baseMessages.some(message => message.localFinance || message.financeResult)) return false;
     if (!retryAnswer.bankCommand) return false;
     const intent = parseBankIntent(baseMessages.findLast(message => message.role === 'user')?.content ?? '');
     const authenticated = sessionRef.current;
@@ -465,11 +475,34 @@ export function useChat(visible: boolean) {
     });
     return true;
   };
+  const addLocalFinance = (turn: LocalFinanceTurn, continueLocal = false) => {
+    if (authBusy || historyAction.current) return false;
+    const previous = continueLocal ? list.current.find(item => item.id === activeIdRef.current) ?? null : null;
+    if (previous && !previous.localOnly) return false;
+    let next: Conversation;
+    try { next = appendLocalFinanceTurn(previous, turn, randomUUID); }
+    catch (error) {
+      setMessageError(error instanceof Error && ['LOCAL_FINANCE_LIMIT', 'MESSAGE_TOO_LONG', 'LOCAL_FINANCE_PRIVATE'].includes(error.message) ? error.message : 'VALIDATION_ERROR');
+      return false;
+    }
+    consentGate.cancel(); setAiConsentOpen(false); stop(); setToolResumeTarget(null);
+    setPlugin(null); setThink(false); setFinancialAi(false); setMessageError(''); setDraft('');
+    hydrated.current.add(next.id);
+    updateItems(current => current.some(item => item.id === next.id) ? current.map(item => item.id === next.id ? next : item) : [next, ...current]);
+    select(next.id); setPhase('idle');
+    return true;
+  };
   const send = (value: string) => {
     if (inflight.current || historyBusy || (activeIdRef.current && !hydrated.current.has(activeIdRef.current))) return false;
     const trimmed = value.trim();
     if (!trimmed) return false;
-    const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
+    const active = list.current.find(item => item.id === activeIdRef.current);
+    if (active?.localOnly) return addLocalFinance(respondToFinanceText(trimmed, locale) ?? localFinanceHelp(locale, trimmed), true);
+    if (!financialAi && !isFinancialAiConversation(active) && !plugin && !active?.plugin) {
+      const financial = respondToFinanceText(trimmed, locale);
+      if (financial) return addLocalFinance(financial);
+    }
+    const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: financialAi ? financialAiTitle(trimmed, locale) : Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
     if (current.messages.at(-1)?.errorCode === 'HISTORY_SAVE_FAILED' && current.messages.findLast(message => message.role === 'user')?.content === trimmed) {
       const base = prepareRetry(current);
       return base ? start(current, base, [], true) : false;
@@ -478,6 +511,7 @@ export function useChat(visible: boolean) {
   };
   const retry = () => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
+    if (conversation?.localOnly) return;
     const base = conversation ? prepareRetry(conversation) : null;
     if (conversation && base) {
       const last = conversation.messages.at(-1);
@@ -493,11 +527,15 @@ export function useChat(visible: boolean) {
     if (start(pending.conversation, pending.messages, pending.invocationIds) && pending.clearDraft
       && draft.trim() === pending.messages.at(-1)?.content) setDraft('');
   };
-  const newConversation = () => { cancelAiSharing(); stop(); setToolResumeTarget(null); select(null); setDraft(''); setMessageError(''); };
+  const newConversation = () => { cancelAiSharing(); stop(); setToolResumeTarget(null); select(null); setDraft(''); setMessageError(''); setFinancialAi(false); };
+  const newFinancialAi = () => { newConversation(); setPlugin(null); setFinancialAi(true); };
   const openConversation = async (id: string, replaceLocal = false) => {
     if (historyAction.current) return;
     if (replaceLocal) historyAction.current = true;
-    cancelAiSharing(); stop(); setToolResumeTarget(null); select(id); setDraft(''); setMessageError('');
+    cancelAiSharing(); stop(); setToolResumeTarget(null); select(id); setDraft(''); setMessageError(''); setFinancialAi(isFinancialAiConversation(list.current.find(item => item.id === id)));
+    if (list.current.find(item => item.id === id)?.localOnly) {
+      setPlugin(null); historyAction.current = false; return;
+    }
     const account = sessionRef.current;
     if (!account) { historyAction.current = false; return; }
     if (historyCapabilities.current.get(account.token) === 'session') {
@@ -513,6 +551,7 @@ export function useChat(visible: boolean) {
       if (replaceLocal) writerFor(account).discard(id, detail.revision); else writerFor(account).seed(id, detail.revision, true);
       hydrated.current.add(id);
       updateItems(current => current.map(item => item.id === id ? restoreHistory(detail) : item));
+      setFinancialAi(isFinancialAiConversation(detail));
       setPlugin(detail.plugin ?? null); setHistoryError('');
     } catch (error) { if (isCurrent(version) && activeIdRef.current === id) setHistoryError(errorCode(error)); }
     finally { if (replaceLocal) historyAction.current = false; if (isCurrent(version)) setHistoryBusy(false); }
@@ -521,6 +560,7 @@ export function useChat(visible: boolean) {
     if (historyAction.current || inflight.current) return;
     const account = sessionRef.current;
     const conversation = list.current.find(item => item.id === activeIdRef.current);
+    if (conversation?.localOnly) return;
     if (account && conversation && writers.current.get(account.token)?.hasPending(conversation.id)) {
       historyAction.current = true; setHistoryBusy(true);
       try {
@@ -536,6 +576,7 @@ export function useChat(visible: boolean) {
   const resumeTool = async (messageId: string, invocationId: string) => {
     const account = sessionRef.current;
     const conversation = list.current.find(item => item.id === activeIdRef.current);
+    if (conversation?.localOnly) return;
     const message = conversation?.messages.at(-1);
     if (!account || !visible || !hasAiConsent(account.token) || !conversation || !conversation.plugin || !message || message.id !== messageId || message.toolProposalId !== invocationId || inflight.current || continuation.current || historyAction.current) return;
     const key = `${account.token}:${conversation.id}:${invocationId}`;
@@ -579,10 +620,12 @@ export function useChat(visible: boolean) {
     authBusy, authOpen, authError, authenticate, logout, closeAuth, restore,
     openAuth: () => { setAuthError(''); setAuthOpen(true); },
     historyError, historyBusy, historyUnavailable, historyCursor, loadHistory, retryHistory,
-    reloadCloud: () => { if (activeIdRef.current && !historyBusy && !inflight.current) void openConversation(activeIdRef.current, true); },
+    reloadCloud: () => { if (activeIdRef.current && !list.current.find(item => item.id === activeIdRef.current)?.localOnly && !historyBusy && !inflight.current) void openConversation(activeIdRef.current, true); },
     items, conversation: items.find(item => item.id === activeId) ?? null, activeId,
     draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError, toolResumeTarget,
     send, stop, retry, newConversation, openConversation,
+    addLocalFinance: (turn: LocalFinanceTurn) => addLocalFinance(turn), privacyEpoch,
+    financialAi, newFinancialAi,
     plugin, selectPlugin, resumeTool,
     aiConsentOpen, confirmAiSharing, cancelAiSharing,
   };

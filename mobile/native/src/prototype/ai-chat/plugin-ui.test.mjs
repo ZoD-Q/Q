@@ -64,10 +64,13 @@ test('selected-bank chat keeps model availability and its working refresh action
     './ai-chat/messages': messages, './plugin-host/chat-proposal': { ChatProposal: 'ChatProposal' },
     './plugin-host/core': core, './banking/transfer-composer': { BankTransferComposer: 'BankTransferComposer' },
     './privacy': { openPrivacyPolicy: noop },
+    './finance-agent/panel': { FinanceTaskSheet: 'FinanceTaskSheet' },
+    './finance-agent/result-card': { FinanceResultCard: 'FinanceResultCard' },
+    './finance-ads': { FinanceAdSettings: 'FinanceAdSettings' },
   });
   let checks = 0;
   const controller = { conversation: null, phase: 'idle', draft: '', setDraft: noop, model: 'deepseek-flash', setModel: noop, think: false, setThink: noop, plugin: bank, status: { configured: false }, statusPhase: 'unconfigured', statusBusy: false, statusError: '', reconnect: () => { checks++; } };
-  const render = () => { cursor = 0; return nodes(ChatPage({ controller, onOpenPlugins: noop })); };
+  const render = () => { cursor = 0; return nodes(ChatPage({ controller, onOpenPlugins: noop, onOpenFinancialService: noop })); };
   const statusSheet = tree => tree.find(node => node.type === 'Sheet' && node.props.title === '对话状态');
   for (const statusPhase of ['unconfigured', 'error']) {
     controller.statusPhase = statusPhase;

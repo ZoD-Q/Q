@@ -1,6 +1,9 @@
 type Translate = (zh: string, en: string) => string;
 export function chatErrorMessage(code: string, text: Translate) {
   switch (code) {
+    case 'LOCAL_FINANCE_PRIVATE': return text('本地财务记录不会发送到云端。请新建 AI 问答，并重新填写要分享的问题。', 'Local financial notes cannot be sent to the cloud. Start a new AI question and enter only what you want to share.');
+    case 'LOCAL_FINANCE_LIMIT': return text('这段本地记录已满，请新建财务任务继续。现有记录仍保留在本次会话。', 'This local task is full. Start a new financial task; existing notes remain available for this session.');
+    case 'FINANCE_MESSAGE_TOO_LONG': return text('问题加上财务问答说明超过本次长度上限，请缩短后发送。', 'The question plus financial guidance exceeds this request’s length limit. Please shorten it.');
     case 'UNAUTHORIZED': return text('登录已过期，请重新登录后继续。', 'Your session expired. Sign in again to continue.');
     case 'INVALID_CREDENTIALS': return text('账号或密码不正确。', 'The handle or password is incorrect.');
     case 'HANDLE_TAKEN': return text('这个账号已被使用，请换一个。', 'This handle is already in use.');

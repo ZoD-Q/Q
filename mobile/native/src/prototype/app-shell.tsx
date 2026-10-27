@@ -424,7 +424,7 @@ function Rail({
   );
 }
 export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId }) {
-  const { colors, text, phone, notice, notify } = useDesign();
+  const { colors, text, phone, notice, notify, locale } = useDesign();
   const insets = useSafeAreaInsets();
   const [page, setPage] = useState<PageId>(initialPage);
   const [sidebar, setSidebar] = useState(true);
@@ -434,7 +434,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const social = useSocial();
   const active = focused && foreground;
-  const chat = useChat(active && (page === "chat" || page === "plugins" || page === "history"));
+  const chat = useChat(active && (page === "chat" || page === "plugins" || page === "history"), locale);
   const items = chat.items;
   const reduced = useReducedMotion();
   const navigate = (next: PageId) => {
@@ -558,7 +558,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         </View>
         <Reveal key={page} style={{ flex: 1 }}>
           {!active ? <View style={{ flex: 1 }} /> : page === "chat" ? (
-            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} />
+            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} />
           ) : page === "video" ? (
             <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
           ) : page === "creators" ? (

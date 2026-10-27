@@ -23,6 +23,12 @@ import {
   Square,
   RotateCcw,
   ChevronRight,
+  Calculator,
+  ReceiptText,
+  PiggyBank,
+  BookOpen,
+  ShieldCheck,
+  Landmark,
   X,
 } from "lucide-react-native";
 import {
@@ -43,21 +49,25 @@ import { MODEL_NAMES, toolResultIsAnswered } from "./ai-chat/state-model";
 import type { ChatController } from "./ai-chat/use-chat";
 import { ChatAuthSheet } from "./ai-chat/auth-sheet";
 import { chatErrorMessage, chatStatusErrorMessage, historyErrorMessage } from "./ai-chat/messages";
-import { getMascotPresentation } from "./ai-chat/mascot-state";
+import { getMascotPresentation, type MascotPresentation } from "./ai-chat/mascot-state";
 import { QCompanion } from "./ai-chat/q-companion";
 import type { AiModel } from "@xiaoq/shared";
 import { ChatProposal } from './plugin-host/chat-proposal';
 import { bankIdForPlugin } from './plugin-host/core';
 import { BankTransferComposer } from './banking/transfer-composer';
 import { openPrivacyPolicy } from './privacy';
+import { FinanceTaskSheet, type FinanceTask } from './finance-agent/panel';
+import { FinanceResultCard } from './finance-agent/result-card';
+import { FinanceAdSettings } from './finance-ads';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
 export function QGlyph({ size = 48 }: { size?: number }) {
   return <QCompanion size={size} showBadge={false} />;
 }
-export function ChatPage({ controller, onOpenPlugins }: {
+export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService }: {
   controller: ChatController;
   onOpenPlugins: () => void;
+  onOpenFinancialService: (category: 'installments' | 'insurance' | 'finance') => void;
 }) {
   const { conversation, draft, setDraft, model, setModel, think, setThink } = controller;
   const { colors, text, phone } = useDesign();
@@ -66,6 +76,9 @@ export function ChatPage({ controller, onOpenPlugins }: {
   const [bankForm, setBankForm] = useState(false);
   const [focused, setFocused] = useState(false);
   const [details, setDetails] = useState(false);
+  const [financeTask, setFinanceTask] = useState<FinanceTask | null>(null);
+  const [financialServices, setFinancialServices] = useState(false);
+  const [adSettings, setAdSettings] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [availableHeight, setAvailableHeight] = useState(0);
   const { height, fontScale } = useWindowDimensions();
@@ -81,8 +94,13 @@ export function ChatPage({ controller, onOpenPlugins }: {
     return () => { show.remove(); hide.remove(); };
   }, []);
   const hasMessages = !!conversation?.messages.length;
+  const localOnly = conversation?.localOnly === true;
   const latestAnswer = conversation?.messages.at(-1);
-  const presentation = getMascotPresentation({
+  const presentation: MascotPresentation = localOnly ? {
+    state: latestAnswer?.financeResult ? 'complete' : 'ready', busy: false,
+    title: latestAnswer?.financeResult ? { zh: '已在本机完成', en: 'Completed on this device' } : { zh: '本地财务助手', en: 'On-device financial assistant' },
+    detail: { zh: '财务记录仅保留本次会话，不上传云端。', en: 'Financial notes stay on this device for this session.' },
+  } : getMascotPresentation({
     phase: controller.phase,
     message: latestAnswer,
     authBusy: controller.authBusy,
@@ -96,19 +114,19 @@ export function ChatPage({ controller, onOpenPlugins }: {
   });
   const statusTitle = text(presentation.title.zh, presentation.title.en);
   const statusDetail = text(presentation.detail.zh, presentation.detail.en);
-  const hasNotice = !!(controller.historyError || controller.historyUnavailable || controller.messageError
+  const hasNotice = !!(controller.messageError || (!localOnly && (controller.historyError || controller.historyUnavailable
     || (controller.authError && !controller.authOpen)
-    || ["error", "unconfigured"].includes(controller.statusPhase));
-  const noticeTitle = controller.historyError ? text("记录尚未同步", "History not synced")
+    || ["error", "unconfigured"].includes(controller.statusPhase))));
+  const noticeTitle = localOnly ? text('输入需要调整', 'Check your input') : controller.historyError ? text("记录尚未同步", "History not synced")
     : controller.messageError ? text("发送需要处理", "Send needs attention")
     : controller.authError && !controller.authOpen ? text("登录需要处理", "Sign-in needs attention")
     : controller.statusPhase === "unconfigured" ? text("对话服务未配置", "Chat is not configured")
     : controller.statusPhase === "error" ? text("连接需要检查", "Check connection")
     : text("记录仅保留在本次会话", "History is kept for this session");
   const compactWelcome = keyboardVisible || height < 580 || fontScale > 1.4 || (availableHeight > 0 && availableHeight < 420);
-  const dockMaxHeight = availableHeight > 0 ? Math.min(availableHeight, Math.max(96, availableHeight * (compactWelcome ? 0.85 : 0.6))) : undefined;
+  const dockMaxHeight = availableHeight > 0 ? Math.min(availableHeight, Math.max(96, availableHeight * (compactWelcome && !localOnly ? 0.85 : 0.6))) : undefined;
   const touchSize = process.env.EXPO_OS === "android" ? 48 : 44;
-  const animateCompanion = presentation.busy && !details && !models && !tools && !bankForm
+  const animateCompanion = presentation.busy && !details && !models && !tools && !bankForm && !financeTask && !financialServices && !adSettings
     && !controller.authOpen && !controller.aiConsentOpen;
   const bankPlugin = bankIdForPlugin(controller.plugin);
   const send = () => {
@@ -124,7 +142,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
     <View
       style={{ width: "100%", maxWidth: 690, alignSelf: "center", gap: 8 }}
     >
-      {hasMessages || compactWelcome ? (
+      {(hasMessages || compactWelcome) && !(localOnly && compactWelcome) ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 4, paddingBottom: 4 }}>
           <QCompanion state={presentation.state} size={52} animated={animateCompanion} />
           <View accessible accessibilityLiveRegion="polite" accessibilityRole="text"
@@ -156,8 +174,8 @@ export function ChatPage({ controller, onOpenPlugins }: {
           ref={input}
           accessibilityLabel={text("给小Q发送消息", "Message Q")}
           placeholder={text(
-            "问小Q，或者说说你的想法…",
-            "Ask Q, or share a thought…",
+            localOnly ? "继续问本地财务知识，或打开财务工具…" : controller.financialAi ? "填写要分享给 AI 的金融问题…" : "问问小Q，整理账单或算清一笔钱…",
+            localOnly ? "Ask a local finance question, or open tools…" : controller.financialAi ? "Enter a finance question to share with AI…" : "Ask Q, organize bills or work out a cost…",
           )}
           placeholderTextColor={colors.faint}
           value={draft}
@@ -207,6 +225,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+            <IconAction icon={Calculator} label={text('财务工具', 'Financial tools')} onPress={() => setFinanceTask('bills')} />
             <IconAction
               icon={Plus}
               label={text("添加工具", "Add tools")}
@@ -216,7 +235,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
             {think ? <Lightbulb size={15} color={colors.accent} /> : null}
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, minWidth: 0 }}>
-            <Pressable
+            {localOnly ? <Type size={13} muted>{text('本地', 'On-device')}</Type> : <Pressable
               accessibilityRole="button"
               accessibilityLabel={text(
                 `选择模型，当前${MODEL_NAMES[model]}`,
@@ -237,7 +256,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
                 {phone ? model === "deepseek-flash" ? "Flash" : "Pro" : MODEL_NAMES[model]}
               </Type>
               <ChevronDown size={12} color={colors.muted} />
-            </Pressable>
+            </Pressable>}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={controller.busy ? text("停止回答", "Stop answer") : text("发送消息", "Send message")}
@@ -272,8 +291,12 @@ export function ChatPage({ controller, onOpenPlugins }: {
           <ChevronRight size={14} color={colors.muted} />
         </Pressable>
       ) : null}
-      {!controller.session ? <View style={{ alignItems: "center" }}>
-        <Action kind="ghost" label={text("登录后开始对话", "Sign in to start chatting")} onPress={controller.openAuth} disabled={controller.authBusy} />
+      {localOnly ? <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <Type size={12} muted>{compactWelcome ? text('本次本地会话', 'Local · this session') : text('本次会话 · 登录、切号或刷新后清除', 'This session · cleared on sign-in, account change or reload')}</Type>
+        <Action kind="ghost" label={compactWelcome ? text('AI 问答', 'Ask AI') : text('新建 AI 问答', 'New AI question')} onPress={() => { controller.newFinancialAi(); input.current?.focus(); }} />
+      </View> : controller.financialAi ? <Type size={12} muted>{text('通用金融知识问答。仅分享你在此填写的内容，不带入本地财务记录。', 'General finance questions. Local financial notes are not included; share only what you enter here.')}</Type> : null}
+      {!controller.session && !localOnly ? <View style={{ alignItems: "center" }}>
+        <Action kind="ghost" label={text("AI 问答与插件需登录，本地计算可直接用", "Sign in for AI and plugins; local tools are ready")} onPress={controller.openAuth} disabled={controller.authBusy} />
       </View> : null}
     </View>
   );
@@ -282,11 +305,11 @@ export function ChatPage({ controller, onOpenPlugins }: {
       <QCompanion state={presentation.state} size={phone ? 152 : 176} animated={animateCompanion} showBadge={presentation.state !== "ready"} />
       <View style={{ alignItems: "center", gap: 10, maxWidth: 420 }}>
         <Type size={phone ? 25 : 32} weight="500" header style={{ textAlign: "center", letterSpacing: -0.5 }}>
-          {text("有什么想聊的？", "What’s on your mind?")}
+          {text("把钱的事，理清楚", "Make sense of your money")}
         </Type>
         <View accessibilityLiveRegion="polite" testID="q-welcome-status">
           <Type size={14} muted style={{ textAlign: "center", lineHeight: 22 }}>
-            {presentation.state === "ready" ? text("说说你的想法，我们一起想想。", "Share a thought. Let’s work through it.") : statusTitle}
+            {text('整理账单，算清成本，读懂金融知识。', 'Organize bills, understand costs, learn the essentials.')}
           </Type>
         </View>
       </View>
@@ -303,26 +326,19 @@ export function ChatPage({ controller, onOpenPlugins }: {
     >
       {[
         {
-          label: text("写点什么", "Write"),
-          value: text(
-            "帮我写一段简短清楚的文字。",
-            "Help me write something clear and concise.",
-          ),
-          icon: SquarePen,
+          label: text("整理账单", "Organize bills"), task: 'bills' as const, icon: ReceiptText,
         },
         {
-          label: text("一起想想", "Think"),
-          value: text("一起梳理一个想法。", "Help me think through an idea."),
-          icon: Lightbulb,
+          label: text("分期成本", "Installment cost"), task: 'installments' as const, icon: Calculator,
         },
+        { label: text('储蓄目标', 'Savings goal'), task: 'savings' as const, icon: PiggyBank },
+        { label: text('金融知识', 'Money essentials'), task: 'knowledge' as const, icon: BookOpen },
       ].map((item) => (
         <Pressable
           key={item.label}
           accessibilityRole="button"
           accessibilityLabel={item.label}
-          onPress={() =>
-            item.value ? suggestion(item.value) : onOpenPlugins()
-          }
+          onPress={() => setFinanceTask(item.task)}
           style={({ pressed }) => ({
             minHeight: touchSize,
             paddingHorizontal: 14,
@@ -391,11 +407,12 @@ export function ChatPage({ controller, onOpenPlugins }: {
                   >
                     <QCompanion size={30} showBadge={false} state={message.id === latestAnswer?.id ? presentation.state : getMascotPresentation({ phase: "idle", message }).state} />
                     <Type size={13} weight="500">
-                      {message.bankCommand ? text("小Q · 银行插件", "Q · Bank plugin") : text("小Q", "Q")}
+                      {message.localFinance ? text('小Q · 本地财务助手', 'Q · On-device finance') : message.bankCommand ? text("小Q · 银行插件", "Q · Bank plugin") : text("小Q", "Q")}
                     </Type>
                   </View>
                 ) : null}
                 {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
+                {localOnly && message.financeResult ? <FinanceResultCard result={message.financeResult} /> : null}
                 {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => { void controller.resumeTool(message.id, message.toolProposalId!); } : undefined} />}
                 {message.id === conversation?.messages.at(-1)?.id && message.id === controller.toolResumeTarget?.messageId && message.toolProposalId
                   ? <Action kind="ghost" label={text('继续回答', 'Continue answer')} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onPress={() => { void controller.resumeTool(message.id, message.toolProposalId!); }} style={{ alignSelf: 'flex-start' }} /> : null}
@@ -424,6 +441,10 @@ export function ChatPage({ controller, onOpenPlugins }: {
           {!compactWelcome ? <View style={{ width: "100%", maxWidth: 660, alignSelf: "center", gap: 28 }}>
             {welcome}
             {!draft.trim() ? prompts : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 }}>
+              <Action kind="ghost" label={text('AI 金融问答', 'Ask financial AI')} onPress={() => { controller.newFinancialAi(); input.current?.focus(); }} />
+              <Action kind="ghost" label={text('金融服务', 'Financial services')} onPress={() => setFinancialServices(true)} />
+            </View>
           </View> : null}
         </ScrollView>
       )}
@@ -432,7 +453,24 @@ export function ChatPage({ controller, onOpenPlugins }: {
         contentContainerStyle={{ paddingHorizontal: phone ? 16 : 36, paddingTop: compactWelcome ? 4 : 12, paddingBottom: phone ? 8 : 24 }}>
         {composer}
       </ScrollView>
+      <FinanceTaskSheet key={`${controller.session?.user.id ?? 'guest'}:${controller.privacyEpoch}`} visible={financeTask !== null} initialTask={financeTask ?? 'bills'} onClose={() => setFinanceTask(null)} onSubmit={controller.addLocalFinance} />
+      <FinanceAdSettings visible={adSettings} onClose={() => setAdSettings(false)} />
+      <Sheet visible={financialServices} title={text('金融服务', 'Financial services')} onClose={() => setFinancialServices(false)}>
+        <Type muted>{text('浏览公开资料与独立的广告位演示。小Q不受理金融申请或付款。', 'Browse public information and separate demo ad placements. Q does not process financial applications or payments.')}</Type>
+        {([
+          { id: 'installments', zh: '分期', en: 'Installments', icon: Calculator },
+          { id: 'insurance', zh: '保险', en: 'Insurance', icon: ShieldCheck },
+          { id: 'finance', zh: '理财', en: 'Investments', icon: Landmark },
+        ] as const).map(item => <Row key={item.id} title={text(item.zh, item.en)} icon={item.icon} onPress={() => { setFinancialServices(false); onOpenFinancialService(item.id); }} />)}
+        <Action kind="ghost" label={text('广告展示设置', 'Ad display settings')} onPress={() => { setFinancialServices(false); setAdSettings(true); }} />
+      </Sheet>
       <Sheet visible={details} title={text("对话状态", "Chat status")} onClose={() => setDetails(false)}>
+        {localOnly ? <View style={{ gap: 14 }}>
+          <Type weight="600">{text('这是一段本地财务任务', 'This is an on-device financial task')}</Type>
+          {controller.messageError ? <Type selectable color={colors.danger}>{chatErrorMessage(controller.messageError, text)}</Type> : null}
+          <Type muted>{text('输入、计算结果与通用知识只保留本次会话，不保存到云端历史、不发送给模型。登录、切换账号或刷新会清除这些记录。状态检查等应用功能仍可能联网。', 'Input, calculations and general knowledge stay in memory for this session, outside cloud history and AI requests. Sign-in, account changes or reload clear them. Other app features, including status checks, may still use the network.')}</Type>
+          <Action label={text('新建财务任务', 'New financial task')} onPress={() => { setDetails(false); setFinanceTask('bills'); }} />
+        </View> : <>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <QCompanion state={presentation.state} size={64} />
           <View style={{ flex: 1, gap: 4 }}><Type weight="600">{statusTitle}</Type><Type muted size={13}>{statusDetail}</Type></View>
@@ -458,6 +496,7 @@ export function ChatPage({ controller, onOpenPlugins }: {
           <Type muted size={13}>{text("如果发生版本冲突，可以重载云端记录；这会替换本机尚未保存的内容。", "For a version conflict, you can reload cloud history. This replaces unsaved changes on this device.")}</Type>
           <Action kind="ghost" label={text("重载云端版本（替换未保存内容）", "Reload cloud version (replace unsaved changes)")} disabled={controller.busy || controller.historyBusy} onPress={controller.reloadCloud} />
         </View> : null}
+        </>}
       </Sheet>
       {bankForm && bankPlugin ? <BankTransferComposer bankId={bankPlugin} onClose={() => setBankForm(false)} onDraft={suggestion} /> : null}
       <Sheet
@@ -477,6 +516,10 @@ export function ChatPage({ controller, onOpenPlugins }: {
         title={text("对话工具", "Chat tools")}
         onClose={() => setTools(false)}
       >
+        <Row icon={Calculator} title={text('财务工具', 'Financial tools')} subtitle={text('本地整理账单、分期成本与储蓄目标', 'On-device bills, installment costs and savings goals')} onPress={() => { setTools(false); setFinanceTask('bills'); }} />
+        <Row icon={Landmark} title={text('金融服务', 'Financial services')} onPress={() => { setTools(false); setFinancialServices(true); }} />
+        <Row icon={BookOpen} title={text('新建 AI 金融问答', 'New financial AI question')} subtitle={text('不带入本地财务记录', 'Does not include local financial notes')} onPress={() => { setTools(false); controller.newFinancialAi(); }} />
+        <Row title={text('广告展示设置', 'Ad display settings')} onPress={() => { setTools(false); setAdSettings(true); }} />
         {bankPlugin ? <Row title={text('填写转账', 'Fill a transfer')} onPress={() => { setTools(false); setBankForm(true); }} /> : null}
         <Row
           icon={Paperclip}
@@ -564,7 +607,7 @@ export function HistoryPage({
             key={item.id}
             icon={SquarePen}
             title={item.title}
-            subtitle={text(
+            subtitle={item.localOnly ? text('本地财务任务 · 本次会话', 'Local finance · this session') : text(
               item.messages.length ? `${item.messages.length} 条消息` : "点击加载记录",
               item.messages.length ? `${item.messages.length} messages` : "Open to load messages",
             )}
