@@ -3,6 +3,7 @@ import { Linking, Pressable, View } from 'react-native';
 import { ArrowUpRight, ShieldCheck } from 'lucide-react-native';
 import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
 import { groups, insuranceTypes, findInsurance, sources, type Copy, type InsuranceType } from './catalog';
+import { FinanceAdPlacement, FinanceAdSettings } from '../finance-ads';
 
 export function InsuranceDashboard() {
   const { text, colors, phone } = useDesign();
@@ -15,6 +16,7 @@ export function InsuranceDashboard() {
   const [comparing, setComparing] = useState(false);
   const [outbound, setOutbound] = useState<(typeof sources)[number] | null>(null);
   const [linkError, setLinkError] = useState(false);
+  const [adSettings, setAdSettings] = useState(false);
   const results = findInsurance(query, group);
   const toggle = (id: string) => setComparison(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id].slice(-3));
   const details = (item: InsuranceType) => {
@@ -27,7 +29,9 @@ export function InsuranceDashboard() {
       <Type size={12} muted>{text('具体保障、除外责任、材料及价格以所选产品条款和保险公司要求为准。', 'Coverage, exclusions, documents and pricing depend on the chosen policy and insurer.')}</Type>
     </>;
   };
-  return <Page title={text('保险全景', 'Insurance explorer')} description={text('从个人健康到家庭资产、企业经营，按生活与业务场景了解保障。', 'Explore protection for your health, family, assets and business.')}>
+  return <Page title={text('保险全景', 'Insurance explorer')} action={<Action kind="ghost" label={text('广告设置', 'Ad settings')} onPress={() => setAdSettings(true)} />} description={text('从个人健康到家庭资产、企业经营，按生活与业务场景了解保障。', 'Explore protection for your health, family, assets and business.')}>
+    <FinanceAdPlacement category="insurance" />
+    <FinanceAdSettings visible={adSettings} onClose={() => setAdSettings(false)} />
     <View style={{ padding: 20, borderRadius: 20, backgroundColor: colors.accentBg, gap: 14 }}>
       <ShieldCheck color={colors.accent} size={28} />
       <Type size={23} weight="600">{text('看懂保障，再做选择', 'Understand your protection')}</Type>

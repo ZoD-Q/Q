@@ -20,6 +20,8 @@ const pluginCore = await import('../plugin-host/core.ts');
 const bankIntent = await import('../banking/intent.ts');
 const bankCatalog = await import('../banking/catalog.ts');
 const bankData = await import('../banking/data.ts');
+const financeConversation = await import('../finance-agent/conversation.ts');
+const financeIntent = await import('../finance-agent/intent.ts');
 test.after(() => resolver.deregister());
 
 const token = 'q_' + 'a'.repeat(43);
@@ -70,7 +72,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     react,
     'expo/fetch': { fetch: async (url, options) => {
       const path = new URL(url).pathname;
-      calls.push({ path, method: options.method, signal: options.signal });
+      calls.push({ path, method: options.method, signal: options.signal, body: options.body });
       if (path.startsWith('/v1/banking/') || path.startsWith('/v1/plugins/')) { ordering.push(path + ':' + options.method); if (bankFetch) return bankFetch(path, options); throw new Error('Unexpected bank action'); }
       if (path === '/v1/ai/status') return statusFetch(options);
       if (path === '/v1/me') return meFetch(options);
@@ -92,6 +94,8 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     '../banking/intent': bankIntent,
     '../banking/catalog': bankCatalog,
     '../banking/client': bankData,
+    '../finance-agent/conversation': financeConversation,
+    '../finance-agent/intent': financeIntent,
     './stream': { ...stream, streamChat: options => {
       streams.push(options); ordering.push('chat:POST');
       return new Promise((resolve, reject) => {
@@ -730,4 +734,133 @@ test('automatic chains cannot exceed eight saved results and preserve factual fa
   view.current.retry();await view.flush();assert.equal(view.streams.length,10);assert.equal(view.streams[9].request.tool_invocation_ids.length,8);
   view.finishToolStream(automaticProposal('55555555-5555-4555-8555-000000000009'),9);await view.flush();
   assert.equal(view.streams.length,10);assert.equal(view.current.messageError,'PLUGIN_TURN_LIMIT');
+});
+
+test('retired guest financial tasks remain local and never start a model or save history', async t => {
+  const view = harness({ stored: null }); t.after(view.close); await view.flush();
+  assert.equal(view.current.send('分期 CNY 8000 12 240'), true);
+  await view.flush();
+  const local = view.current.conversation;
+  assert.equal(local.localOnly, true);
+  assert.equal(local.messages.at(-1).financeResult, undefined);
+  assert.match(local.messages.at(-1).content, /已从首页移除/);
+  assert.equal(view.current.authOpen, false);
+  assert.equal(view.current.aiConsentOpen, false);
+  assert.equal(view.streams.length, 0);
+  assert.equal(view.historyPosts.length, 0);
+  assert.equal(view.calls.some(call => call.method !== 'GET'), false);
+});
+
+test('private local results stay outside cloud detail, save, retry and bank-tool paths', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush(); view.grantConsent();
+  const secret = 'PRIVATE_BILL_MARKER_62015';
+  assert.equal(view.current.send(`账单 CNY\n收入 ${secret} 123.45\n支出 Food 20`), true);
+  const id = view.current.conversation.id;
+  const count = view.calls.length;
+  await view.current.openConversation(id); await view.current.retryHistory(); view.current.reloadCloud(); view.current.retry();
+  await view.current.resumeTool('fake-message', '11111111-1111-4111-8111-111111111111');
+  assert.equal(view.current.send('从汇丰转500港币到陈小明的中银账户'), true);
+  await view.flush();
+  assert.equal(view.current.conversation.id, id);
+  assert.equal(view.calls.length, count);
+  assert.equal(view.streams.length, 0);
+  assert.equal(view.historyPosts.length, 0);
+  assert.equal(JSON.stringify(view.calls).includes(secret), false);
+});
+
+test('opening a local task cancels a pending AI permission and never reuses a cloud identity', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush();
+  assert.equal(view.current.send('pending cloud question'), false);
+  assert.equal(view.current.aiConsentOpen, true);
+  assert.equal(view.current.addLocalFinance({ prompt: 'local task', answer: 'PRIVATE_LOCAL_RESULT' }), true);
+  const localId = view.current.conversation.id;
+  assert.equal(view.current.aiConsentOpen, false);
+  view.current.confirmAiSharing(); await view.flush();
+  assert.equal(view.streams.length, 0);
+  view.current.newFinancialAi(); view.grantConsent();
+  assert.equal(view.current.send('What is APR?'), true); await view.flush();
+  assert.notEqual(view.current.conversation.id, localId);
+  assert.equal(view.current.conversation.localOnly, undefined);
+  assert.equal(view.streams.length, 1);
+  const context = JSON.stringify(view.streams[0].request.messages);
+  assert.equal(context.includes('PRIVATE_LOCAL_RESULT'), false);
+  assert.ok(context.includes('source-based market research'));
+  assert.ok(context.includes('What is APR?'));
+  assert.equal(JSON.stringify(view.historyPosts).includes('PRIVATE_LOCAL_RESULT'), false);
+  assert.equal(JSON.stringify(view.historyPosts).includes('financeResult'), false);
+});
+
+test('guest sign-in and account changes discard local notes and drafts', async t => {
+  const view = harness({ stored: null, historyFetch: cloudHistory }); t.after(view.close); await view.flush();
+  view.current.addLocalFinance({ prompt: 'guest private', answer: 'guest result' });
+  view.current.setDraft('private draft');
+  await view.changeToken(token); await view.flush();
+  assert.equal(view.current.session.user.id, user.id);
+  assert.equal(view.current.items.some(item => item.localOnly), false);
+  assert.equal(view.current.draft, '');
+  view.current.addLocalFinance({ prompt: 'signed in private', answer: 'signed in result' });
+  await view.changeToken('q_' + 'b'.repeat(43)); await view.flush();
+  assert.equal(view.current.items.some(item => item.localOnly), false);
+  assert.equal(view.historyPosts.length, 0);
+});
+
+test('switching from an active cloud answer to a local task preserves the old cloud ID only for its own result', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush(); view.grantConsent();
+  assert.equal(view.current.send('cloud question'), true); await view.flush();
+  const cloudId = view.current.conversation.id;
+  assert.equal(view.current.addLocalFinance({ prompt: 'new private local task', answer: 'PRIVATE_NEW_LOCAL' }), true);
+  const localId = view.current.conversation.id;
+  assert.notEqual(localId, cloudId);
+  assert.equal(view.streams[0].signal.aborted, true);
+  await view.flush();
+  assert.equal(view.current.conversation.id, localId);
+  assert.equal(view.current.items.find(item => item.id === cloudId).localOnly, undefined);
+  assert.equal(view.historyPosts.some(item => item.id === localId), false);
+  assert.equal(JSON.stringify(view.historyPosts).includes('PRIVATE_NEW_LOCAL'), false);
+});
+
+test('long UTF-16 financial input cannot fall back to a cloud request', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush(); view.grantConsent();
+  const value = '账单 CNY\n收入 PRIVATE_SALARY 10000\n支出 ' + '💸'.repeat(6000) + ' 20';
+  assert.ok(value.length > 12000 && Array.from(value).length < 12000);
+  assert.equal(view.current.send(value), true); await view.flush();
+  assert.equal(view.current.conversation.localOnly, true);
+  assert.equal(view.historyPosts.length, 0);
+  assert.equal(view.streams.length, 0);
+  assert.equal(JSON.stringify(view.calls).includes('PRIVATE_SALARY'), false);
+  assert.equal(view.current.send('账单 CNY\n收入 PRIVATE_TOO_LONG ' + '💸'.repeat(13000)), false);
+  await view.flush();
+  assert.equal(view.current.messageError, 'MESSAGE_TOO_LONG');
+  assert.equal(view.historyPosts.length, 0);
+  assert.equal(view.streams.length, 0);
+});
+
+test('financial AI mode survives reopening its existing cloud conversation', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush(); view.grantConsent();
+  view.current.newFinancialAi();
+  assert.equal(view.current.send('What is APR?'), true); await view.flush();
+  const id = view.current.conversation.id;
+  view.finishStream(0, 'APR includes relevant borrowing costs.'); await view.flush();
+  view.current.newConversation(); await view.current.openConversation(id); await view.flush();
+  assert.equal(view.current.financialAi, true);
+  assert.equal(view.current.send('What is APR?'), true); await view.flush();
+  assert.equal(view.current.conversation.id, id);
+  assert.equal(view.current.conversation.localOnly, undefined);
+  assert.equal(view.streams.length, 2);
+  assert.ok(JSON.stringify(view.streams[1].request.messages).includes('source-based market research'));
+  assert.ok(JSON.stringify(view.streams[1].request.messages).includes('APR includes relevant borrowing costs.'));
+});
+
+test('financial AI mode restores from saved visible history without a new wire field', async t => {
+  const id = '88888888-8888-4888-8888-888888888888';
+  const detail = { id, title: 'Finance Q&A · What is APR?', revision: 1, updated_at: user.created_at,
+    messages: [{ id: 'u', role: 'user', content: 'What is APR?', status: 'complete' }, { id: 'a', role: 'assistant', content: 'A reference borrowing rate.', status: 'complete' }] };
+  const view = harness({ historyFetch: async () => json({ items: [{ id, title: detail.title, revision: 1, updated_at: user.created_at }], next_cursor: null }), historyDetail: async () => json(detail) });
+  t.after(view.close); await view.flush(); view.grantConsent();
+  await view.current.openConversation(id); await view.flush();
+  assert.equal(view.current.financialAi, true);
+  assert.equal(view.current.send('What is APR?'), true); await view.flush();
+  assert.equal(view.current.conversation.id, id);
+  assert.equal(view.streams.length, 1);
+  assert.ok(JSON.stringify(view.streams[0].request.messages).includes('source-based market research'));
 });

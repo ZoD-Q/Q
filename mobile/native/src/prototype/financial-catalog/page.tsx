@@ -5,6 +5,7 @@ import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '.
 import { useQAccount } from '../account/account-state';
 import { useFinancialPreview } from '../services/preview-state';
 import { findListings, listings, reviewedOn, trustedSource, type Category, type Copy, type Listing } from './catalog';
+import { FinanceAdPlacement, FinanceAdSettings } from '../finance-ads';
 
 const titles: Record<Category, Copy> = { installments: ['分期', 'Installments'], insurance: ['保险', 'Insurance'], finance: ['理财', 'Investments'] };
 const icons = { installments: WalletCards, insurance: ShieldCheck, finance: Landmark };
@@ -21,6 +22,7 @@ export function FinancialCatalogPage({ category }: { category: Category }) {
   const [outbound, setOutbound] = useState<Listing | null>(null);
   const [linkError, setLinkError] = useState(false);
   const [checks, setChecks] = useState<string[]>([]);
+  const [adSettings, setAdSettings] = useState(false);
   const label = (pair: Copy) => text(pair[0], pair[1]);
   const matches = findListings(category, query).filter(item => !savedOnly || savedListings.includes(item.id));
   const compareItems = listings.filter(item => comparison.includes(item.id));
@@ -42,7 +44,9 @@ export function FinancialCatalogPage({ category }: { category: Category }) {
     <Row title={text('费用与价格', 'Costs and pricing')} subtitle={label(item.costs)} />
     <Row title={text('需要注意', 'Important considerations')} subtitle={label(item.risk)} last />
   </>;
-  return <Page title={label(titles[category])} description={text('了解真实机构与公开产品，比较后前往官方了解详情。小Q不受理申请或付款。', 'Explore real providers and public offerings, compare them and visit official sources. Q does not process applications or payments.')}>
+  return <Page title={label(titles[category])} action={<Action kind="ghost" label={text('广告设置', 'Ad settings')} onPress={() => setAdSettings(true)} />} description={text('了解真实机构与公开产品，比较后前往官方了解详情。小Q不受理申请或付款。', 'Explore real providers and public offerings, compare them and visit official sources. Q does not process applications or payments.')}>
+    <FinanceAdPlacement category={category} />
+    <FinanceAdSettings visible={adSettings} onClose={() => setAdSettings(false)} />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Tag accent>{text('官方公开信息', 'Official public information')}</Tag><Tag>{text('付款未开放', 'Payments unavailable')}</Tag></View>
     <Input label={text('搜索机构、产品或代码', 'Search provider, product or code')} value={query} onChangeText={setQuery} placeholder={text('输入关键词', 'Enter a keyword')} />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

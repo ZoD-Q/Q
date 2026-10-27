@@ -236,3 +236,28 @@ test('cloud replacement waits for an uncertain retry before fetching and replaci
   resolveSave(); await Promise.all([retry,reload]);
   assert.equal(fetched,true); assert.equal(cloudRevision,2);
 });
+
+test('financial result markers cannot enter cloud history or model context even when the local flag is lost', async () => {
+  const { createHistoryWriter } = await import('./history.ts');
+  let writes = 0;
+  const writer = createHistoryWriter(async () => { writes++; throw new Error('must not write'); }, () => 'request');
+  for (const local of [
+    { id: 'private', title: 'private', localOnly: true, messages: [message('u', 'user', 'private')] },
+    { id: 'private', title: 'private', messages: [{ ...message('u', 'user', 'private'), localFinance: true }] },
+    { id: 'private', title: 'private', messages: [{ ...message('a', 'assistant', 'private'), financeResult: { kind: 'bills' } }] },
+  ]) {
+    await assert.rejects(writer.save(local), /LOCAL_FINANCE_PRIVATE/);
+    await assert.rejects(writer.retry(local), /LOCAL_FINANCE_PRIVATE/);
+  }
+  assert.equal(writes, 0);
+  assert.throws(() => buildContext([{ ...message('u', 'user', 'private'), localFinance: true }]), /LOCAL_FINANCE_PRIVATE/);
+  assert.throws(() => buildContext([{ ...message('u', 'user', 'private'), financeResult: { kind: 'bills' } }]), /LOCAL_FINANCE_PRIVATE/);
+});
+
+test('financial AI guidance is included in the bounded context without modifying the original conversation', () => {
+  const messages = [message('u', 'user', 'Explain a concept')];
+  const before = structuredClone(messages);
+  assert.equal(buildContext(messages, 'Public financial guidance').messages[0].content, 'Public financial guidance\n\nExplain a concept');
+  assert.deepEqual(messages, before);
+  assert.throws(() => buildContext([message('u', 'user', 'x'.repeat(12000))], 'Guidance'), /FINANCE_MESSAGE_TOO_LONG/);
+});

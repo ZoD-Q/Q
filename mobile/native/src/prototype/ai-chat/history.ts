@@ -50,8 +50,11 @@ export function restoreHistory(detail: HistoryDetail): Conversation {
   return { id: detail.id, title: detail.title, ...(detail.plugin ? { plugin: detail.plugin } : {}), messages: detail.messages.map(m => m.status === 'pending' || m.status === 'streaming' ? { ...m, status: 'cancelled', errorCode: 'INTERRUPTED' } : m) };
 }
 
-type SaveBody = Omit<Conversation, 'id'> & { request_id: string; expected_revision: number };
+type SaveBody = Pick<Conversation, 'title' | 'messages' | 'plugin'> & { request_id: string; expected_revision: number };
 function saveSnapshot(conversation: Conversation, revision: number, requestId: string): SaveBody {
+  if (conversation.localOnly || conversation.messages.some(message => message.localFinance || message.financeResult)) {
+    throw new Error('LOCAL_FINANCE_PRIVATE');
+  }
   return {
     title: conversation.title,
     messages: JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[],
@@ -68,6 +71,9 @@ export function createHistoryWriter(save: (id: string, body: SaveBody) => Promis
   const uncertain = new Set<string>();
   const seed = (id: string, revision: number, replaceSnapshot = false) => { if (!pending.has(id) && (replaceSnapshot || !revisions.has(id))) revisions.set(id, revision); };
   const run = (conversation: Conversation, retry = false): Promise<HistoryDetail> => {
+    if (conversation.localOnly || conversation.messages.some(message => message.localFinance || message.financeResult)) {
+      return Promise.reject(new Error('LOCAL_FINANCE_PRIVATE'));
+    }
     const previous = queues.get(conversation.id) ?? Promise.resolve();
     const operation = previous.catch(() => {}).then(async () => {
       let body = pending.get(conversation.id);

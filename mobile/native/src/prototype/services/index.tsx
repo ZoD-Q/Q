@@ -1,5 +1,4 @@
 import type { BankAccount } from "../banking/client";
-import { FinancePage } from "./finance";
 import { PluginsPage } from "./plugins";
 import { WalletPage } from "./wallet";
 import { KeysPage } from "./keys";
@@ -28,7 +27,6 @@ export function ServicePage({
     case "keys":
       return <KeysPage />;
     case "finance":
-      return <FinancePage />;
     case "installments":
       return <FinancialCatalogPage key={page} category={page} />;
     case "insurance":
