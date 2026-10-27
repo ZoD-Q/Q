@@ -1,7 +1,6 @@
-import { calculateInstallments, calculateSavings, summarizeBills, type Currency, type FinanceOutcome, type FinanceResult } from './core';
 import { FINANCE_KNOWLEDGE } from './knowledge';
 import { createFinanceTurn } from './copy';
-import { localFinanceHelp, type LocalFinanceTurn } from './conversation';
+import type { LocalFinanceTurn } from './conversation';
 
 type Locale = 'zh' | 'en';
 const topics: readonly [string, RegExp][] = [
@@ -15,62 +14,42 @@ const topics: readonly [string, RegExp][] = [
   ['early-repayment', /提前还款|提前结清|early repay|early settlement/i],
 ];
 
-function resultTurn(prompt: string, result: FinanceOutcome<FinanceResult>, locale: Locale): LocalFinanceTurn {
-  if (result.ok) return { ...createFinanceTurn(result.value, locale), prompt };
+const legacyTask = /账单|分期|储蓄|存钱|借款|还款|\bbills?\b|\binstallments?\b|\bsavings?\b/i;
+const financialInput = /账单|分期|储蓄|存钱|收入|支出|保险|基金|投资|理财|借款|还款|本金|手续费|总费用|年利率|现金流|金融|市场|美股|加密货币|\bbills?\b|\binstallments?\b|\bsavings?\b|\bincome\b|\bexpenses?\b|\bapr\b|\bfinance\b|\bmarkets?\b|\bstocks?\b|\bcrypto\b/i;
+
+function unavailableTask(prompt: string, locale: Locale): LocalFinanceTurn {
   return {
     prompt,
-    answer: (locale === 'zh' ? '还不能完成计算，请核对输入：\n' : 'Please correct the input before calculating:\n')
-      + result.errors.slice(0, 8).map(error => `${error.line ? (locale === 'zh' ? `第 ${error.line} 行：` : `Line ${error.line}: `) : ''}${error.message[locale]}`).join('\n')
-      + (locale === 'zh' ? '\n\n也可以打开“财务工具”逐项填写。本次没有生成汇总或发送内容。' : '\n\nYou can also use Financial tools. No summary was generated and nothing was sent.'),
+    answer: locale === 'zh'
+      ? '账单整理、分期成本和储蓄目标工具已从首页移除，当前不再处理这些任务。已有结果仍可查看。\n\n这段输入仅留在本次本机会话，没有上传，也没有生成新计算结果。可以打开“金融知识”阅读基础概念；市场资料请从“金融数据”查看公开来源。'
+      : 'Bill organization, installment costs and savings goals have been removed from the home page and are no longer processed here. Existing results remain available.\n\nThis input stays on this device for this session. Nothing was uploaded and no new calculation was generated. Open Financial knowledge for basic concepts or Financial data for public market sources.',
   };
 }
 
-/** Bounded, explicit input formats. Unrecognized financial text asks for fields; it is never guessed. */
+/** Keep retired financial tasks local; removing an entry point must never forward its private input. */
 export function respondToFinanceText(prompt: string, locale: Locale): LocalFinanceTurn | null {
   const value = prompt.trim();
   if (!value) return null;
   if (value.length > 24000) {
-    return /账单|分期|储蓄|收入|支出|保险|基金|理财|\bbills?\b|\binstallments?\b|\bsavings?\b|\bincome\b|\bexpense\b|\bapr\b/i.test(value)
-      ? { prompt, answer: locale === 'zh' ? '这份财务输入过长，请拆分后在本地财务工具中处理。没有上传内容。' : 'Split this financial input into smaller local tasks. Nothing was uploaded.' }
+    return financialInput.test(value)
+      ? { prompt, answer: locale === 'zh' ? '这份财务输入过长，已在本机停止处理，没有上传内容。账单、分期与储蓄工具当前不可用；请勿重新提交财务原文到 AI 对话。' : 'This financial input is too long and was stopped on this device. Nothing was uploaded. Bill, installment and savings tools are unavailable; do not resubmit private financial notes to AI chat.' }
       : null;
   }
-  const canonicalInstallment = /^(?:分期|installments?)\s+(CNY|HKD)\s+(\S+)\s+(\S+)\s+(\S+)$/i.exec(value);
-  if (canonicalInstallment) {
-    const [, currency, principal, months, feeTotal] = canonicalInstallment;
-    return resultTurn(prompt, calculateInstallments({ currency: currency.toUpperCase() as Currency, principal, months, feeTotal }), locale);
-  }
-  const naturalInstallment = /^(?:(?:请|帮我)?(?:算一下|计算|算)\s*)?(?:分期[：:]?\s*)?(CNY|HKD|人民币|港币)?\s*(\d+(?:\.\d+)?)\s*元?\s*[,，]?\s*分(?:成)?\s*(\d+)\s*期\s*[,，]?\s*(?:总费用|总手续费|手续费)\s*(?:为|是|[:：])?\s*(\d+(?:\.\d+)?)\s*元?[。]?$/i.exec(value);
-  if (naturalInstallment) {
-    const [, unit, principal, months, feeTotal] = naturalInstallment;
-    const currency: Currency = unit?.toUpperCase() === 'HKD' || unit === '港币' ? 'HKD' : 'CNY';
-    return resultTurn(prompt, calculateInstallments({ currency, principal, months, feeTotal }), locale);
-  }
-  const saving = /^(?:储蓄|savings?)\s+(CNY|HKD)\s+(\S+)\s+(\S+)\s+(\S+)$/i.exec(value);
-  if (saving) {
-    const [, currency, target, current, monthly] = saving;
-    return resultTurn(prompt, calculateSavings({ currency: currency.toUpperCase() as Currency, target, current, monthly }), locale);
-  }
-  const bills = /^(?:账单|bills?)\s+(CNY|HKD)\s*\r?\n([\s\S]+)$/i.exec(value);
-  if (bills) return resultTurn(prompt, summarizeBills(bills[2], bills[1].toUpperCase() as Currency), locale);
-  if (/(?:收入|支出|\bincome\b|\bexpense\b)/i.test(value)) {
-    return {
-      prompt,
-      answer: locale === 'zh'
-        ? '我看到你输入了账单记录。请先明确币种：在第一行写“账单 CNY”或“账单 HKD”，每条记录另起一行，例如“支出 餐饮 38.50”。也可以打开“财务工具”整理。不会把不同币种合并，也不会上传这些记录。'
-        : 'Please specify the currency with “bills CNY” or “bills HKD” on the first line, followed by one entry per line, for example “expense Food 38.50”. You can also open Financial tools. These entries are not uploaded or combined across currencies.',
-    };
-  }
+  // Financial records take priority over a knowledge keyword elsewhere in the same input.
+  if (/账单|\bbills?\b/i.test(value)
+    || /(?:^|\n)\s*(?:收入|支出|income|expenses?)\s+.+\s+\S+/i.test(value)
+    || (/(?:我的|本人|个人|工资|房租|my\s)/i.test(value) && /收入|支出|\bincome\b|\bexpenses?\b/i.test(value))
+    || /分(?:成)?\s*\d+\s*期/u.test(value)
+    || (/(?:本金|手续费|总费用)/u.test(value) && /\d/u.test(value))
+    || (legacyTask.test(value) && /\d/u.test(value))) return unavailableTask(prompt, locale);
+  // Public-company and market research must not be mistaken for a personal budget task.
+  if (/美股|A股|港股|财报|公告|宏观|新闻|热点|行情|股价|币价|加密货币|比特币|英伟达|苹果公司|微软|\bstocks?\b|\bcrypto\b|\bfilings?\b|\bearnings\b|\bnews\b|\bNVDA\b|\bAAPL\b|\bMSFT\b/i.test(value)) return null;
   const topic = topics.find(([, pattern]) => pattern.test(value));
   const entry = topic ? FINANCE_KNOWLEDGE.find(item => item.id === topic[0]) : undefined;
   if (entry) return { ...createFinanceTurn({ kind: 'knowledge', entry }, locale), prompt };
-  if (/账单|分期|储蓄|存钱|免赔|还款|借款|保险|基金|投资|理财|\bbills?\b|\binstallments?\b|\bsavings?\b|\binsurance\b/i.test(value)) {
-    const help = localFinanceHelp(locale, prompt);
-    return { ...help, answer: (locale === 'zh'
-      ? '我可以帮你整理账单、解释通用知识和做确定性计算，不会猜测机构报价或推荐具体在售产品。\n\n快速输入示例：\n分期 CNY 8000 12 240\n（本金 8000、12 期、全部费用合计 240）\n储蓄 CNY 50000 10000 2000\n（目标 50000、现有 10000、每月存入 2000）\n\n'
-      : 'I can organize bills, explain general concepts and calculate from explicit inputs. I do not invent quotes or recommend specific products.\n\nExamples:\ninstallment CNY 8000 12 240\n(principal 8000, 12 payments, total fees 240)\nsavings CNY 50000 10000 2000\n(target 50000, current 10000, monthly 2000)\n\n') + help.answer };
-  }
+  if (legacyTask.test(value)) return unavailableTask(prompt, locale);
   return null;
 }
 
 /** Public task guidance only. It contains no local financial notes or advertising data. */
-export const FINANCIAL_AI_GUIDANCE = 'You are Q, a financial literacy assistant. Explain general financial concepts in the user\'s language, distinguish facts from assumptions, and ask for missing inputs. Do not invent account balances, live rates, quotes, approvals, insurance coverage or guaranteed returns. Do not recommend a specific financial product or use advertising as evidence. You have no access to this device\'s local bills or calculations. For numeric cost or savings calculations, direct the user to Q\'s on-device Financial tools, which use explicit inputs and assumptions. Do not claim to submit applications, buy products or execute financial transactions.';
+export const FINANCIAL_AI_GUIDANCE = 'You are Q, a source-based market research and financial knowledge assistant. Explain in the user\'s language and distinguish sourced facts, inferences and scenarios. Current prices, market moves and news conclusions require relevant tool results or evidence explicitly supplied by the user; memory alone is not current evidence. Cite the actual source and link when available, state the data or publication timestamp with timezone, and distinguish it from retrieval time. Report known delays, missing timestamps and freshness limits; never label data real-time unless the evidence establishes that. If evidence is missing, say what is unknown and ask for a source or a data lookup without inventing quotes or news. A provider name or public website is not proof of a connected API, subscription or live feed. Do not claim connections to Jin10, Tonghuashun or any other vendor unless a tool result establishes the specific access. Do not use advertising as evidence, promise returns or trade outcomes, or claim to submit applications or execute transactions. You have no access to this device\'s local bills or calculations. Bill organization, installment-cost and savings-goal tools are unavailable from the home page; do not tell users to open them or to upload private records.';

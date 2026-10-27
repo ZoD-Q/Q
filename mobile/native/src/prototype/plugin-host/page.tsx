@@ -300,13 +300,15 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, initialIntent, onI
   </Page>;
 }
 
-export function PluginHostPage({ chat, onOpenWorkbench, onSelect, initialIntent, onIntentHandled }: { chat: ChatController; onOpenWorkbench: () => void; onSelect: (connection: PluginConnection) => void } & LinkIntent) {
+export function PluginHostPage({ chat, onOpenWorkbench, onOpenMarketData, onSelect, initialIntent, onIntentHandled }: { chat: ChatController; onOpenWorkbench: () => void; onOpenMarketData?: () => void; onSelect: (connection: PluginConnection) => void } & LinkIntent) {
   const { text, colors } = useDesign();
   const [tab, setTab] = useState('connected');
   const [authModalPending, authModalEvent] = useReducer(pluginAuthModalReducer, chat.authOpen);
   const connectionPageReady = canPresentPluginConnectionPage({ platform: process.env.EXPO_OS, authenticated: !!chat.session, authOpen: chat.authOpen, authModalPending });
   const openAuth = () => { authModalEvent('requested'); chat.openAuth(); };
-  return <View style={{ flex: 1 }}><View style={{ paddingHorizontal: 24, paddingBottom: 12 }}><Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'banks', label: text('银行插件', 'Bank plugins') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
+  return <View style={{ flex: 1 }}><View style={{ paddingHorizontal: 24, paddingBottom: 12 }}>
+    {onOpenMarketData ? <Row title={text('金融数据工具', 'Financial data tools')} subtitle={text('查询公开币种数据、美国公司公告与财经新闻，核对来源与时间。', 'Explore public crypto data, US filings and financial news with sources and timestamps.')} onPress={onOpenMarketData} /> : null}
+    <Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'banks', label: text('银行插件', 'Bank plugins') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
     {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? tab === 'banks' ? <BankPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} /> : <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} initialIntent={initialIntent} onIntentHandled={onIntentHandled} />
       : chat.session ? <Page title={text('我的插件', 'My plugins')}><ActivityIndicator color={colors.accent} accessibilityLabel={text('正在完成登录', 'Finishing sign-in')} /></Page>
         : <Page title={text('我的插件', 'My plugins')}><Type muted>{initialIntent ? text('链接已保留。登录 Q 后继续查看插件信息，再确认添加。', 'Your link is kept. Sign in to Q to review the plugin and confirm addition.') : text('登录 Q 后添加插件，连接与授权保存在你的账户下。', 'Sign in to Q to save plugin connections and authorizations to your account.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} onPress={openAuth} disabled={chat.authBusy} /></Page>}

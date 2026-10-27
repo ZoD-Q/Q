@@ -30,6 +30,7 @@ export type PageId =
   | "chat"
   | "history"
   | "plugins"
+  | "market-data"
   | "plugin-workbench"
   | "installments"
   | "insurance"

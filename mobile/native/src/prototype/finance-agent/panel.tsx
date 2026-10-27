@@ -13,6 +13,7 @@ export type { FinanceTask } from './copy';
 export interface FinanceTaskSheetProps {
   visible: boolean;
   initialTask?: FinanceTask;
+  knowledgeOnly?: boolean;
   onClose: () => void;
   onSubmit: (turn: LocalFinanceTurn) => boolean;
 }
@@ -53,9 +54,10 @@ function MoneyField({ label, value, onChangeText, field, errors, hint, currency,
   );
 }
 
-function FinanceTaskForm({ initialTask = 'bills', onClose, onSubmit }: Omit<FinanceTaskSheetProps, 'visible'>) {
+function FinanceTaskForm({ initialTask = 'bills', knowledgeOnly = false, onClose, onSubmit }: Omit<FinanceTaskSheetProps, 'visible'>) {
   const { colors, locale, text } = useDesign();
-  const [task, setTask] = useState<FinanceTask>(initialTask);
+  const [selectedTask, setTask] = useState<FinanceTask>(initialTask);
+  const task: FinanceTask = knowledgeOnly ? 'knowledge' : selectedTask;
   const [currency, setCurrency] = useState<Currency>('CNY');
   const [bills, setBills] = useState('');
   const [exampleLoaded, setExampleLoaded] = useState(false);
@@ -119,7 +121,7 @@ function FinanceTaskForm({ initialTask = 'bills', onClose, onSubmit }: Omit<Fina
       : text('计算到本地对话', 'Calculate in local chat');
 
   return (
-    <Sheet visible title={text('财务工具', 'Financial tools')} onClose={close} footer={
+    <Sheet visible title={knowledgeOnly ? text('金融知识', 'Financial knowledge') : text('财务工具', 'Financial tools')} onClose={close} footer={
       <View style={{ gap: 8 }}>
         {errors.length ? <Type size={12} color={colors.danger} selectable>{text(`有 ${errors.length} 处输入需要检查；已保留你的内容。`, `${errors.length} ${errors.length === 1 ? 'entry needs' : 'entries need'} attention. Your input is preserved.`)}</Type> : null}
         {submitBlocked ? <View accessibilityLiveRegion="polite"><Type size={12} color={colors.danger} selectable>{text('当前正在处理其他操作，请稍后再试。输入已保留。', 'Another operation is in progress. Try again shortly; your input is preserved.')}</Type></View> : null}
@@ -132,16 +134,18 @@ function FinanceTaskForm({ initialTask = 'bills', onClose, onSubmit }: Omit<Fina
       <View testID="finance-task-sheet" style={{ gap: 20 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <LockKeyhole size={16} strokeWidth={1.7} color={colors.accent} accessible={false} />
-          <Type size={13} color={colors.accent} style={{ flex: 1 }}>{text('本地整理与计算 · 不自动发送给 AI', 'Local calculations · never sent to AI automatically')}</Type>
+          <Type size={13} color={colors.accent} style={{ flex: 1 }}>{knowledgeOnly
+            ? text('在本机阅读知识 · 附参考来源', 'Read on this device · references included')
+            : text('本地整理与计算 · 不自动发送给 AI', 'Local calculations · never sent to AI automatically')}</Type>
         </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {!knowledgeOnly ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {TASKS.map(({ id, icon: Icon }) => <Pressable key={id} testID={`finance-task-${id}`} accessibilityRole="button" accessibilityLabel={financeText(TASK_LABELS[id], locale)} accessibilityState={{ selected: task === id }} onPress={() => {
             setTask(id); setErrors([]); setSubmitBlocked(false); Keyboard.dismiss();
           }} style={({ pressed }) => ({ width: '48%', flexGrow: 1, minHeight: 48, padding: 12, borderRadius: 12, flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: task === id ? colors.accentBg : colors.soft, opacity: pressed ? 0.7 : 1 })}>
             <Icon size={17} color={task === id ? colors.accent : colors.muted} strokeWidth={1.7} accessible={false} />
             <Type size={13} weight={task === id ? '600' : '400'} color={task === id ? colors.accent : colors.ink} style={{ flex: 1 }}>{financeText(TASK_LABELS[id], locale)}</Type>
           </Pressable>)}
-        </View>
+        </View> : null}
         {task !== 'knowledge' ? <View style={{ gap: 8 }}>
           <Type size={13} weight="500">{text('本次币种', 'Currency for this task')}</Type>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -196,7 +200,9 @@ function FinanceTaskForm({ initialTask = 'bills', onClose, onSubmit }: Omit<Fina
           {knowledgeEntries.length === 0 ? <Type size={13} muted>{text('没有匹配的条目，换一个关键词试试。', 'No matching entries. Try another keyword.')}</Type> : null}
         </View> : null}
         <View style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: 14 }}>
-          <Type size={12} muted selectable>{financeText(FINANCE_PRIVACY, locale)}</Type>
+          <Type size={12} muted selectable>{knowledgeOnly
+            ? text('知识查找和阅读在本机完成。添加到本地对话后仅保留本次会话，不会发送给 AI 或云端历史；打开参考来源会访问外部网页。', 'Knowledge search and reading happen on this device. Entries added to local chat stay in this session and are not sent to AI or cloud history. Opening a reference visits an external website.')
+            : financeText(FINANCE_PRIVACY, locale)}</Type>
         </View>
       </View>
     </Sheet>
@@ -204,7 +210,7 @@ function FinanceTaskForm({ initialTask = 'bills', onClose, onSubmit }: Omit<Fina
 }
 
 /** Unmount form state as soon as the sheet closes, including unsubmitted financial input. */
-export function FinanceTaskSheet({ visible, initialTask, onClose, onSubmit }: FinanceTaskSheetProps) {
+export function FinanceTaskSheet({ visible, initialTask, knowledgeOnly, onClose, onSubmit }: FinanceTaskSheetProps) {
   if (!visible) return null;
-  return <FinanceTaskForm key={initialTask} initialTask={initialTask} onClose={onClose} onSubmit={onSubmit} />;
+  return <FinanceTaskForm key={knowledgeOnly ? 'knowledge-only' : initialTask} initialTask={initialTask} knowledgeOnly={knowledgeOnly} onClose={onClose} onSubmit={onSubmit} />;
 }

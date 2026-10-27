@@ -320,7 +320,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     let context: ReturnType<typeof buildContext>;
     try {
       const lastUser = baseMessages.findLastIndex(message => message.role === 'user');
-      context = buildContext(baseMessages.slice(0, lastUser + 1), (financialAi || isFinancialAiConversation(conversation)) && !conversation.plugin ? FINANCIAL_AI_GUIDANCE : '');
+      context = buildContext(baseMessages.slice(0, lastUser + 1), !conversation.plugin ? FINANCIAL_AI_GUIDANCE : '');
     }
     catch (error) { setMessageError(errorCode(error)); return false; }
     if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft })) {

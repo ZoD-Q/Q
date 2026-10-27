@@ -35,6 +35,7 @@ import { PluginHostPage } from "./plugin-host/page";
 import { pluginEntryIntentReducer } from "./plugin-host/core";
 import { useQAccount } from "./account/account-state";
 import { useSocial } from "./social";
+import { MarketDataPage } from './market-data/page';
 
 const serviceNavigation: {
   id: PageId;
@@ -44,6 +45,7 @@ const serviceNavigation: {
 }[] = [
   { id: "video", zh: "视频创作", en: "Video studio", icon: Clapperboard },
   { id: "plugins", zh: "插件", en: "Plugins", icon: Layers3 },
+  { id: "market-data", zh: "金融数据", en: "Financial data", icon: TrendingUp },
   { id: "plugin-workbench", zh: "插件工作台", en: "Plugin workbench", icon: Code2 },
   { id: "installments", zh: "分期", en: "Installments", icon: CreditCard },
   { id: "insurance", zh: "保险", en: "Insurance", icon: ShieldCheck },
@@ -558,7 +560,14 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         </View>
         <Reveal key={page} style={{ flex: 1 }}>
           {!active ? <View style={{ flex: 1 }} /> : page === "chat" ? (
-            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} />
+            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} />
+          ) : page === 'market-data' ? (
+            <MarketDataPage active={active} onAnalyze={draft => {
+              chat.newFinancialAi();
+              chat.setDraft(draft);
+              navigate('chat');
+              return true;
+            }} />
           ) : page === "video" ? (
             <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
           ) : page === "creators" ? (
@@ -570,7 +579,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "plugin-workbench" ? (
             <PluginWorkbenchPage onBack={() => navigate("plugins")} onConnect={intent => { updatePluginIntent({ type: "received", intent }); navigate("plugins"); }} />
           ) : page === "plugins" ? (
-            <PluginHostPage chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
+            <PluginHostPage chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
           ) : (
             <ServicePage page={page} onOpenWorkbench={() => navigate("plugin-workbench")} onBankTransfer={account => {
               if (!account.connection_id) return;

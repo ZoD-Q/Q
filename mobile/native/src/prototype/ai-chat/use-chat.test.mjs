@@ -736,13 +736,14 @@ test('automatic chains cannot exceed eight saved results and preserve factual fa
   assert.equal(view.streams.length,10);assert.equal(view.current.messageError,'PLUGIN_TURN_LIMIT');
 });
 
-test('guest financial calculations work without login and never start a model or save history', async t => {
+test('retired guest financial tasks remain local and never start a model or save history', async t => {
   const view = harness({ stored: null }); t.after(view.close); await view.flush();
   assert.equal(view.current.send('分期 CNY 8000 12 240'), true);
   await view.flush();
   const local = view.current.conversation;
   assert.equal(local.localOnly, true);
-  assert.equal(local.messages.at(-1).financeResult.totalRepaymentMinor, 824000);
+  assert.equal(local.messages.at(-1).financeResult, undefined);
+  assert.match(local.messages.at(-1).content, /已从首页移除/);
   assert.equal(view.current.authOpen, false);
   assert.equal(view.current.aiConsentOpen, false);
   assert.equal(view.streams.length, 0);
@@ -783,7 +784,7 @@ test('opening a local task cancels a pending AI permission and never reuses a cl
   assert.equal(view.streams.length, 1);
   const context = JSON.stringify(view.streams[0].request.messages);
   assert.equal(context.includes('PRIVATE_LOCAL_RESULT'), false);
-  assert.ok(context.includes('financial literacy assistant'));
+  assert.ok(context.includes('source-based market research'));
   assert.ok(context.includes('What is APR?'));
   assert.equal(JSON.stringify(view.historyPosts).includes('PRIVATE_LOCAL_RESULT'), false);
   assert.equal(JSON.stringify(view.historyPosts).includes('financeResult'), false);
@@ -846,7 +847,7 @@ test('financial AI mode survives reopening its existing cloud conversation', asy
   assert.equal(view.current.conversation.id, id);
   assert.equal(view.current.conversation.localOnly, undefined);
   assert.equal(view.streams.length, 2);
-  assert.ok(JSON.stringify(view.streams[1].request.messages).includes('financial literacy assistant'));
+  assert.ok(JSON.stringify(view.streams[1].request.messages).includes('source-based market research'));
   assert.ok(JSON.stringify(view.streams[1].request.messages).includes('APR includes relevant borrowing costs.'));
 });
 
@@ -861,5 +862,5 @@ test('financial AI mode restores from saved visible history without a new wire f
   assert.equal(view.current.send('What is APR?'), true); await view.flush();
   assert.equal(view.current.conversation.id, id);
   assert.equal(view.streams.length, 1);
-  assert.ok(JSON.stringify(view.streams[0].request.messages).includes('financial literacy assistant'));
+  assert.ok(JSON.stringify(view.streams[0].request.messages).includes('source-based market research'));
 });
