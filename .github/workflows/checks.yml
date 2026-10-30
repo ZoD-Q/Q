@@ -1,0 +1,252 @@
+name: Q checks
+
+on:
+  push:
+    branches: [main, Mandow, hera, jojo, Flechazo]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# No repository writes, service secrets, deployment, or automatic merge.
+permissions:
+  contents: read
+
+concurrency:
+  group: q-checks-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: '2'
+  EXPO_NO_TELEMETRY: '1'
+  # PRs check GitHub's merge commit; build metadata must describe that checkout.
+  CI_COMMIT_SHA: ${{ github.sha }}
+  CI_PIPELINE_ID: ${{ github.run_id }}
+
+jobs:
+  source-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate source diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            case "$REF_NAME" in
+              main|Mandow|hera|jojo|Flechazo) ;;
+              *) echo 'Manual checks require a maintained branch.' >&2; exit 1 ;;
+            esac
+          fi
+          if [ -n "$PR_BASE_SHA" ]; then
+            base="$(git merge-base "$PR_BASE_SHA" "$CI_COMMIT_SHA")"
+          elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then
+            base="$BEFORE_SHA"
+          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
+            base="$(git rev-parse HEAD^)"
+          else
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+          git diff --check "$base" "$CI_COMMIT_SHA"
+
+  web-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - name: Check web types, lint, logic, and deployment tools
+        run: |
+          npm --prefix web run typecheck
+          npm --prefix web run lint
+          npm --prefix web test
+          bash -n web/deploy/deploy.sh web/deploy/remote.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
+      - run: npm --prefix web run build
+      - name: Check browser interactions
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Verify artifact revision and checksums
+        working-directory: web
+        run: |
+          node -e "const v=JSON.parse(require('fs').readFileSync('dist/version.json')); if(v.sha!==process.env.CI_COMMIT_SHA || v.mode!=='demo' || v.sourceDirty) process.exit(1)"
+          mkdir -p .local
+          (cd dist && find . -type f -print0 | sort -z | xargs -0 sha256sum) > .local/SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: q-admin-demo-${{ github.sha }}
+          path: |
+            web/dist/
+            web/.local/SHA256SUMS
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve browser diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/
+          retention-days: 7
+
+  mobile-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm --prefix mobile ci
+      - name: Check mobile types, lint, and feature tests
+        run: |
+          npm --prefix mobile run typecheck
+          npm --prefix mobile run lint
+          npm --prefix mobile run test:utils
+          npm --prefix mobile run test:video
+          npm --prefix mobile run test:plugins
+          npm --prefix mobile run test:api-workbench
+          npm --prefix mobile run test:chat
+          npm --prefix mobile run test:account
+          npm --prefix mobile run test:social
+      - name: Verify generated API types and web export
+        run: |
+          npm --prefix mobile run api:generate
+          git diff --exit-code -- mobile/shared/src/generated.ts
+          npm --prefix mobile run export:web
+
+  backend-check:
+    name: backend-check (PostgreSQL ${{ matrix.postgres }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: rust:1-bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['17', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-bookworm
+        env:
+          POSTGRES_DB: q_ci_test
+          POSTGRES_USER: q_ci
+          POSTGRES_PASSWORD: q_ci_disposable
+        options: >-
+          --health-cmd "pg_isready -U q_ci -d q_ci_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Disposable container only; never read business database credentials.
+      TEST_DATABASE_URL: postgresql://q_ci:q_ci_disposable@postgres:5432/q_ci_test
+      PGPASSWORD: q_ci_disposable
+      POSTGRES_VERSION: ${{ matrix.postgres }}
+      Q_PG_BIN_DIR: /usr/lib/postgresql/${{ matrix.postgres }}/bin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust checks and matching PostgreSQL client
+        run: |
+          rustup component add rustfmt clippy
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates
+          install -d /usr/share/postgresql-common/pgdg
+          curl --fail --show-error --location --retry 2 --max-time 60 \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://apt.postgresql.org/pub/repos/apt' \
+            'Suites: bookworm-pgdg' \
+            'Components: main' \
+            'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+            > /etc/apt/sources.list.d/pgdg.sources
+          apt-get update
+          apt-get install -y --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
+          echo "$Q_PG_BIN_DIR" >> "$GITHUB_PATH"
+      - name: Check Rust and run all isolated database suites
+        run: |
+          cargo fmt --manifest-path backend/Cargo.toml --check
+          cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features video-test-fixtures -- -D warnings
+          cargo test --locked --manifest-path backend/Cargo.toml
+          cargo test --locked --manifest-path backend/Cargo.toml --example beauty_mcp
+          cargo test --locked --manifest-path backend/Cargo.toml --test postgres -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --test account_lifecycle -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --test ai_history -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --test social -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --test social_backup -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --features video-test-fixtures --test video_workbench -- --ignored
+          cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --features ai-test-fixtures -- -D warnings
+          cargo test --locked --manifest-path backend/Cargo.toml --features ai-test-fixtures --test ai_chat -- --ignored
+          cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo test --locked --manifest-path backend/Cargo.toml --all-features --test plugins -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --all-features --lib trusted_readonly_rechecks -- --ignored
+
+  deploy-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container: python:3.13-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test deployment tools without deploying
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nginx openssl age
+          bash -n backend/deploy/package-release.sh backend/deploy/backup.sh backend/deploy/health-check.sh backend/deploy/test-nginx-config.sh web/deploy/remote.sh
+          bash backend/deploy/test-nginx-config.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy -p 'test_*.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/beauty-gallery -p 'test_*.py'
+          Q_AGE_BIN=/usr/bin/age PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/offsite-backup -p 'test_*.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s backend/deploy/monitor -p 'test_*.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
+
+  ci-check:
+    name: ci-check
+    if: ${{ always() }}
+    needs: [source-check, web-check, mobile-check, backend-check, deploy-check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          results = json.loads(os.environ['NEEDS_JSON'])
+          for name, job in results.items():
+              print(f"{name}: {job['result']}")
+          if any(job['result'] != 'success' for job in results.values()):
+              raise SystemExit('All validation jobs must succeed before human merge.')
+          PY
