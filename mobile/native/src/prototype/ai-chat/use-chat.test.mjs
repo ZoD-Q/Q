@@ -68,8 +68,11 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
   };
   const session = createSessionStore({ get: async () => stored, set: async value => { stored = value; }, remove: async () => { stored = null; } });
   const consent = createAiPermission();
+  const appListeners = new Set();
+  const appState = { currentState: 'active', addEventListener: (_, listener) => { appListeners.add(listener); return { remove: () => appListeners.delete(listener) }; } };
   const imports = {
     react,
+    'react-native': { AppState: appState },
     'expo/fetch': { fetch: async (url, options) => {
       const path = new URL(url).pathname;
       calls.push({ path, method: options.method, signal: options.signal, body: options.body });
@@ -145,6 +148,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     failStream(index, code) { streamFailures[index](new stream.ChatError(code)); },
     async flush() { for (let i = 0; i < 80; i++) { await Promise.resolve(); if (dirty && mounted) render(); } },
     setVisible(value) { visible = value; if (mounted) render(); },
+    setAppState(value) { appState.currentState = value; for (const listener of appListeners) listener(value); },
     advance(duration) {
       now += duration;
       for (const timer of [...timers.values()].sort((a, b) => a.at - b.at)) if (timer.at <= now && timers.delete(timer)) timer.callback();
@@ -863,4 +867,169 @@ test('financial AI mode restores from saved visible history without a new wire f
   assert.equal(view.current.conversation.id, id);
   assert.equal(view.streams.length, 1);
   assert.ok(JSON.stringify(view.streams[0].request.messages).includes('source-based market research'));
+});
+
+const researchId = '99999999-9999-4999-8999-999999999999';
+const researchText = 'Analyze these public Treasury bills headlines. Source: https://example.invalid/news; retrieved 2026-11-01T00:00:00Z.';
+const researchDetail = (extra = {}) => ({ id: researchId, title: 'Existing market discussion', revision: 1, updated_at: user.created_at,
+  messages: [{ id: 'prior-user', role: 'user', content: 'Explain bonds', status: 'complete' }, { id: 'prior-answer', role: 'assistant', content: 'Public bond concepts', status: 'complete' }], ...extra });
+const researchHistory = async () => json({ items: [{ id: researchId, title: 'Existing market discussion', revision: 1, updated_at: user.created_at }], next_cursor: null });
+
+test('research handoff creates a separate draft from a hidden chat without sending or copying local notes', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush();
+  view.current.addLocalFinance({ prompt: 'PRIVATE_LOCAL_NOTE', answer: 'Private local answer' });
+  const localId = view.current.activeId;
+  view.setVisible(false); await view.flush();
+  assert.equal(await view.current.prepareResearchDraft(researchText), true);
+  assert.equal(view.current.activeId, null); assert.equal(view.current.plugin, null); assert.equal(view.current.financialAi, true);
+  assert.equal(view.current.draft, researchText);
+  assert.equal(view.current.items.find(item => item.id === localId).localOnly, true);
+  assert.equal(view.historyPosts.length, 0); assert.equal(view.streams.length, 0);
+  view.setVisible(true); await view.flush();
+  assert.equal(view.current.draft, researchText);
+  view.grantConsent(); assert.equal(view.current.send(view.current.draft), true); await view.flush();
+  assert.equal(view.streams.length, 1);
+  assert.equal(view.current.conversation.localOnly, undefined);
+  assert.ok(!JSON.stringify(view.streams[0].request).includes('PRIVATE_LOCAL_NOTE'));
+  assert.ok(!JSON.stringify(view.streams[0].request.messages).includes(token));
+  assert.equal(view.streams[0].request.plugin_connection_id, undefined);
+});
+
+test('research handoff loads an existing ordinary conversation before changing selection and uses market mode', async t => {
+  const response = deferred();
+  const view = harness({ historyFetch: researchHistory, historyDetail: () => response.promise }); t.after(view.close); await view.flush();
+  view.setVisible(false); await view.flush();
+  const pending = view.current.prepareResearchDraft(researchText, researchId);
+  assert.equal(view.current.researchBusy, true); assert.equal(view.current.activeId, null); assert.equal(view.current.draft, '');
+  assert.equal(await view.current.prepareResearchDraft('second request', researchId), false);
+  response.resolve(json(researchDetail()));
+  assert.equal(await pending, true); await view.flush();
+  assert.equal(view.current.activeId, researchId); assert.equal(view.current.draft, researchText); assert.equal(view.current.researchBusy, false);
+  assert.equal(view.historyPosts.length, 0); assert.equal(view.streams.length, 0);
+  view.setVisible(true); await view.flush(); view.grantConsent();
+  assert.equal(view.current.send(view.current.draft), true); await view.flush();
+  assert.equal(view.current.activeId, researchId); assert.equal(view.current.conversation.localOnly, undefined);
+  assert.ok(JSON.stringify(view.streams[0].request.messages).includes('Public bond concepts'));
+  assert.equal(view.streams[0].request.plugin_connection_id, undefined);
+});
+
+test('research handoff preserves selection after failed, mismatched or ineligible cloud detail', async t => {
+  const cases = [
+    () => new Response('', { status: 503 }),
+    () => json({ ...researchDetail(), id: '88888888-8888-4888-8888-888888888888' }),
+    () => json(researchDetail({ plugin: history.chatPluginSnapshot(bankConnection) })),
+    () => json(researchDetail({ localOnly: true })),
+    () => json(researchDetail({ messages: [{ id: 'u', role: 'user', content: 'PRIVATE', status: 'complete', localFinance: true }] })),
+    () => json(researchDetail({ messages: [{ id: 'u', role: 'user', content: 'PRIVATE', status: 'complete', financeResult: {} }] })),
+    () => json({ invalid: true }),
+  ];
+  for (const respond of cases) {
+    const view = harness({ historyFetch: researchHistory, historyDetail: async () => respond() }); t.after(view.close); await view.flush();
+    view.current.addLocalFinance({ prompt: 'PRIVATE_KEEP', answer: 'Existing result' });
+    const previousId = view.current.activeId;
+    view.setVisible(false); await view.flush();
+    assert.equal(await view.current.prepareResearchDraft(researchText, researchId), false);
+    assert.equal(view.current.activeId, previousId); assert.equal(view.current.draft, '');
+    assert.equal(view.current.conversation.localOnly, true); assert.equal(view.current.financialAi, false);
+    assert.equal(view.historyPosts.length, 0); assert.equal(view.streams.length, 0);
+  }
+});
+
+test('research handoff cannot overwrite drafts or enter local and plugin conversations', async t => {
+  const view = harness({ historyFetch: researchHistory, historyDetail: async () => json(researchDetail({ plugin: history.chatPluginSnapshot(bankConnection) })) }); t.after(view.close); await view.flush();
+  view.current.setDraft('UNSENT_USER_DRAFT');
+  assert.equal(await view.current.prepareResearchDraft(researchText), false);
+  assert.equal(view.current.draft, 'UNSENT_USER_DRAFT');
+  view.current.setDraft(''); await view.current.openConversation(researchId); await view.flush();
+  assert.equal(await view.current.prepareResearchDraft(researchText, researchId), false);
+  view.current.addLocalFinance({ prompt: 'PRIVATE', answer: 'Local' });
+  const localId = view.current.activeId;
+  assert.equal(await view.current.prepareResearchDraft(researchText, localId), false);
+  assert.equal(await view.current.prepareResearchDraft(researchText, 'unknown'), false);
+  assert.equal(await view.current.prepareResearchDraft(''), false);
+  assert.equal(await view.current.prepareResearchDraft('x'.repeat(12001)), false);
+  assert.equal(view.historyPosts.length, 0); assert.equal(view.streams.length, 0);
+});
+
+test('aborted, backgrounded, superseded and account-changed research loads cannot insert late drafts', async t => {
+  for (const change of ['abort', 'background', 'edited-draft', 'new-conversation', 'account', 'hide', 'unmount']) {
+    const response = deferred(), cancel = new AbortController();
+    const view = harness({ historyFetch: researchHistory, historyDetail: () => response.promise }); t.after(view.close); await view.flush();
+    // Hide is a separate test of the hook's own invalidation; other cases start on the market page.
+    if (change !== 'hide') { view.setVisible(false); await view.flush(); }
+    const operation = view.current.prepareResearchDraft(researchText, researchId, cancel.signal);
+    await view.flush();
+    const request = view.calls.find(call => call.path.endsWith(researchId));
+    if (change === 'abort') cancel.abort();
+    if (change === 'background') view.setAppState('background');
+    if (change === 'edited-draft') { view.current.setDraft('New user edit'); view.current.setDraft(''); }
+    if (change === 'new-conversation') view.current.newConversation();
+    if (change === 'account') await view.changeToken('q_' + 'b'.repeat(43));
+    if (change === 'hide') view.setVisible(false);
+    if (change === 'unmount') view.close();
+    response.resolve(json(researchDetail()));
+    assert.equal(await operation, false, change); await view.flush();
+    assert.equal(view.current.draft, '', change); assert.equal(view.current.activeId, null, change);
+    assert.equal(view.historyPosts.length, 0); assert.equal(view.streams.length, 0);
+    if (['abort', 'background', 'account', 'hide', 'unmount'].includes(change)) assert.equal(request.signal.aborted, true, change);
+  }
+});
+
+test('research handoff does not cancel a running response or an open AI sharing confirmation', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close); await view.flush();
+  assert.equal(view.current.send('Explain markets'), false); await view.flush();
+  assert.equal(view.current.aiConsentOpen, true);
+  assert.equal(await view.current.prepareResearchDraft(researchText), false);
+  assert.equal(view.current.aiConsentOpen, true);
+  view.current.confirmAiSharing(); await view.flush();
+  assert.equal(view.streams.length, 1);
+  const previous = view.current.activeId;
+  assert.equal(await view.current.prepareResearchDraft(researchText), false);
+  assert.equal(view.current.activeId, previous); assert.equal(view.streams[0].signal.aborted, false);
+});
+
+test('research drafts work for guests and reject a target with an uncertain history write', async t => {
+  const guest = harness({ stored: null }); t.after(guest.close); await guest.flush(); guest.setVisible(false); await guest.flush();
+  assert.equal(await guest.current.prepareResearchDraft(researchText), true);
+  guest.setVisible(true); await guest.flush();
+  assert.equal(guest.current.draft, researchText); assert.equal(guest.current.session, null);
+  assert.equal(guest.streams.length, 0); assert.equal(guest.historyPosts.length, 0);
+  const view = harness({ historyFetch: cloudHistory, historySave: async () => new Response('', { status: 503 }) }); t.after(view.close); await view.flush(); view.grantConsent();
+  assert.equal(view.current.send('public fixture'), true); await view.flush();
+  const pendingId = view.current.activeId;
+  view.current.setDraft('');
+  assert.equal(await view.current.prepareResearchDraft(researchText, pendingId), false);
+  assert.equal(view.current.activeId, pendingId); assert.equal(view.current.draft, ''); assert.equal(view.streams.length, 0);
+});
+
+test('a cold hidden chat does not accept a guest draft before restoring an existing account', async t => {
+  const view = harness({ historyFetch: cloudHistory }); t.after(view.close);
+  view.setVisible(false); await view.flush();
+  assert.equal(view.current.session, null);
+  assert.equal(await view.current.prepareResearchDraft(researchText), false);
+  assert.equal(view.current.draft, ''); assert.equal(view.historyPosts.length, 0); assert.equal(view.streams.length, 0);
+  view.setVisible(true); await view.flush();
+  assert.equal(view.current.session.user.id, user.id);
+  view.setVisible(false); await view.flush();
+  assert.equal(await view.current.prepareResearchDraft(researchText), true);
+  view.setVisible(true); await view.flush();
+  assert.equal(view.current.draft, researchText);
+});
+
+test('research handoff reserves the actual market guidance budget before fetching or changing a conversation', async t => {
+  const capacity = 12000 - Array.from(financeIntent.FINANCIAL_AI_GUIDANCE).length - 2;
+  assert.ok(capacity > 0 && capacity < 12000);
+  const view = harness({ historyFetch: researchHistory, historyDetail: async () => json(researchDetail()) }); t.after(view.close); await view.flush();
+  const priorCalls = view.calls.length;
+  const tooLong = '💬'.repeat(capacity + 1);
+  assert.ok(Array.from(tooLong).length < 12000);
+  assert.equal(await view.current.prepareResearchDraft(tooLong, researchId), false);
+  assert.equal(view.current.draft, ''); assert.equal(view.current.activeId, null);
+  assert.equal(view.calls.length, priorCalls); assert.equal(view.historyPosts.length, 0);
+  const atLimit = '💬'.repeat(capacity);
+  assert.equal(await view.current.prepareResearchDraft(atLimit), true);
+  view.grantConsent(); assert.equal(view.current.send(view.current.draft), true); await view.flush();
+  assert.equal(view.streams.length, 1);
+  assert.equal(Array.from(view.streams[0].request.messages.at(-1).content).length, 12000);
+  assert.equal(view.current.conversation.messages[0].content, atLimit);
 });

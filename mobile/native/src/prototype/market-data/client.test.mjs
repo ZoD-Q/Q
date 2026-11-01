@@ -11,19 +11,55 @@ test.after(() => resolver.deregister());
 const crypto = { kind: 'crypto', asset: 'BTC' };
 const markets = { kind: 'news', topic: 'markets' };
 const fed = { kind: 'news', topic: 'fed' };
-const coin = { id: 'btc-bitcoin', symbol: 'BTC', name: 'Bitcoin', rank: 1, last_updated: '2026-10-27T11:00:00Z', quotes: { USD: { price: 100 } } };
+const word = value => BigInt(value).toString(16).padStart(64, '0');
+const coin = [
+  { jsonrpc: '2.0', id: 1, result: '0x1' },
+  { jsonrpc: '2.0', id: 2, result: `0x${word(8)}` },
+  { jsonrpc: '2.0', id: 3, result: `0x${[1, 10000000000, 1793102340, 1793102340, 1].map(word).join('')}` },
+];
 const payload = value => Response.json(value);
 const fails = (action, code) => assert.rejects(action, error => error.code === code && error.message === code);
 const withUrl = (response, url) => { Object.defineProperty(response, 'url', { value: url }); return response; };
 
-test('crypto requires explicit development opt-in and never starts a blocked request', async () => {
-  let calls = 0;
-  const transport = async () => { calls++; return payload(coin); };
-  await fails(requestMarketReport(crypto, { transport }), 'development_only');
-  await fails(requestMarketReport(crypto, { transport, allowDevelopmentSources: false }), 'development_only');
-  assert.equal(calls, 0);
-  const result = await requestMarketReport(crypto, { transport, allowDevelopmentSources: true });
-  assert.equal(calls, 1); assert.equal(result.records[0].priceUsd, 100);
+test('release crypto performs one anonymous read-only RPC batch without development opt-in', async () => {
+  const proxies = { BTC: '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c', ETH: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', SOL: '0x4ffC43a60e009B551865A93d232E33Fce9f01507' };
+  for (const asset of Object.keys(proxies)) {
+    let calls = 0;
+    const result = await requestMarketReport({ kind: 'crypto', asset }, { transport: async (url, init) => {
+      calls++;
+      assert.equal(url, 'https://eth-mainnet.g.alchemy.com/public');
+      assert.equal(init.method, 'POST'); assert.equal(init.credentials, 'omit'); assert.equal(init.redirect, 'error');
+      assert.equal(init.cache, 'no-store'); assert.equal(init.referrerPolicy, 'no-referrer');
+      assert.deepEqual(init.headers, { Accept: 'application/json', 'Content-Type': 'application/json' });
+      const batch = JSON.parse(init.body);
+      assert.deepEqual(batch, [
+        { jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] },
+        { jsonrpc: '2.0', id: 2, method: 'eth_call', params: [{ to: proxies[asset], data: '0x313ce567' }, 'latest'] },
+        { jsonrpc: '2.0', id: 3, method: 'eth_call', params: [{ to: proxies[asset], data: '0xfeaf968c' }, 'latest'] },
+      ]);
+      return withUrl(payload(coin), url);
+    } });
+    assert.equal(calls, 1); assert.equal(result.records[0].priceUsd, 100); assert.equal(result.records[0].symbol, asset);
+  }
+});
+
+test('RPC application errors and wrong network never become successful prices or retries', async () => {
+  for (const data of [{ error: { code: -32000, message: 'PRIVATE_AUTH' } }, [{ jsonrpc: '2.0', id: 1, result: '0x2' }, ...coin.slice(1)],
+    [coin[0], coin[1], { jsonrpc: '2.0', id: 3, error: { code: -32603, message: 'PRIVATE_INTERNAL' } }]]) {
+    let calls = 0;
+    await fails(requestMarketReport(crypto, { transport: async () => { calls++; return payload(data); } }), 'invalid_data');
+    assert.equal(calls, 1);
+  }
+});
+
+test('crypto read cancellation aborts the POST and never retries', async () => {
+  const external = new AbortController(); let signal; let calls = 0;
+  const pending = requestMarketReport(crypto, { signal: external.signal, transport: async (_url, init) => {
+    calls++; signal = init.signal; return new Promise(() => undefined);
+  } });
+  const rejected = fails(pending, 'cancelled'); external.abort(); await rejected;
+  assert.equal(signal.aborted, true); assert.equal(calls, 1);
+  assert.equal(getEventListeners(external.signal, 'abort').length, 0);
 });
 
 test('transport receives exactly one anonymous GET with safe fixed URL and no account headers', async () => {
@@ -184,7 +220,7 @@ test('malformed JSON, wrong media type, invalid UTF-8 and schema failures are sa
   for (const response of [new Response('{broken', { headers: { 'Content-Type': 'application/json' } }), new Response('<html>PRIVATE</html>', { headers: { 'Content-Type': 'text/html' } }),
     new Response(Uint8Array.of(255, 254), { headers: { 'Content-Type': 'application/json' } }), payload({ error: 'PRIVATE' }),
   ]) await fails(requestMarketReport(markets, { transport: async () => response }), 'invalid_data');
-  await fails(requestMarketReport(crypto, { allowDevelopmentSources: true, transport: async () => payload({ ...coin, symbol: 'ETH' }) }), 'invalid_data');
+  await fails(requestMarketReport(crypto, { transport: async () => payload({ id: 'btc-bitcoin', symbol: 'BTC', quotes: { USD: { price: 100 } } }) }), 'invalid_data');
 });
 
 test('network and stream exceptions do not expose diagnostic details', async () => {
