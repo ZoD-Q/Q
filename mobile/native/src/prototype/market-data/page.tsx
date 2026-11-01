@@ -89,13 +89,14 @@ function ResultRecords({ report, preview }: { report: MarketReport; preview: (li
   </View>;
 }
 
-export function MarketDataPage({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false }: {
+export function MarketDataPage({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false, initialQuery }: {
   active: boolean; onAnalyze: (draft: string, conversationId?: string, signal?: AbortSignal) => Promise<boolean>;
   conversations?: { id: string; title: string }[]; historyBusy?: boolean; historyError?: boolean; hasMoreHistory?: boolean;
   onLoadHistory?: (more: boolean) => void; signedIn?: boolean;
+  initialQuery?: MarketQuery;
 }) {
   const { text, colors, locale } = useDesign();
-  const [query, setQuery] = useState<MarketQuery>({ kind: 'crypto', asset: 'BTC' });
+  const [query, setQuery] = useState<MarketQuery>(initialQuery ?? { kind: 'crypto', asset: 'BTC' });
   const [outbound, setOutbound] = useState<Outbound | null>(null);
   const [sourceDetails, setSourceDetails] = useState(false);
   const [linkError, setLinkError] = useState(false);

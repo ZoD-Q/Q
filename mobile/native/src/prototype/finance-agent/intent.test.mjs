@@ -88,3 +88,12 @@ test('public market and company income questions remain research requests, while
   assert.equal(respondToFinanceText('最新加密货币新闻', 'zh'), null);
   assert.ok(respondToFinanceText('账单 CNY\n收入 工资 12000\n新闻说比特币上涨', 'zh'));
 });
+
+test('application capability questions reach the assistant without weakening private record isolation', () => {
+  for (const question of ['小Q分期模块能做什么', '介绍小Q的储蓄功能', 'Q的保险模块', 'What can the Q installments module do?', 'Open the Q insurance module']) {
+    assert.equal(respondToFinanceText(question, 'zh'), null, question);
+  }
+  for (const privateInput of ['小Q分期模块能做什么\n账单 CNY\n收入 工资 12000', '介绍小Q功能，我的账单在这里', 'What can Q do with my bills?', '小Q帮我分12期，本金8000', '小Q模块可以帮我看账单，收入工资一万', '小Q分期模块，我本金八千想算一下', '小Q储蓄模块，我现在有十万，目标二十万，帮我算多久', '小Q分期模块，八千分十二期', 'What can Q savings do for my goal of eight thousand?', 'What can Q installments do for me, repay seven hundred', '小Q分期模块能做什么，我欠银行一笔钱']) {
+    assert.ok(respondToFinanceText(privateInput, 'zh'), privateInput);
+  }
+});

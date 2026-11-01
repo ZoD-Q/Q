@@ -13,10 +13,11 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 } });
 const core = await import('../plugin-host/core.ts');
 const workbench = await import('../api-workbench/core.ts');
+const appAssistant = await import('../app-assistant/core.ts');
 test.after(() => resolver.deregister());
 
 const noop = () => {};
-const design = { ...Object.fromEntries(['Action', 'Choice', 'IconAction', 'Input', 'Page', 'Row', 'Sheet', 'Tabs', 'Type'].map(name => [name, name])), useDesign: () => ({ colors: {}, text: zh => zh, phone: false }) };
+const design = { ...Object.fromEntries(['Action', 'Choice', 'IconAction', 'Input', 'Page', 'Row', 'Sheet', 'Tabs', 'Type'].map(name => [name, name])), useDesign: () => ({ colors: {}, text: zh => zh, phone: false, locale: 'zh' }) };
 const react = { useEffect: noop, useRef: value => ({ current: value }), useState: value => [typeof value === 'function' ? value() : value, noop] };
 const jsx = (type, props) => ({ type, props });
 const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown', 'ChevronRight', 'Lightbulb', 'Paperclip', 'Plus', 'Search', 'SlidersHorizontal', 'SquarePen', 'Square', 'RotateCcw', 'RefreshCw', 'X'].map(name => [name, name]));
@@ -25,7 +26,7 @@ const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown'
 function component(path, imports) {
   const source = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const module = { exports: {} };
-  const common = { react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react-native': icons };
+  const common = { react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react-native': icons, './app-assistant/core': appAssistant };
   runInNewContext(source, { module, exports: module.exports, process: { env: { EXPO_OS: 'ios' } }, require: name => {
     const provided = { ...common, ...imports };
     assert.ok(name in provided, `Unmocked component dependency: ${name}`);

@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ChatError, decodeAiStatus, streamChat } from "./stream.ts";
+import { registerHooks } from 'node:module';
+const resolver = registerHooks({ resolve(specifier, context, next) {
+  if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
+  return next(specifier, context);
+} });
+const { ChatError, decodeAiStatus, streamChat, fitChatRequestHistory } = await import('./stream.ts');
+test.after(() => resolver.deregister());
 
 const encoder = new TextEncoder();
 const request = { model: "deepseek-flash", thinking: false, messages: [{ role: "user", content: "你好" }] };
@@ -369,4 +375,62 @@ test('a server tool-turn limit keeps its safe code and never exposes a remote er
     assert.equal(error.message, 'PLUGIN_TURN_LIMIT');
     return error instanceof ChatError;
   });
+});
+
+test('app tool mode is versioned, strict, and separate from plugin invocations', async () => {
+  assert.equal(decodeAiStatus({ configured: true, models: [], app_tools_version: 1 }).app_tools_version, 1);
+  assert.throws(() => decodeAiStatus({ configured: true, models: [], app_tools_version: 2 }));
+  const command = { name: 'insurance_search', arguments: { query: 'pet' } };
+  const events = [];
+  const fake = fixture([frame('app_tool', command), done({ finish_reason: 'tool_calls' })]);
+  await streamChat(options(fake.transport, { request: { ...request, app_tools_version: 1 }, onEvent: event => events.push(event) }));
+  assert.equal(events[0].type, 'app_tool'); assert.deepEqual(events[0].arguments, command.arguments);
+  assert.deepEqual(JSON.parse(fake.stats.init.body).app_context, []);
+  for (const req of [request, { ...request, plugin_connection_id: pluginId }, { ...request, app_tools_version: 1, app_context: Array(3).fill({ ...command, result: 'public data' }) }, { ...request, app_tools_version: 1, app_context: [{ ...command, result: 'public' }], app_final_only: true }]) {
+    await expectCode(streamChat(options(fixture([frame('app_tool', command)]).transport, { request: req })), 'INVALID_RESPONSE');
+  }
+  for (const bad of [{ name: 'bank_transfer', arguments: {} }, { name: 'app_open', arguments: { module: 'wallet', url: 'https://evil.invalid' } }, { name: 'insurance_search', arguments: { query: 'x'.repeat(121) } }]) {
+    await expectCode(streamChat(options(fixture([frame('app_tool', bad)]).transport, { request: { ...request, app_tools_version: 1 } })), 'INVALID_RESPONSE');
+  }
+  await expectCode(streamChat(options(fixture([frame('app_tool', command), frame('app_tool', command)]).transport, { request: { ...request, app_tools_version: 1 } })), 'INVALID_RESPONSE');
+});
+
+test('app public result context has independent limits and never leaks into plugin or legacy requests', async () => {
+  const context = { name: 'app_info', arguments: { module: 'insurance' }, result: '公开资料' };
+  const fake = fixture([answer(), done()]);
+  await streamChat(options(fake.transport, { request: { ...request, app_tools_version: 1, app_context: [context], app_final_only: true } }));
+  assert.deepEqual(JSON.parse(fake.stats.init.body).app_context, [context]);
+  const invalid = [
+    { app_context: [context] }, { app_tools_version: 2 }, { app_tools_version: 1, thinking: true },
+    { app_tools_version: 1, plugin_connection_id: pluginId }, { app_tools_version: 1, tool_invocation_ids: [] },
+    { app_tools_version: 1, automatic_readonly_tools: false }, { app_tools_version: 1, app_final_only: true },
+    { app_tools_version: 1, app_context: [context, context, context, context] },
+    { app_tools_version: 1, app_context: [{ ...context, result: 'x'.repeat(10001) }] },
+    { app_tools_version: 1, app_context: Array(3).fill({ ...context, result: 'x'.repeat(8001) }) },
+    { app_tools_version: 1, app_context: [{ ...context, result: 'bad\u0000data' }] },
+    { app_tools_version: 1, app_context: [{ ...context, name: 'arbitrary_network' }] },
+  ];
+  for (const fields of invalid) {
+    const fixtureValue = fixture([answer(), done()]);
+    await expectCode(streamChat(options(fixtureValue.transport, { request: { ...request, ...fields } })), 'VALIDATION_ERROR');
+    assert.equal(fixtureValue.stats.calls, 0);
+  }
+});
+
+test('the 128KiB wire budget preserves current Unicode prompts and public results while trimming old complete turns', async () => {
+  const context = { name: 'app_info', arguments: { module: 'insurance' }, result: '🌊'.repeat(8000) };
+  const req = { ...request, app_tools_version: 1, app_context: [context, context, context], messages: [
+    { role: 'user', content: 'a'.repeat(3000) }, { role: 'assistant', content: 'b'.repeat(3000) },
+    { role: 'user', content: '💬'.repeat(8000) },
+  ] };
+  const fitted = fitChatRequestHistory(req);
+  assert.equal(fitted.messages.length, 1); assert.equal(req.messages.length, 3);
+  assert.equal(fitted.messages[0].content, req.messages[2].content);
+  assert.deepEqual(fitted.app_context, req.app_context);
+  assert.ok(new TextEncoder().encode(JSON.stringify(fitted)).length <= 128 * 1024);
+  const oversize = { ...fitted, messages: [{ role: 'user', content: '💬'.repeat(12000) }] };
+  assert.throws(() => fitChatRequestHistory(oversize), error => error.code === 'REQUEST_TOO_LARGE');
+  const fake = fixture([answer(), done()]);
+  await expectCode(streamChat(options(fake.transport, { request: oversize })), 'REQUEST_TOO_LARGE');
+  assert.equal(fake.stats.calls, 0);
 });

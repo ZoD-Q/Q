@@ -17,6 +17,20 @@ const topics: readonly [string, RegExp][] = [
 const legacyTask = /账单|分期|储蓄|存钱|借款|还款|\bbills?\b|\binstallments?\b|\bsavings?\b/i;
 const financialInput = /账单|分期|储蓄|存钱|收入|支出|保险|基金|投资|理财|借款|还款|本金|手续费|总费用|年利率|现金流|金融|市场|美股|加密货币|\bbills?\b|\binstallments?\b|\bsavings?\b|\bincome\b|\bexpenses?\b|\bapr\b|\bfinance\b|\bmarkets?\b|\bstocks?\b|\bcrypto\b/i;
 
+/** Product questions are not retired personal calculation requests. This only
+ * chooses the normal assistant path; it never grants access to any module. */
+function appCapabilityQuestion(value: string): boolean {
+  if (value.length > 200 || /[\d\n\r]|账单|收入|支出|本金|目标|\bbills?\b|\bincome\b|\bexpenses?\b/i.test(value)) return false;
+  const zh = value.replace(/\s+/g, '').replace(/[？?。.!！]+$/, '');
+  // Only a complete product question/navigation phrase is exempt. Appending a
+  // private calculation, even with spelled-out amounts, stays on the local path.
+  const chinese = /^(?:(?:请|帮我|给我|我想|想|可以|能否)?(?:(?:介绍|了解|解释|说明|查看|打开|进入)(?:一下)?)?)?(?:(?:小[qQ]|[Qq]|这个app|应用)的?)?(?:分期|储蓄)(?:模块|功能|入口)(?:的)?(?:(?:能|可以)(?:帮我|帮助我)?(?:做|干)什么|是干什么的|有什么功能|有什么用|怎么用|如何使用|在哪里|在哪|功能|用途|介绍|说明|用法|是什么)?$/i;
+  if (chinese.test(zh)) return true;
+  const en = value.trim().replace(/[?.!]+$/, '').replace(/\s+/g, ' ');
+  const feature = '(?:the )?(?:q |app )?(?:installments?|savings?) (?:module|feature|page)';
+  return new RegExp(`^(?:what can ${feature} (?:do|help with)|what does ${feature} do|how (?:do|can) I use ${feature}|(?:please )?(?:open|show|explain|describe|tell me about) ${feature}|${feature}(?: overview)?)$`, 'i').test(en);
+}
+
 function unavailableTask(prompt: string, locale: Locale): LocalFinanceTurn {
   return {
     prompt,
@@ -42,6 +56,7 @@ export function respondToFinanceText(prompt: string, locale: Locale): LocalFinan
     || /分(?:成)?\s*\d+\s*期/u.test(value)
     || (/(?:本金|手续费|总费用)/u.test(value) && /\d/u.test(value))
     || (legacyTask.test(value) && /\d/u.test(value))) return unavailableTask(prompt, locale);
+  if (appCapabilityQuestion(value)) return null;
   // Public-company and market research must not be mistaken for a personal budget task.
   if (/美股|A股|港股|财报|公告|宏观|新闻|热点|行情|股价|币价|加密货币|比特币|英伟达|苹果公司|微软|\bstocks?\b|\bcrypto\b|\bfilings?\b|\bearnings\b|\bnews\b|\bNVDA\b|\bAAPL\b|\bMSFT\b/i.test(value)) return null;
   const topic = topics.find(([, pattern]) => pattern.test(value));

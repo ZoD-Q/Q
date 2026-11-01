@@ -6,7 +6,9 @@ import type { AiModel, AuthResponse } from '@xiaoq/shared';
 import { API_URL } from '../../services/api';
 import { readSessionSnapshot, getSessionRevision, invalidateToken, removeToken, writeToken, subscribeSession } from '../../services/session-store';
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
-import { ChatError, decodeAiStatus, streamChat } from './stream';
+import { ChatError, decodeAiStatus, streamChat, fitChatRequestHistory, type AppToolContext } from './stream';
+import { CAPABILITY_GUIDANCE, validateAppCommand, type AppCommand, type AppNavigationAction } from '../app-assistant/core';
+import { executeAppCommand, appResultContext } from '../app-assistant/executor';
 import { buildContext, finishStatus, prepareRetry, type ChatMessage, type Conversation, type ChatPlugin } from './state-model';
 import { chatPluginSnapshot, createHistoryWriter, decodeHistory, decodeHistoryPage, restoreHistory } from './history';
 import { createAiConsentGate, hasAiConsent, revokeAiConsent, subscribeAiConsent } from './consent';
@@ -18,8 +20,13 @@ import { decodeBankWallet } from '../banking/client';
 import { appendLocalFinanceTurn, financialAiTitle, isFinancialAiConversation, localFinanceHelp, type LocalFinanceTurn } from '../finance-agent/conversation';
 import { FINANCIAL_AI_GUIDANCE, respondToFinanceText } from '../finance-agent/intent';
 
-type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number; automaticInvocationId?: string };
-type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean };
+type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number; automaticInvocationId?: string; appToolAttempted?: boolean };
+type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean; appResume?: AppResume };
+type AppResume = { messageId: string; token: string; conversationId: string; messages: ChatMessage[]; context: AppToolContext[]; text: string; actions: AppNavigationAction[] };
+const guidanceFor = (prompt: string) => {
+  const full = `${FINANCIAL_AI_GUIDANCE}\n\n${CAPABILITY_GUIDANCE}`;
+  return Array.from(`${full}\n\n${prompt}`).length <= 12000 ? full : FINANCIAL_AI_GUIDANCE;
+};
 type ToolResumeTarget = { conversationId: string; messageId: string; invocationId: string };
 const errorCode = (error: unknown) => error instanceof ChatError || error instanceof WorkbenchError ? error.code
   : error instanceof Error && ['EMPTY_MESSAGE', 'MESSAGE_TOO_LONG', 'FINANCE_MESSAGE_TOO_LONG', 'LOCAL_FINANCE_PRIVATE'].includes(error.message) ? error.message : 'REQUEST_FAILED';
@@ -40,6 +47,9 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   const [aiConsentOpen, setAiConsentOpen] = useState(false);
   const [consentGate] = useState(() => createAiConsentGate<ConsentRequest>());
   const [messageError, setMessageError] = useState('');
+  const [appActions, setAppActions] = useState<Record<string, AppNavigationAction[]>>({});
+  const [appResumeIds, setAppResumeIds] = useState<string[]>([]);
+  const appContinuations = useRef(new Map<string, AppResume>());
   const [toolResumeTarget, setToolResumeTarget] = useState<ToolResumeTarget | null>(null);
   const [historyError, setHistoryError] = useState('');
   const [historyBusy, setHistoryBusy] = useState(false);
@@ -167,7 +177,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     if (!request) return;
     inflight.current = null;
     request.controller.abort();
-    updateAnswer(request, message => ({ ...message, status: 'cancelled' }));
+    updateAnswer(request, message => ({ ...message, status: 'cancelled', ...(request.appToolAttempted ? { errorCode: appContinuations.current.has(request.assistantId) ? 'APP_EXPLANATION_FAILED' : 'APP_QUERY_INTERRUPTED' } : {}) }));
     const account = sessionRef.current;
     const snapshot = list.current.find(item => item.id === request.conversationId);
     if (account && snapshot) void persist(account, snapshot);
@@ -187,6 +197,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   const clearPrivateState = () => {
     setToolResumeTarget(null);
     continuedInvocations.current.clear();
+    appContinuations.current.clear(); setAppActions({}); setAppResumeIds([]);
     historyEpoch.current++; hydrated.current.clear(); historyOwner.current = ''; setHistoryCursor(null); setHistoryError(''); setHistoryBusy(false);
     historyReady.current = false; setHistoryUnavailable(false);
     updateItems(() => []); select(null); setDraft(''); setMessageError(''); setPlugin(null);
@@ -257,7 +268,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     // Market pages can be visible while this hook's chat surface is hidden.
     // Their transfers still stop when the app leaves the foreground.
     const subscription = AppState.addEventListener('change', state => {
-      if (state !== 'active') researchRequest.current?.abort();
+      if (state !== 'active') { researchRequest.current?.abort(); inflight.current?.controller.abort(); }
     });
     return () => subscription.remove();
   }, []);
@@ -327,35 +338,55 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     finally { if (isCurrent(version)) setAuthBusy(false); }
   };
 
-  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false, continuationKey?: string) => {
+  const rememberAppResume = (messageId: string, value: AppResume) => {
+    appContinuations.current.delete(messageId);
+    appContinuations.current.set(messageId, value);
+    while (appContinuations.current.size > 20) {
+      const oldest = appContinuations.current.keys().next().value;
+      if (oldest) appContinuations.current.delete(oldest);
+    }
+    setAppResumeIds([...appContinuations.current.keys()]);
+  };
+  const rememberAppActions = (messageId: string, actions: AppNavigationAction[], previousId?: string) => {
+    setAppActions(value => Object.fromEntries([...Object.entries(value).filter(([id]) => id !== messageId && id !== previousId), [messageId, actions]].slice(-100)));
+  };
+  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false, continuationKey?: string, appResume?: AppResume) => {
     if (conversation.localOnly || baseMessages.some(message => message.localFinance || message.financeResult)) {
       setMessageError('LOCAL_FINANCE_PRIVATE'); return false;
     }
     const authenticated = sessionRef.current;
-    if (inflight.current || continuation.current || authBusy || historyBusy || historyAction.current) return false;
+    if (inflight.current || continuation.current || authBusy || historyBusy || historyAction.current || !visible || AppState.currentState !== 'active') return false;
     if (!authenticated) { setAuthOpen(true); return false; }
     if (!historyReady.current || historyOwner.current !== authenticated.token) return false;
     if (!status?.configured) { setMessageError(statusBusy ? 'AI_STATUS_CHECKING' : statusError || 'AI_NOT_CONFIGURED'); return false; }
     let context: ReturnType<typeof buildContext>;
     try {
       const lastUser = baseMessages.findLastIndex(message => message.role === 'user');
-      context = buildContext(baseMessages.slice(0, lastUser + 1), !conversation.plugin ? FINANCIAL_AI_GUIDANCE : '');
+      context = buildContext(baseMessages.slice(0, lastUser + 1), !conversation.plugin ? guidanceFor(baseMessages[lastUser]?.content ?? '') : '');
     }
     catch (error) { setMessageError(errorCode(error)); return false; }
-    if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft })) {
+    if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft, ...(appResume ? { appResume } : {}) })) {
       setAiConsentOpen(true);
       return false;
     }
     const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: randomUUID(), controller: new AbortController(), generation: generation.current };
     if (writers.current.get(authenticated.token)?.hasPending(conversation.id)) { setHistoryError('HISTORY_SAVE_PENDING'); return false; }
     const selectedPlugin = conversation.plugin;
-    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: '', status: 'pending', model, thinking: selectedPlugin ? false : think, contextLimited: context.limited, toolInvocationIds: invocationIds };
+    const appEnabled = !selectedPlugin && !think && status.app_tools_version === 1;
+    if (appResume && (!appEnabled || appResume.token !== authenticated.token || appResume.conversationId !== conversation.id)) { setMessageError('APP_RESULT_RELOAD'); return false; }
+    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: appResume?.text ?? '', status: 'pending', model, thinking: selectedPlugin ? false : think, contextLimited: context.limited, toolInvocationIds: invocationIds };
     inflight.current = request;
+    if (appResume) {
+      request.appToolAttempted = true;
+      appContinuations.current.delete(appResume.messageId);
+      rememberAppResume(answer.id, { ...appResume, messageId: answer.id });
+      rememberAppActions(answer.id, appResume.actions, appResume.messageId);
+    }
     const next = { ...conversation, messages: [...baseMessages, answer] };
     updateItems(current => current.some(item => item.id === next.id) ? current.map(item => item.id === next.id ? next : item) : [next, ...current]);
     hydrated.current.add(next.id);
     select(next.id); setPhase('waiting'); setMessageError('');
-    const current = () => isCurrent(request.generation) && inflight.current === request && sessionRef.current?.token === authenticated.token;
+    const current = () => isCurrent(request.generation) && inflight.current === request && !request.controller.signal.aborted && AppState.currentState === 'active' && sessionRef.current?.token === authenticated.token && activeIdRef.current === request.conversationId;
     void (async () => {
       if (!await persist(authenticated, next)) {
         if (current()) { updateAnswer(request, message => ({ ...message, status: 'error', errorCode: 'HISTORY_SAVE_FAILED' })); if (clearDraft) setDraft(baseMessages.findLast(message => message.role === 'user')?.content ?? ''); }
@@ -363,27 +394,91 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
       }
       if (!current()) return;
       if (continuationKey) { continuedInvocations.current.add(continuationKey); setToolResumeTarget(null); }
-      await streamChat({ baseUrl: API_URL, token: authenticated.token, request: { model, thinking: selectedPlugin ? false : think, messages: context.messages, ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds, ...(status.automatic_readonly_tools === true ? { automatic_readonly_tools: true } : {}) } : {}) }, signal: request.controller.signal, transport: expoFetch,
-      onEvent: event => {
-        if (!current()) return;
-        if (event.type === 'status') setPhase(event.phase);
-        if (event.type === 'delta') { setPhase('responding'); updateAnswer(request, message => ({ ...message, content: message.content + event.text, status: 'streaming' })); }
-        if (event.type === 'tool_proposal') {
-          if (event.connection_id !== selectedPlugin?.id) { request.controller.abort(); return; }
-          if (event.automatic === true && status.automatic_readonly_tools === true) request.automaticInvocationId = event.invocation_id;
-          updateAnswer(request, message => ({ ...message, toolProposalId: event.invocation_id }));
+      const appContext: AppToolContext[] = appResume ? [...appResume.context] : [];
+      const seen = new Set(appContext.map(item => JSON.stringify({ name: item.name, arguments: item.arguments })));
+      let publicText = appResume?.text ?? '';
+      let actions = appResume?.actions ?? [];
+      let finalOnly = Boolean(appResume);
+      const saveAppResume = () => {
+        if (!appContext.length || !current()) return;
+        rememberAppResume(answer.id, { messageId: answer.id, token: authenticated.token, conversationId: conversation.id, messages: baseMessages, context: [...appContext], text: publicText, actions: [...actions] });
+      };
+      const timer = setTimeout(() => request.controller.abort(), 190000);
+      try {
+        for (let turn = 0; turn < 4; turn++) {
+          if (!current()) return;
+          let appCall: AppCommand | null = null;
+          const outgoing = fitChatRequestHistory({
+            model, thinking: selectedPlugin ? false : think, messages: context.messages,
+            ...(appEnabled ? { app_tools_version: 1 as const, app_context: appContext, ...(finalOnly ? { app_final_only: true } : {}) } : {}),
+            ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds, ...(status.automatic_readonly_tools === true ? { automatic_readonly_tools: true } : {}) } : {}),
+          });
+          if (outgoing.messages.length < context.messages.length) {
+            context = { messages: outgoing.messages, limited: true };
+            updateAnswer(request, message => ({ ...message, contextLimited: true }));
+          }
+          await streamChat({ baseUrl: API_URL, token: authenticated.token, request: outgoing, signal: request.controller.signal, transport: expoFetch,
+          onEvent: event => {
+            if (!current()) return;
+            if (event.type === 'status') setPhase(event.phase);
+            if (event.type === 'delta') { setPhase('responding'); updateAnswer(request, message => ({ ...message, content: message.content + event.text, status: 'streaming' })); }
+            if (event.type === 'app_tool') {
+              if (!appEnabled || appCall || finalOnly || appContext.length >= 3) throw new ChatError('INVALID_RESPONSE');
+              request.appToolAttempted = true;
+              appCall = validateAppCommand({ name: event.name, arguments: event.arguments });
+            }
+            if (event.type === 'tool_proposal') {
+              if (event.connection_id !== selectedPlugin?.id) { request.controller.abort(); return; }
+              if (event.automatic === true && status.automatic_readonly_tools === true) request.automaticInvocationId = event.invocation_id;
+              updateAnswer(request, message => ({ ...message, toolProposalId: event.invocation_id }));
+            }
+            if (event.type === 'done' && !appCall) updateAnswer(request, message => ({ ...message, status: event.finish_reason === 'tool_calls' && message.toolProposalId ? 'tool' : finishStatus(event.finish_reason, message.content), finishReason: event.finish_reason, usage: event.usage, ...(event.finish_reason === 'stop' ? { errorCode: undefined } : {}) }));
+          } });
+          if (!current()) return;
+          if (!appCall) {
+            const completed = list.current.find(item => item.id === conversation.id)?.messages.find(item => item.id === answer.id)?.status === 'complete';
+            if (appContext.length && !completed) {
+              saveAppResume();
+              updateAnswer(request, message => ({ ...message, errorCode: 'APP_EXPLANATION_FAILED' }));
+            } else { appContinuations.current.delete(answer.id); setAppResumeIds(ids => ids.filter(id => id !== answer.id)); }
+            return;
+          }
+          const command = validateAppCommand(appCall);
+          const signature = JSON.stringify(command);
+          let result;
+          if (seen.has(signature)) {
+            result = { text: locale === 'zh' ? '这次请求已处理，不重复查询。请根据已取得资料继续解释。' : 'This request was already handled. Use the available result without repeating the lookup.', actions: [], data: { repeated: true } };
+            finalOnly = true;
+          } else {
+            seen.add(signature);
+            result = await executeAppCommand(command, locale, { signal: request.controller.signal, transport: expoFetch });
+          }
+          if (!current()) return;
+          const encoded = appResultContext(result);
+          if (appContext.reduce((total, item) => total + Array.from(item.result).length, 0) + Array.from(encoded).length > 24000) throw new ChatError('RESPONSE_TOO_LARGE');
+          appContext.push({ ...command, result: encoded });
+          publicText += `${publicText ? '\n\n' : ''}${result.text}`;
+          actions = [...actions, ...result.actions].slice(-12);
+          rememberAppActions(answer.id, actions);
+          updateAnswer(request, message => ({ ...message, content: `${publicText}\n\n`, status: 'incomplete', errorCode: 'APP_EXPLANATION_FAILED' }));
+          saveAppResume();
+          const snapshot = list.current.find(item => item.id === conversation.id);
+          if (!snapshot || !await persist(authenticated, snapshot)) {
+            if (current()) updateAnswer(request, message => ({ ...message, status: 'error', errorCode: 'HISTORY_SAVE_FAILED' }));
+            return;
+          }
+          if (appContext.length === 3) finalOnly = true;
         }
-        if (event.type === 'done') updateAnswer(request, message => ({ ...message, status: event.finish_reason === 'tool_calls' && message.toolProposalId ? 'tool' : finishStatus(event.finish_reason, message.content), finishReason: event.finish_reason, usage: event.usage }));
-      },
-    });
+      } finally { clearTimeout(timer); }
+
     })().catch(async error => {
-      if (!current()) return;
+      if (!isCurrent(request.generation) || inflight.current !== request || sessionRef.current?.token !== authenticated.token) return;
       if (error instanceof ChatError && error.status === 401) {
         const version = invalidate(); applySession(null); clearPrivateState(); setAuthError('UNAUTHORIZED'); setAuthOpen(true);
         await removeToken(authenticated.token).catch(() => { if (isCurrent(version)) setAuthError('STORAGE_ERROR'); });
         return;
       }
-      const code = errorCode(error);
+      const code = request.appToolAttempted && error instanceof ChatError && error.code === 'REQUEST_TOO_LARGE' ? 'APP_CONTEXT_TOO_LARGE' : request.appToolAttempted ? appContinuations.current.has(answer.id) ? 'APP_EXPLANATION_FAILED' : 'APP_QUERY_INTERRUPTED' : request.controller.signal.aborted ? 'CANCELLED' : errorCode(error);
       updateAnswer(request, message => ({ ...message, status: code === 'CANCELLED' ? 'cancelled' : 'error', errorCode: code }));
     }).finally(async () => {
       const final = list.current.find(item => item.id === request.conversationId);
@@ -522,11 +617,21 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
       if (financial) return addLocalFinance(financial);
     }
     const current = list.current.find(item => item.id === activeIdRef.current) ?? { id: randomUUID(), title: financialAi ? financialAiTitle(trimmed, locale) : Array.from(trimmed).slice(0, 24).join(''), messages: [], ...(plugin ? { plugin } : {}) };
+    if (current.messages.at(-1) && appContinuations.current.has(current.messages.at(-1)!.id) && current.messages.findLast(message => message.role === 'user')?.content === trimmed) return resumeAppResult(current.messages.at(-1)!.id);
     if (current.messages.at(-1)?.errorCode === 'HISTORY_SAVE_FAILED' && current.messages.findLast(message => message.role === 'user')?.content === trimmed) {
       const base = prepareRetry(current);
       return base ? start(current, base, [], true) : false;
     }
     return start(current, [...current.messages, { id: randomUUID(), role: 'user', content: trimmed, status: 'complete' }], [], true);
+  };
+  const resumeAppResult = (messageId: string) => {
+    const saved = appContinuations.current.get(messageId);
+    if (list.current.find(item => item.id === activeIdRef.current)?.messages.find(item => item.id === messageId)?.errorCode === 'APP_CONTEXT_TOO_LARGE') { setMessageError('APP_CONTEXT_TOO_LARGE'); return false; }
+    const conversation = list.current.find(item => item.id === activeIdRef.current);
+    if (!saved || !conversation || conversation.plugin || conversation.localOnly || conversation.id !== saved.conversationId
+      || conversation.messages.at(-1)?.id !== messageId || saved.token !== sessionRef.current?.token
+      || writers.current.get(saved.token)?.hasPending(conversation.id)) return false;
+    return start(conversation, saved.messages, [], false, undefined, saved);
   };
   const retry = () => {
     const conversation = list.current.find(item => item.id === activeIdRef.current);
@@ -534,6 +639,9 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     const base = conversation ? prepareRetry(conversation) : null;
     if (conversation && base) {
       const last = conversation.messages.at(-1);
+      if (last?.errorCode === 'APP_CONTEXT_TOO_LARGE') { setMessageError('APP_CONTEXT_TOO_LARGE'); return; }
+      if (last && ['APP_EXPLANATION_FAILED', 'APP_QUERY_INTERRUPTED'].includes(last.errorCode ?? '') && !appContinuations.current.has(last.id)) { setMessageError('APP_RESULT_RELOAD'); return; }
+      if (last && appContinuations.current.has(last.id)) { resumeAppResult(last.id); return; }
       if (last?.bankCommand) recoverBankCommand(conversation, base, last);
       else start(conversation, base, last?.toolInvocationIds ?? []);
     }
@@ -543,7 +651,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     const pending = consentGate.approve(sessionRef.current?.token ?? '', generation.current);
     setAiConsentOpen(false);
     if (!pending || !mounted.current) return;
-    if (start(pending.conversation, pending.messages, pending.invocationIds) && pending.clearDraft
+    if (start(pending.conversation, pending.messages, pending.invocationIds, false, undefined, pending.appResume) && pending.clearDraft
       && draft.trim() === pending.messages.at(-1)?.content) setDraft('');
   };
   const newConversation = () => { cancelAiSharing(); stop(); setToolResumeTarget(null); select(null); setDraft(''); setMessageError(''); setFinancialAi(false); };
@@ -555,7 +663,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
       || authLock.current || historyBusy || historyAction.current || draftRef.current.trim()) return false;
     try {
       // Use the actual send limit, including the research guidance overhead.
-      buildContext([{ id: 'research-draft', role: 'user', content: text, status: 'complete' }], FINANCIAL_AI_GUIDANCE);
+      buildContext([{ id: 'research-draft', role: 'user', content: text, status: 'complete' }], guidanceFor(text));
     } catch { return false; }
     const account = sessionRef.current;
     const eligible = (item: Conversation | undefined) => !!item && !item.localOnly && !item.plugin
@@ -638,7 +746,11 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
       if (replaceLocal) await writerFor(account).drain();
       const detail = await call(`/v1/ai/conversations/${id}`, decodeHistory, account.token);
       if (!isCurrent(version) || sessionRef.current?.token !== account.token || activeIdRef.current !== id) return;
-      if (replaceLocal) writerFor(account).discard(id, detail.revision); else writerFor(account).seed(id, detail.revision, true);
+      if (replaceLocal) {
+        for (const [key, item] of appContinuations.current) if (item.conversationId === id) appContinuations.current.delete(key);
+        setAppResumeIds([...appContinuations.current.keys()]);
+        writerFor(account).discard(id, detail.revision);
+      } else writerFor(account).seed(id, detail.revision, true);
       hydrated.current.add(id);
       updateItems(current => current.map(item => item.id === id ? restoreHistory(detail) : item));
       setFinancialAi(isFinancialAiConversation(detail));
@@ -715,7 +827,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError, toolResumeTarget,
     send, stop, retry, newConversation, openConversation,
     addLocalFinance: (turn: LocalFinanceTurn) => addLocalFinance(turn), privacyEpoch,
-    financialAi, newFinancialAi, prepareResearchDraft, researchBusy,
+    financialAi, newFinancialAi, prepareResearchDraft, researchBusy, appActions, appResumeIds, resumeAppResult, canResumeAppResult: (messageId: string) => appContinuations.current.has(messageId) && list.current.find(item => item.id === activeIdRef.current)?.messages.find(item => item.id === messageId)?.errorCode !== 'APP_CONTEXT_TOO_LARGE',
     plugin, selectPlugin, resumeTool,
     aiConsentOpen, confirmAiSharing, cancelAiSharing,
   };

@@ -58,19 +58,21 @@ import { openPrivacyPolicy } from './privacy';
 import { FinanceTaskSheet } from './finance-agent/panel';
 import { FinanceResultCard } from './finance-agent/result-card';
 import { FinanceAdSettings } from './finance-ads';
+import { APP_MODULES, createAppNavigationAction, type AppNavigationAction } from './app-assistant/core';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
 export function QGlyph({ size = 48 }: { size?: number }) {
   return <QCompanion size={size} showBadge={false} />;
 }
-export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData }: {
+export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData, onOpenAppAction }: {
   controller: ChatController;
   onOpenPlugins: () => void;
   onOpenFinancialService: (category: 'installments' | 'insurance' | 'finance') => void;
   onOpenMarketData: () => void;
+  onOpenAppAction?: (action: AppNavigationAction) => void;
 }) {
   const { conversation, draft, setDraft, model, setModel, think, setThink } = controller;
-  const { colors, text, phone } = useDesign();
+  const { colors, text, phone, locale } = useDesign();
   const [models, setModels] = useState(false);
   const [tools, setTools] = useState(false);
   const [bankForm, setBankForm] = useState(false);
@@ -79,6 +81,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [financialServices, setFinancialServices] = useState(false);
   const [adSettings, setAdSettings] = useState(false);
+  const [appFunctions, setAppFunctions] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [availableHeight, setAvailableHeight] = useState(0);
   const { height, fontScale } = useWindowDimensions();
@@ -126,7 +129,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
   const compactWelcome = keyboardVisible || height < 580 || fontScale > 1.4 || (availableHeight > 0 && availableHeight < 420);
   const dockMaxHeight = availableHeight > 0 ? Math.min(availableHeight, Math.max(96, availableHeight * (compactWelcome && !localOnly ? 0.85 : 0.6))) : undefined;
   const touchSize = process.env.EXPO_OS === "android" ? 48 : 44;
-  const animateCompanion = presentation.busy && !details && !models && !tools && !bankForm && !knowledgeOpen && !financialServices && !adSettings
+  const animateCompanion = presentation.busy && !details && !models && !tools && !bankForm && !knowledgeOpen && !financialServices && !adSettings && !appFunctions
     && !controller.authOpen && !controller.aiConsentOpen;
   const bankPlugin = bankIdForPlugin(controller.plugin);
   const send = () => {
@@ -174,8 +177,8 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
           ref={input}
           accessibilityLabel={text("给小Q发送消息", "Message Q")}
           placeholder={text(
-            localOnly ? "继续问本地金融知识…" : controller.financialAi ? "填写市场问题与参考来源…" : "问问小Q，了解市场与金融知识…",
-            localOnly ? "Ask a local finance question…" : controller.financialAi ? "Enter a market question and reference sources…" : "Ask Q about markets and financial knowledge…",
+            localOnly ? "继续问本地金融知识…" : controller.financialAi ? "填写市场问题与参考来源…" : "说说你的需求，或问小Q有哪些功能…",
+            localOnly ? "Ask a local finance question…" : controller.financialAi ? "Enter a market question and reference sources…" : "Tell Q what you need, or ask what the app can do…",
           )}
           placeholderTextColor={colors.faint}
           value={draft}
@@ -305,11 +308,11 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
       <QCompanion state={presentation.state} size={phone ? 152 : 176} animated={animateCompanion} showBadge={presentation.state !== "ready"} />
       <View style={{ alignItems: "center", gap: 10, maxWidth: 420 }}>
         <Type size={phone ? 25 : 32} weight="500" header style={{ textAlign: "center", letterSpacing: -0.5 }}>
-          {text("看懂市场，找到依据", "Understand markets with evidence")}
+          {text("想做什么，问问小Q", "What would you like to do?")}
         </Type>
         <View accessibilityLiveRegion="polite" testID="q-welcome-status">
           <Type size={14} muted style={{ textAlign: "center", lineHeight: 22 }}>
-            {text('查阅公开数据，理解市场变化，读懂金融知识。', 'Explore public data, understand market changes and learn financial essentials.')}
+            {text('了解保障、查询市场，找到小Q里的合适功能。', 'Explore insurance, research markets and find the right features in Q.')}
           </Type>
         </View>
       </View>
@@ -405,6 +408,9 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
                   </View>
                 ) : null}
                 {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
+                {onOpenAppAction && controller.appActions?.[message.id]?.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {controller.appActions[message.id].map((action, index) => <Action key={`${action.module}:${index}`} kind="secondary" label={action.label} disabled={controller.busy || controller.historyBusy} onPress={() => onOpenAppAction(action)} />)}
+                </View> : null}
                 {localOnly && message.financeResult ? <FinanceResultCard result={message.financeResult} /> : null}
                 {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => { void controller.resumeTool(message.id, message.toolProposalId!); } : undefined} />}
                 {message.id === conversation?.messages.at(-1)?.id && message.id === controller.toolResumeTarget?.messageId && message.toolProposalId
@@ -415,7 +421,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
                   ? text("回答达到本次长度上限，内容未完整结束。", "The answer reached this request’s length limit and is incomplete.")
                   : text("供应商未完整返回本次回答。", "The provider did not complete this answer.")}</Type> : null}
                 {message.role === "assistant" && message.id === conversation?.messages.at(-1)?.id && ["error", "incomplete", "cancelled"].includes(message.status)
-                  ? <Action kind="ghost" icon={RotateCcw} label={text("重试回答", "Retry answer")} onPress={controller.retry} disabled={controller.busy || controller.authBusy || controller.historyBusy} style={{ alignSelf: "flex-start" }} /> : null}
+                  ? <Action kind="ghost" icon={RotateCcw} label={controller.canResumeAppResult?.(message.id) ? text('继续解释已取得资料', 'Explain the saved results') : text("重试回答", "Retry answer")} onPress={() => { if (controller.canResumeAppResult?.(message.id)) void controller.resumeAppResult(message.id); else controller.retry(); }} disabled={controller.busy || controller.authBusy || controller.historyBusy} style={{ alignSelf: "flex-start" }} /> : null}
               </Reveal>
             ))}
           </ScrollView>
@@ -436,7 +442,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
             {!draft.trim() ? prompts : null}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 }}>
               <Action kind="ghost" label={text('金融数据', 'Financial data')} onPress={onOpenMarketData} />
-              <Action kind="ghost" label={text('AI 市场研究', 'AI market research')} onPress={() => { controller.newFinancialAi(); input.current?.focus(); }} />
+              <Action kind="ghost" label={text('小Q能帮什么', 'What can Q do?')} onPress={() => setAppFunctions(true)} />
               <Action kind="ghost" label={text('金融服务', 'Financial services')} onPress={() => setFinancialServices(true)} />
             </View>
           </View> : null}
@@ -449,6 +455,16 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
       </ScrollView>
       <FinanceTaskSheet key={`${controller.session?.user.id ?? 'guest'}:${controller.privacyEpoch}`} visible={knowledgeOpen} knowledgeOnly initialTask="knowledge" onClose={() => setKnowledgeOpen(false)} onSubmit={controller.addLocalFinance} />
       <FinanceAdSettings visible={adSettings} onClose={() => setAdSettings(false)} />
+      <Sheet visible={appFunctions} title={text('小Q里的功能', 'Features in Q')} onClose={() => setAppFunctions(false)}>
+        <Type muted>{text('选择功能查看。保险和金融数据支持公开资料查询；涉及账号、授权或费用的操作会在相应页面核对。', 'Choose a feature. Insurance and financial data support public research; account access, authorization and costs are checked in the relevant page.')}</Type>
+        {controller.status?.app_tools_version !== 1 ? <Type size={13} muted>{text('当前服务尚未启用对话内应用查询，可先打开对应页面使用。', 'In-chat app queries are not enabled on the current service. Open the relevant page to use its features.')}</Type> : think ? <Type size={13} muted>{text('对话内应用查询使用标准模式；深度思考模式仍可解释资料。', 'In-chat app queries use standard mode; thinking mode can still explain supplied material.')}</Type> : null}
+        {APP_MODULES.map(module => <View key={module.id} style={{ gap: 8, paddingVertical: 12 }}>
+          <Type weight="600">{text(module.title[0], module.title[1])}</Type>
+          <Type size={14}>{text(module.summary[0], module.summary[1])}</Type>
+          <Type size={12} muted>{text(module.limits[0], module.limits[1])}</Type>
+          {onOpenAppAction ? <Action kind="secondary" label={text(`打开${module.title[0]}`, `Open ${module.title[1]}`)} disabled={controller.busy || controller.historyBusy} onPress={() => { setAppFunctions(false); onOpenAppAction(createAppNavigationAction(module.id, locale)); }} /> : null}
+        </View>)}
+      </Sheet>
       <Sheet visible={financialServices} title={text('金融服务', 'Financial services')} onClose={() => setFinancialServices(false)}>
         <Type muted>{text('浏览公开资料与独立的广告位演示。小Q不受理金融申请或付款。', 'Browse public information and separate demo ad placements. Q does not process financial applications or payments.')}</Type>
         {([
@@ -510,6 +526,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
         title={text("对话工具", "Chat tools")}
         onClose={() => setTools(false)}
       >
+        <Row title={text('小Q里的功能', 'Features in Q')} subtitle={text('了解各模块能做什么，并直接打开', 'Learn what each module does and open it')} onPress={() => { setTools(false); setAppFunctions(true); }} />
         <Row icon={BookOpen} title={text('金融知识', 'Financial knowledge')} subtitle={text('本机阅读，附参考来源', 'Read on this device with references')} onPress={() => { setTools(false); setKnowledgeOpen(true); }} />
         <Row icon={ChartNoAxesCombined} title={text('金融数据', 'Financial data')} subtitle={text('公开来源、发布时间与数据延迟', 'Public sources, publication times and data delays')} onPress={() => { setTools(false); onOpenMarketData(); }} />
         <Row icon={Landmark} title={text('金融服务', 'Financial services')} onPress={() => { setTools(false); setFinancialServices(true); }} />

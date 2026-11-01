@@ -5,15 +5,16 @@ import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '.
 import { groups, insuranceTypes, findInsurance, sources, type Copy, type InsuranceType } from './catalog';
 import { FinanceAdPlacement, FinanceAdSettings } from '../finance-ads';
 
-export function InsuranceDashboard() {
+export type InsuranceEntry = { query?: string; group?: string; insuranceIds?: string[] };
+export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceEntry }) {
   const { text, colors, phone } = useDesign();
   const label = (copy: Copy) => text(copy[0], copy[1]);
-  const [query, setQuery] = useState('');
-  const [group, setGroup] = useState('all');
+  const [query, setQuery] = useState(initialEntry?.query ?? '');
+  const [group, setGroup] = useState(initialEntry?.group ?? 'all');
   const [tab, setTab] = useState('catalog');
-  const [selected, setSelected] = useState<InsuranceType | null>(null);
-  const [comparison, setComparison] = useState<string[]>([]);
-  const [comparing, setComparing] = useState(false);
+  const [selected, setSelected] = useState<InsuranceType | null>(initialEntry?.insuranceIds?.length === 1 ? insuranceTypes.find(item => item.id === initialEntry.insuranceIds![0]) ?? null : null);
+  const [comparison, setComparison] = useState<string[]>(initialEntry?.insuranceIds ?? []);
+  const [comparing, setComparing] = useState((initialEntry?.insuranceIds?.length ?? 0) >= 2);
   const [outbound, setOutbound] = useState<(typeof sources)[number] | null>(null);
   const [linkError, setLinkError] = useState(false);
   const [adSettings, setAdSettings] = useState(false);

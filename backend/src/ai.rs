@@ -1,6 +1,8 @@
 //! Authenticated streaming through a fixed DeepSeek endpoint. Plugin tools are proposals only;
 //! a separate explicit confirmation executes them. Each response body owns its request.
+mod app_turn;
 mod plugin_turn;
+use app_turn::AppContext;
 use plugin_turn::{PluginTurn, ProposedCall};
 use std::{
     collections::HashMap,
@@ -80,10 +82,17 @@ pub struct ChatRequest {
     pub tool_invocation_ids: Vec<Uuid>,
     #[serde(default)]
     pub automatic_readonly_tools: bool,
+    #[serde(default, deserialize_with = "app_turn::deserialize_version")]
+    pub app_tools_version: Option<u8>,
+    #[serde(default)]
+    pub app_context: Vec<AppContext>,
+    #[serde(default)]
+    pub app_final_only: bool,
 }
 
 impl ChatRequest {
     fn validate(&self) -> ApiResult<()> {
+        app_turn::validate(self)?;
         if self.tool_invocation_ids.len() > 8
             || self
                 .tool_invocation_ids
@@ -145,6 +154,9 @@ impl ChatRequest {
         if self.thinking {
             body["reasoning_effort"] = json!("high");
         }
+        if self.app_tools_version == Some(app_turn::VERSION) {
+            app_turn::augment(&mut body, &self.app_context, self.app_final_only);
+        }
         body
     }
 }
@@ -158,12 +170,14 @@ pub struct ModelInfo {
 pub struct AiStatus {
     configured: bool,
     automatic_readonly_tools: bool,
+    app_tools_version: u8,
     models: [ModelInfo; 2],
 }
 pub async fn status(State(state): State<AppState>) -> Json<AiStatus> {
     Json(AiStatus {
         configured: state.ai.is_some(),
         automatic_readonly_tools: true,
+        app_tools_version: app_turn::VERSION,
         models: [
             ModelInfo {
                 id: ChatModel::Flash,
@@ -285,6 +299,9 @@ impl AiRuntime {
         let deadline = Deadline::now() + self.total_timeout;
         let model = request.model;
         let thinking = request.thinking;
+        let app_tools = request.app_tools_version == Some(app_turn::VERSION)
+            && !request.app_final_only
+            && request.app_context.len() < app_turn::MAX_CONTEXT;
         let mut body = request.provider_body();
         if let Some(plugin) = &plugin {
             plugin.augment(&mut body);
@@ -310,7 +327,7 @@ impl AiRuntime {
             }
             if let Some(bytes) = upstream.as_mut() {
                 let mut decoder = SseDecoder::default();
-                let mut parser = CompletionParser { allow_tools: plugin.is_some(), ..CompletionParser::default() };
+                let mut parser = CompletionParser { allow_tools: plugin.is_some() || app_tools, ..CompletionParser::default() };
                 let mut phase = if thinking { "thinking" } else { "responding" };
                 let mut input_bytes = 0usize;
                 yield Ok(event("status", json!({"phase":phase})));
@@ -357,14 +374,22 @@ impl AiRuntime {
             match terminal {
                 Ok((finish_reason, usage)) => {
                     if finish_reason == "tool_calls" {
-                        let prepared = match (plugin.as_ref(), proposed.as_ref()) {
-                            (Some(plugin),Some(call)) => timeout_at(deadline, plugin.propose(call)).await,
-                            _ => { yield Ok(event("error", json!({"code":"AI_UPSTREAM_ERROR","message":"The model returned an invalid tool proposal."}))); return; }
+                        let Some(call) = proposed.as_ref() else {
+                            yield Ok(event("error", json!({"code":"AI_UPSTREAM_ERROR","message":"The model returned an invalid tool proposal."}))); return;
                         };
-                        match prepared {
-                            Ok(Ok(proposal)) => yield Ok(event("tool_proposal", proposal)),
-                            Ok(Err(error)) => { yield Ok(event("error", json!({"code":error.code,"message":error.message}))); return; }
-                            Err(_) => { yield Ok(event("error", json!({"code":"AI_TIMEOUT","message":"Tool proposal preparation timed out."}))); return; }
+                        if let Some(plugin) = plugin.as_ref() {
+                            match timeout_at(deadline, plugin.propose(call)).await {
+                                Ok(Ok(proposal)) => yield Ok(event("tool_proposal", proposal)),
+                                Ok(Err(error)) => { yield Ok(event("error", json!({"code":error.code,"message":error.message}))); return; }
+                                Err(_) => { yield Ok(event("error", json!({"code":"AI_TIMEOUT","message":"Tool proposal preparation timed out."}))); return; }
+                            }
+                        } else if app_tools {
+                            match app_turn::proposal(call) {
+                                Ok(proposal) => yield Ok(event("app_tool", proposal)),
+                                Err(error) => { yield Ok(event("error", json!({"code":error.code(),"message":error.message()}))); return; }
+                            }
+                        } else {
+                            yield Ok(event("error", json!({"code":"AI_UPSTREAM_ERROR","message":"Unexpected tool proposal."}))); return;
                         }
                     }
                     drop(permit);
@@ -711,6 +736,9 @@ mod tests {
             plugin_connection_id: None,
             tool_invocation_ids: Vec::new(),
             automatic_readonly_tools: false,
+            app_tools_version: None,
+            app_context: Vec::new(),
+            app_final_only: false,
             messages: vec![ChatMessage {
                 role: Role::User,
                 content: "Hello".into(),
@@ -728,6 +756,51 @@ mod tests {
         request.thinking = true;
         assert!(request.validate().is_err());
     }
+    #[test]
+    fn application_mode_and_context_fail_closed_before_provider() {
+        let context = || json!({"name":"app_info","arguments":{"module":"insurance"},"result":"Public catalogue"});
+        for fields in [
+            json!({"app_tools_version":2}),
+            json!({"app_tools_version":null}),
+            json!({"app_context":[context()]}),
+            json!({"app_final_only":true}),
+            json!({"app_tools_version":1,"app_final_only":true}),
+            json!({"app_tools_version":1,"thinking":true}),
+            json!({"app_tools_version":1,"plugin_connection_id":Uuid::new_v4()}),
+            json!({"app_tools_version":1,"automatic_readonly_tools":true}),
+            json!({"app_tools_version":1,"tool_invocation_ids":[Uuid::new_v4()]}),
+            json!({"app_tools_version":1,"app_context":[context(),context(),context(),context()]}),
+            json!({"app_tools_version":1,"app_context":[{"name":"app_info","arguments":{"module":"insurance"},"result":"bad\u{0001}"}]}),
+            json!({"app_tools_version":1,"app_context":[{"name":"app_info","arguments":{"module":"insurance"},"result":"🙂".repeat(10001)}]}),
+            json!({"app_tools_version":1,"app_context":[{"name":"app_info","arguments":{"module":"insurance"},"result":"x","trusted":true}]}),
+            json!({"app_tools_version":1,"app_context":[{"name":"bank_transfer","arguments":{},"result":"succeeded"}]}),
+        ] {
+            let mut body = json!({"model":"deepseek-flash","thinking":false,"messages":[{"role":"user","content":"insurance"}]});
+            body.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            assert!(
+                serde_json::from_value::<ChatRequest>(body).map_or(true, |r| r.validate().is_err())
+            );
+        }
+        let mut input = request();
+        input.app_tools_version = Some(1);
+        input.app_context = vec![app_turn::AppContext {
+            name: "app_info".into(),
+            arguments: json!({"module":"all"}),
+            result: "🙂".repeat(10_000),
+        }];
+        assert!(input.validate().is_ok());
+        input
+            .app_context
+            .extend((0..2).map(|_| app_turn::AppContext {
+                name: "app_info".into(),
+                arguments: json!({"module":"all"}),
+                result: "x".repeat(7001),
+            }));
+        assert!(input.validate().is_err());
+    }
+
     fn chunk(delta: Value, finish: Value) -> String {
         format!(
             "data: {}\r\n\r\n",
@@ -955,6 +1028,17 @@ mod tests {
                     if mode == "quota" { return (StatusCode::PAYMENT_REQUIRED, "UPSTREAM_SECRET_BODY").into_response(); }
                     if mode == "redirect" { return (StatusCode::TEMPORARY_REDIRECT, [("location", "/chat")]).into_response(); }
                     if mode == "slow" { tokio::time::sleep(Duration::from_secs(2)).await; }
+                    if mode.starts_with("app_") {
+                        let name = if mode == "app_unknown" { "q_bank_balance" } else { "q_app_info" };
+                        let arguments = if mode == "app_arguments" { json!({"module":"insurance","url":"https://example.com"}) } else { json!({"module":"insurance"}) };
+                        let mut call = json!({"index":0,"id":"fixture_call","type":"function","function":{"name":name,"arguments":arguments.to_string()}});
+                        if mode == "app_no_id" { call.as_object_mut().unwrap().remove("id"); }
+                        let mut calls = vec![call];
+                        if mode == "app_parallel" { calls.push(json!({"index":1,"id":"second","type":"function","function":{"name":"q_app_info","arguments":"{\"module\":\"all\"}"}})); }
+                        let wire = format!("{}{}data: [DONE]\n\n", chunk(json!({"tool_calls":calls}), Value::Null), chunk(json!({}), json!("tool_calls")));
+                        return ([("content-type", "text/event-stream")], wire).into_response();
+                    }
+
                     let mut text = String::from(": keep-alive\r\n\r\n");
                     text.push_str(&chunk(json!({"role":"assistant","content":null}), Value::Null));
                     text.push_str(&chunk(json!({"reasoning_content":"PRIVATE_REASONING_NOT_FOR_CLIENT"}), Value::Null));
@@ -1050,6 +1134,71 @@ mod tests {
                     .as_str()
                     .unwrap()
                     .contains("You are Q")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn application_tools_emit_only_valid_opted_in_proposals_and_no_execution() {
+        for (mode, version, exhausted, success) in [
+            ("app_ok", Some(1), false, true),
+            ("app_ok", None, false, false),
+            ("app_ok", Some(1), true, false),
+            ("app_unknown", Some(1), false, false),
+            ("app_arguments", Some(1), false, false),
+            ("app_no_id", Some(1), false, false),
+            ("app_parallel", Some(1), false, false),
+        ] {
+            let stub = Stub::start(mode).await;
+            let runtime = stub.runtime(Duration::from_secs(3), Duration::from_secs(1));
+            let mut input = request();
+            input.app_tools_version = version;
+            if exhausted {
+                input.app_context = (0..3)
+                    .map(|_| app_turn::AppContext {
+                        name: "app_info".into(),
+                        arguments: json!({"module":"insurance"}),
+                        result: "Prior public catalogue".into(),
+                    })
+                    .collect();
+            }
+            assert!(input.validate().is_ok());
+            let response =
+                runtime
+                    .clone()
+                    .response(input, runtime.reserve(Uuid::new_v4()).unwrap(), None);
+            let events = decode_public(&to_bytes(response.into_body(), 1_000_000).await.unwrap());
+            assert!(!events.iter().any(|(name, _)| name == "tool_proposal"));
+            if success {
+                let app = events
+                    .iter()
+                    .position(|(name, _)| name == "app_tool")
+                    .unwrap();
+                assert_eq!(
+                    events[app].1,
+                    json!({"name":"app_info","arguments":{"module":"insurance"}})
+                );
+                assert_eq!(events[app + 1].0, "done");
+                assert_eq!(events[app + 1].1["finish_reason"], "tool_calls");
+            } else {
+                assert!(
+                    events
+                        .iter()
+                        .all(|(name, _)| name != "app_tool" && name != "done")
+                );
+                assert_eq!(events.last().unwrap().1["code"], "AI_UPSTREAM_ERROR");
+            }
+            assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(runtime.admissions.lock().unwrap().active, 0);
+            assert_eq!(
+                stub.payload
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .get("tools")
+                    .is_some(),
+                version.is_some() && !exhausted
             );
         }
     }
