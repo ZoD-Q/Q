@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { fetch as expoFetch } from 'expo/fetch';
 import { randomUUID } from 'expo-crypto';
 import type { AiModel, AuthResponse } from '@xiaoq/shared';
@@ -55,7 +56,17 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   const list = useRef<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
-  const [draft, setDraft] = useState('');
+  const [draft, updateDraft] = useState('');
+  const draftRef = useRef('');
+  const draftRevision = useRef(0);
+  const selectionRevision = useRef(0);
+  const researchRequest = useRef<AbortController | null>(null);
+  const [researchBusy, setResearchBusy] = useState(false);
+  const setDraft = (value: string) => {
+    draftRevision.current++;
+    draftRef.current = value;
+    updateDraft(value);
+  };
   const [model, setModel] = useState<AiModel>('deepseek-flash');
   const [think, setThink] = useState(false);
   const [financialAi, setFinancialAi] = useState(false);
@@ -139,7 +150,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     }
     finally { if (mounted.current && epoch === historyEpoch.current) setHistoryBusy(false); }
   };
-  const select = (id: string | null) => { activeIdRef.current = id; setActiveId(id); };
+  const select = (id: string | null) => { selectionRevision.current++; activeIdRef.current = id; setActiveId(id); };
   const updateAnswer = (request: ActiveRequest, update: (message: ChatMessage) => ChatMessage) => {
     updateItems(current => current.map(conversation => conversation.id !== request.conversationId ? conversation : {
       ...conversation, messages: conversation.messages.map(message => message.id === request.assistantId ? update(message) : message),
@@ -242,6 +253,14 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   });
   useEffect(() => subscribeSession(onSessionChanged), []);
   useEffect(() => subscribeAiConsent(onAiConsentChanged), []);
+  useEffect(() => {
+    // Market pages can be visible while this hook's chat surface is hidden.
+    // Their transfers still stop when the app leaves the foreground.
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active') researchRequest.current?.abort();
+    });
+    return () => subscription.remove();
+  }, []);
   const stopOnUnmount = useEffectEvent(() => stop());
   useEffect(() => {
     mounted.current = true;
@@ -529,6 +548,77 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   };
   const newConversation = () => { cancelAiSharing(); stop(); setToolResumeTarget(null); select(null); setDraft(''); setMessageError(''); setFinancialAi(false); };
   const newFinancialAi = () => { newConversation(); setPlugin(null); setFinancialAi(true); };
+  const prepareResearchDraft = async (value: string, conversationId?: string, signal?: AbortSignal): Promise<boolean> => {
+    const text = value.trim();
+    if (!text || Array.from(text).length > 12000 || !mounted.current || AppState.currentState !== 'active'
+      || signal?.aborted || researchRequest.current || inflight.current || continuation.current || authBusy || aiConsentOpen
+      || authLock.current || historyBusy || historyAction.current || draftRef.current.trim()) return false;
+    try {
+      // Use the actual send limit, including the research guidance overhead.
+      buildContext([{ id: 'research-draft', role: 'user', content: text, status: 'complete' }], FINANCIAL_AI_GUIDANCE);
+    } catch { return false; }
+    const account = sessionRef.current;
+    const eligible = (item: Conversation | undefined) => !!item && !item.localOnly && !item.plugin
+      && !item.messages.some(message => message.localFinance || message.financeResult || message.bankCommand || message.toolProposalId || message.toolInvocationIds?.length);
+    const target = conversationId === undefined ? undefined : list.current.find(item => item.id === conversationId);
+    if (conversationId !== undefined && (!account || !eligible(target) || writers.current.get(account.token)?.hasPending(conversationId))) return false;
+    const version = generation.current, revision = getSessionRevision();
+    const selection = selectionRevision.current, edit = draftRevision.current;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    researchRequest.current = controller;
+    shortRequests.current.add(controller);
+    historyAction.current = true; setResearchBusy(true);
+    const current = () => isCurrent(version) && researchRequest.current === controller && !controller.signal.aborted
+      && AppState.currentState === 'active' && getSessionRevision() === revision
+      && sessionRef.current?.token === account?.token && selectionRevision.current === selection
+      && draftRevision.current === edit && !draftRef.current.trim();
+    try {
+      if (!account) {
+        // A hidden chat may not yet have restored an already-signed-in account.
+        // Treat only an actually empty session store as guest; otherwise opening
+        // chat would restore that identity and erase a falsely accepted draft.
+        const snapshot = await readSessionSnapshot();
+        if (!current() || snapshot.token || snapshot.revision !== revision) return false;
+      }
+      let next = target;
+      if (conversationId !== undefined && account && !hydrated.current.has(conversationId)) {
+        if (historyCapabilities.current.get(account.token) !== 'cloud') return false;
+        const detail = await workbenchRequest({ baseUrl: API_URL, path: `/v1/ai/conversations/${conversationId}`, token: account.token,
+          signal: controller.signal, transport: expoFetch, decode: value => {
+            // Local-only is never a cloud-history capability, even on malformed input.
+            if (value && typeof value === 'object' && 'localOnly' in value && value.localOnly) throw new WorkbenchError('INVALID_RESPONSE');
+            return decodeHistory(value);
+          } });
+        if (!current() || detail.id !== conversationId || !eligible(detail)
+          || !eligible(list.current.find(item => item.id === conversationId)) || writers.current.get(account.token)?.hasPending(conversationId)) return false;
+        next = restoreHistory(detail);
+        writerFor(account).seed(conversationId, detail.revision, true);
+      }
+      if (!current() || (conversationId !== undefined && (!eligible(next)
+        || !eligible(list.current.find(item => item.id === conversationId)) || !account || writers.current.get(account.token)?.hasPending(conversationId)))) return false;
+      if (next) {
+        updateItems(items => items.map(item => item.id === next.id ? next : item));
+        hydrated.current.add(next.id);
+      }
+      // No model call or history write. Navigation is committed only after loading
+      // and all privacy checks succeed; the caller can now open the chat surface.
+      cancelAiSharing(); setToolResumeTarget(null); select(conversationId ?? null);
+      setPlugin(null); setFinancialAi(true); setMessageError(''); setHistoryError(''); setDraft(text);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+      shortRequests.current.delete(controller);
+      controller.abort();
+      if (researchRequest.current === controller) {
+        researchRequest.current = null; historyAction.current = false;
+        if (mounted.current) setResearchBusy(false);
+      }
+    }
+  };
   const openConversation = async (id: string, replaceLocal = false) => {
     if (historyAction.current) return;
     if (replaceLocal) historyAction.current = true;
@@ -625,7 +715,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     draft, setDraft, model, setModel, think, setThink, phase, busy: phase !== 'idle', messageError, toolResumeTarget,
     send, stop, retry, newConversation, openConversation,
     addLocalFinance: (turn: LocalFinanceTurn) => addLocalFinance(turn), privacyEpoch,
-    financialAi, newFinancialAi,
+    financialAi, newFinancialAi, prepareResearchDraft, researchBusy,
     plugin, selectPlugin, resumeTool,
     aiConsentOpen, confirmAiSharing, cancelAiSharing,
   };
