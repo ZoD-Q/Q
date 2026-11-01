@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import * as core from '../api-workbench/core.ts';
-import * as stream from './stream.ts';
+
 import * as stateModel from './state-model.ts';
 import { registerHooks } from 'node:module';
 import { createAiStatusMonitor } from './status-monitor.ts';
@@ -15,6 +15,8 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
   return next(specifier, context);
 } });
+const stream = await import('./stream.ts');
+const appCore = await import('../app-assistant/core.ts');
 const history = await import('./history.ts');
 const pluginCore = await import('../plugin-host/core.ts');
 const bankIntent = await import('../banking/intent.ts');
@@ -40,8 +42,9 @@ const hookSource = ts.transpileModule(readFileSync(new URL('./use-chat.ts', impo
 /** Execute the actual hook's async actions with deterministic state/effect plumbing.
  * This verifies orchestration, not React rendering, layout, or native transport. */
 function harness({ stored = token, statusFetch = async () => json(configured), meFetch = async () => json(user),
-  historyFetch = async () => new Response('', { status: 404 }), historySave, historyDetail, bankFetch,
+  historyFetch = async () => new Response('', { status: 404 }), historySave, historyDetail, bankFetch, appExecute,
 } = {}) {
+  const appCalls = [];
   const slots = [], calls = [], timers = new Map(), streams = [], streamCompletions = [], streamFailures = [], historyPosts = [], ordering = [];
   let cursor = 0, dirty = true, visible = true, mounted = true, pendingEffects = [], result, now = 0, nextId = 0;
   const react = {
@@ -99,6 +102,11 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     '../banking/client': bankData,
     '../finance-agent/conversation': financeConversation,
     '../finance-agent/intent': financeIntent,
+    '../app-assistant/core': appCore,
+    '../app-assistant/executor': {
+      executeAppCommand: async (command, locale, options) => { appCalls.push({ command, signal: options.signal }); return appExecute ? appExecute(command, locale, options) : appCore.executeLocalAppCommand(command, locale); },
+      appResultContext: result => JSON.stringify({ text: result.text, data: result.data }),
+    },
     './stream': { ...stream, streamChat: options => {
       streams.push(options); ordering.push('chat:POST');
       return new Promise((resolve, reject) => {
@@ -120,7 +128,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
   const module = { exports: {} };
   runInNewContext(hookSource, { module, exports: module.exports, require: name => {
     assert.ok(name in imports, `Unmocked module: ${name}`); return imports[name];
-  }, AbortController, Error });
+  }, AbortController, Error, setTimeout: (callback, delay) => { const timer = { at: now + delay, callback }; timers.set(timer, timer); return timer; }, clearTimeout: timer => timers.delete(timer) });
   const render = () => {
     cursor = 0; dirty = false;
     result = module.exports.useChat(visible);
@@ -131,9 +139,10 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
   render();
   return {
     get current() { return dirty ? render() : result; },
-    calls, streams, historyPosts, ordering,
+    calls, streams, historyPosts, ordering, appCalls,
     token: () => stored,
     grantConsent: () => consent.grant(stored),
+    revokeConsent: () => consent.revoke(),
     changeToken: session.writeToken,
     finishStream(index = 0, content = 'fixture answer') {
       streams[index].onEvent({ type: 'delta', text: content });
@@ -142,6 +151,11 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     },
     finishToolStream(proposal, index = 0) {
       streams[index].onEvent({ type: 'tool_proposal', ...proposal });
+      streams[index].onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'tool_calls' });
+      streamCompletions[index]();
+    },
+    finishAppStream(command, index = 0) {
+      streams[index].onEvent({ type: 'app_tool', ...command });
       streams[index].onEvent({ type: 'done', model: 'deepseek-flash', finish_reason: 'tool_calls' });
       streamCompletions[index]();
     },
@@ -1032,4 +1046,165 @@ test('research handoff reserves the actual market guidance budget before fetchin
   assert.equal(view.streams.length, 1);
   assert.equal(Array.from(view.streams[0].request.messages.at(-1).content).length, 12000);
   assert.equal(view.current.conversation.messages[0].content, atLimit);
+});
+
+const appConfigured = () => json({ ...configured, app_tools_version: 1 });
+const appInfo = { name: 'app_info', arguments: { module: 'insurance' } };
+
+test('ordinary app-capable chat executes public reads, saves readable results and continues with click-only actions', async t => {
+  const view = harness({ statusFetch: appConfigured, historyFetch: cloudHistory }); t.after(view.close);
+  await view.flush(); view.grantConsent();
+  assert.equal(view.current.send('How can Q help me with insurance?'), true); await view.flush();
+  assert.equal(view.streams[0].request.app_tools_version, 1);
+  view.finishAppStream(appInfo); await view.flush();
+  assert.equal(view.appCalls.length, 1); assert.equal(view.streams.length, 2);
+  assert.equal(view.streams[1].request.app_context[0].name, 'app_info');
+  assert.ok(view.current.conversation.messages.at(-1).content.includes('保险'));
+  const answerId = view.current.conversation.messages.at(-1).id;
+  assert.ok(view.current.appActions[answerId].some(action => action.module === 'insurance'));
+  const savedPublicResult = view.historyPosts.find(post => post.body.messages.at(-1).content.includes('保险')).body.messages.at(-1);
+  assert.equal(savedPublicResult.status, 'incomplete');
+  assert.equal(savedPublicResult.errorCode, 'APP_EXPLANATION_FAILED');
+  assert.ok(view.historyPosts.every(post => post.body.messages.every(message => !('appActions' in message))));
+  assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
+  view.finishStream(1, 'These are coverage directions, not product quotations.'); await view.flush();
+  assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+  assert.equal(view.current.canResumeAppResult(answerId), false);
+});
+
+test('legacy servers and thinking mode omit every app wire field', async t => {
+  for (const statusFetch of [async () => json(configured), appConfigured]) {
+    const view = harness({ statusFetch }); t.after(view.close); await view.flush(); view.grantConsent();
+    if (statusFetch === appConfigured) view.current.setThink(true);
+    assert.equal(view.current.send('Q insurance module capabilities'), true); await view.flush();
+    assert.equal('app_tools_version' in view.streams[0].request, false);
+    assert.equal('app_context' in view.streams[0].request, false);
+    assert.equal(view.appCalls.length, 0);
+    assert.ok(view.streams[0].request.messages.at(-1).content.includes(appCore.CAPABILITY_GUIDANCE));
+  }
+});
+
+test('repeated commands do not reread sources and the per-turn cap forces a final explanation', async t => {
+  const repeated = harness({ statusFetch: appConfigured }); t.after(repeated.close); await repeated.flush(); repeated.grantConsent();
+  repeated.current.send('Tell me about Q insurance'); await repeated.flush(); repeated.finishAppStream(appInfo); await repeated.flush();
+  repeated.finishAppStream(appInfo, 1); await repeated.flush();
+  assert.equal(repeated.appCalls.length, 1); assert.equal(repeated.streams[2].request.app_final_only, true);
+  repeated.finishStream(2); await repeated.flush();
+  const capped = harness({ statusFetch: appConfigured }); t.after(capped.close); await capped.flush(); capped.grantConsent(); capped.current.send('Show Q features'); await capped.flush();
+  for (let i = 0; i < 3; i++) { capped.finishAppStream({ name: 'app_info', arguments: { module: ['insurance','wallet','video'][i] } }, i); await capped.flush(); }
+  assert.equal(capped.appCalls.length, 3); assert.equal(capped.streams.length, 4);
+  assert.equal(capped.streams[3].request.app_final_only, true); assert.equal(capped.streams[3].request.app_context.length, 3);
+  capped.finishStream(3); await capped.flush();
+});
+
+test('explanation retry reuses obtained public data without executing the query again', async t => {
+  const view = harness({ statusFetch: appConfigured }); t.after(view.close); await view.flush(); view.grantConsent();
+  view.current.send('Help with Q insurance'); await view.flush(); view.finishAppStream(appInfo); await view.flush();
+  view.failStream(1, 'AI_UPSTREAM_ERROR'); await view.flush();
+  const failed = view.current.conversation.messages.at(-1);
+  assert.equal(failed.errorCode, 'APP_EXPLANATION_FAILED'); assert.equal(view.current.canResumeAppResult(failed.id), true);
+  view.current.retry(); await view.flush();
+  assert.equal(view.appCalls.length, 1); assert.equal(view.streams.length, 3); assert.equal(view.streams[2].request.app_final_only, true);
+  assert.equal(view.streams[2].request.app_context.length, 1);
+  view.finishStream(2, 'Explanation from saved public data.'); await view.flush();
+  assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+});
+
+test('stop, background and account changes cancel an app lookup and suppress its late result', async t => {
+  for (const action of ['stop', 'background', 'account']) {
+    const pending = deferred();
+    const view = harness({ statusFetch: appConfigured, appExecute: () => pending.promise }); t.after(view.close);
+    await view.flush(); view.grantConsent(); view.current.send('Get public Q data'); await view.flush(); view.finishAppStream(appInfo); await view.flush();
+    if (action === 'stop') view.current.stop();
+    if (action === 'background') view.setAppState('background');
+    if (action === 'account') { await view.changeToken('q_other_fixture'); await view.flush(); }
+    assert.equal(view.appCalls[0].signal.aborted, true);
+    pending.resolve({ text: 'LATE_PRIVATE_MARKER', actions: [], data: { success: true } }); await view.flush();
+    assert.equal(view.streams.length, 1); assert.equal(JSON.stringify(view.current.items).includes('LATE_PRIVATE_MARKER'), false);
+    if (action === 'account') assert.deepEqual(Object.keys(view.current.appActions), []);
+  }
+});
+
+test('failed result-history save blocks continuation and an explicit retry cannot bypass the pending writer', async t => {
+  let saves = 0;
+  const view = harness({ statusFetch: appConfigured, historyFetch: cloudHistory, historySave: async (id, body) => ++saves === 1 ? json({ id, ...body, revision: 1, updated_at: user.created_at }) : new Response('', { status: 503 }) }); t.after(view.close);
+  await view.flush(); view.grantConsent(); view.current.send('Q insurance overview'); await view.flush(); view.finishAppStream(appInfo); await view.flush();
+  assert.equal(view.appCalls.length, 1); assert.equal(view.streams.length, 1);
+  const message = view.current.conversation.messages.at(-1);
+  assert.equal(message.errorCode, 'HISTORY_SAVE_FAILED'); assert.equal(view.current.resumeAppResult(message.id), false);
+  view.current.retry(); await view.flush(); assert.equal(view.appCalls.length, 1); assert.equal(view.streams.length, 1);
+});
+
+test('cancelled app history reload never replays a read, while repeated explanation failures retain recovery', async t => {
+  const view = harness({ statusFetch: appConfigured }); t.after(view.close); await view.flush(); view.grantConsent();
+  view.current.send('Q insurance'); await view.flush(); view.finishAppStream(appInfo); await view.flush(); view.failStream(1, 'AI_UPSTREAM_ERROR'); await view.flush();
+  view.current.retry(); await view.flush(); view.failStream(2, 'AI_UPSTREAM_ERROR'); await view.flush();
+  const second = view.current.conversation.messages.at(-1);
+  assert.equal(second.errorCode, 'APP_EXPLANATION_FAILED'); assert.equal(view.current.canResumeAppResult(second.id), true);
+  view.current.retry(); await view.flush(); assert.equal(view.appCalls.length, 1);
+  const savedId = '11111111-2222-4333-8444-555555555555';
+  const restored = harness({ statusFetch: appConfigured, historyFetch: async () => json({ items: [{ id: savedId, title: 'Past research', revision: 1, updated_at: user.created_at }], next_cursor: null }), historyDetail: async () => json({ id: savedId, title: 'Past research', revision: 1, updated_at: user.created_at, messages: [
+    { id: 'u1', role: 'user', status: 'complete', content: 'Read public data' },
+    { id: 'a1', role: 'assistant', status: 'error', content: 'Previously obtained public source facts.', errorCode: 'APP_EXPLANATION_FAILED' },
+  ] }) }); t.after(restored.close); await restored.flush(); restored.grantConsent(); await restored.current.openConversation(savedId); await restored.flush();
+  assert.equal(restored.appCalls.length, 0); assert.equal(restored.streams.length, 0);
+  restored.current.retry(); await restored.flush(); assert.equal(restored.current.messageError, 'APP_RESULT_RELOAD');
+  assert.equal(restored.appCalls.length, 0); assert.equal(restored.streams.length, 0);
+});
+
+test('app mode never enters selected plugins or private finance tasks and uses a shared total deadline', async t => {
+  const pluginView = harness({ statusFetch: appConfigured }); t.after(pluginView.close); await pluginView.flush(); pluginView.grantConsent();
+  pluginView.current.selectPlugin(bankConnection);
+  await pluginView.flush(); pluginView.current.send('Get balance'); await pluginView.flush();
+  assert.equal(pluginView.streams[0].request.app_tools_version, undefined);
+  const privateView = harness({ statusFetch: appConfigured }); t.after(privateView.close); await privateView.flush(); privateView.grantConsent();
+  privateView.current.send('账单 CNY\n收入 工资 10000\n支出 房租 3000'); await privateView.flush();
+  assert.equal(privateView.appCalls.length, 0); assert.equal(privateView.streams.length, 0); assert.equal(privateView.current.conversation.localOnly, true);
+  const pending = deferred(); const timed = harness({ statusFetch: appConfigured, appExecute: () => pending.promise }); t.after(timed.close); await timed.flush(); timed.grantConsent();
+  timed.current.send('Read Q insurance'); await timed.flush(); timed.finishAppStream(appInfo); await timed.flush(); timed.advance(190000); await timed.flush();
+  assert.equal(timed.appCalls[0].signal.aborted, true);
+  pending.resolve({ text: 'TOO_LATE', actions: [] }); await timed.flush(); assert.equal(timed.streams.length, 1);
+  assert.equal(JSON.stringify(timed.current.items).includes('TOO_LATE'), false);
+});
+
+
+test('renewing AI sharing permission preserves final-only app continuation and never replans the lookup', async t => {
+  const view = harness({ statusFetch: appConfigured }); t.after(view.close); await view.flush(); view.grantConsent();
+  view.current.send('Q insurance overview'); await view.flush(); view.finishAppStream(appInfo); await view.flush();
+  view.failStream(1, 'AI_UPSTREAM_ERROR'); await view.flush();
+  const id = view.current.conversation.messages.at(-1).id;
+  view.revokeConsent(); await view.flush();
+  assert.equal(view.current.resumeAppResult(id), false); await view.flush();
+  assert.equal(view.current.aiConsentOpen, true); assert.equal(view.streams.length, 2);
+  view.current.confirmAiSharing(); await view.flush();
+  assert.equal(view.streams.length, 3); assert.equal(view.appCalls.length, 1);
+  assert.equal(view.streams[2].request.app_final_only, true);
+  assert.equal(view.streams[2].request.app_context[0].name, 'app_info');
+  assert.equal(view.streams[2].request.app_context.length, 1);
+  view.finishStream(2, 'Explanation without another lookup.'); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+});
+
+
+test('repeated failed app explanations migrate recovery state without retaining removed assistant IDs', async t => {
+  const view = harness({ statusFetch: appConfigured }); t.after(view.close); await view.flush(); view.grantConsent();
+  view.current.send('Q insurance overview'); await view.flush(); view.finishAppStream(appInfo); await view.flush();
+  view.failStream(1, 'AI_UPSTREAM_ERROR'); await view.flush();
+  const removed = [];
+  for (let i = 0; i < 26; i++) {
+    const id = view.current.conversation.messages.at(-1).id; removed.push(id);
+    assert.equal(view.current.resumeAppResult(id), true); await view.flush();
+    view.failStream(i + 2, 'AI_UPSTREAM_ERROR'); await view.flush();
+    const current = view.current.conversation.messages.at(-1).id;
+    assert.deepEqual([...view.current.appResumeIds], [current]);
+    assert.deepEqual(Object.keys(view.current.appActions), [current]);
+    assert.equal(removed.some(old => view.current.canResumeAppResult(old)), false);
+  }
+  assert.equal(view.appCalls.length, 1);
+  // A pending consent retry is not admitted and therefore must retain its source.
+  const id = view.current.conversation.messages.at(-1).id;
+  view.revokeConsent(); await view.flush();
+  assert.equal(view.current.resumeAppResult(id), false); await view.flush();
+  assert.equal(view.current.canResumeAppResult(id), true);
+  assert.equal(Object.hasOwn(view.current.appActions, id), true);
 });

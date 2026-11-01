@@ -245,7 +245,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. By default a proposal is persisted without execution. When automatic_readonly_tools is opted in after capability discovery, the host may complete only its trusted built-in balance/history reads and mark automatic=true; transfers and untrusted remote tools still await confirmation. Clients read the saved invocation and may continue once using completed invocation IDs, after durable history save. Images/resources are displayed natively; raw tool results are not client-supplied model context. */
+        /** @description Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. By default a proposal is persisted without execution. When automatic_readonly_tools is opted in after capability discovery, the host may complete only its trusted built-in balance/history reads and mark automatic=true; transfers and untrusted remote tools still await confirmation. Clients read the saved invocation and may continue once using completed invocation IDs, after durable history save. Images/resources are displayed natively; raw tool results are not client-supplied model context. Version-1 application mode additionally emits app_tool (AppToolProposal), followed by done with finish_reason=tool_calls. The client may execute only its fixed public read handlers; app_open produces a user-clicked native navigation card. It may continue with at most three bounded AppToolContext records. Reloading history never replays an application tool. Application context is separate from server-owned plugin invocation results. */
         post: operations["aiChat"];
         delete?: never;
         options?: never;
@@ -1206,13 +1206,18 @@ export interface components {
             models: components["schemas"]["AiModelInfo"][];
             /** @description Host support for explicitly opted-in automatic trusted read-only plugin queries. Missing on older servers; clients must omit the request flag unless true. */
             automatic_readonly_tools?: boolean;
+            /**
+             * @description Support for version-1 public application tools. Missing on older servers; the client must discover this version before opting in.
+             * @enum {integer}
+             */
+            app_tools_version?: 1;
         };
         AiHistoryMessage: {
             /** @enum {string} */
             role: "user" | "assistant";
             content: string;
         };
-        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. */
+        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions. */
         AiChatRequest: {
             model: components["schemas"]["AiModel"];
             thinking: boolean;
@@ -1223,6 +1228,17 @@ export interface components {
             tool_invocation_ids?: string[];
             /** @description Optional host opt-in, valid only with plugin_connection_id. The server may execute its trusted built-in bank balance/history reads before returning a saved proposal. Transfer and untrusted remote tools still require explicit confirmation; readOnlyHint alone never authorizes automatic execution. */
             automatic_readonly_tools?: boolean;
+            /**
+             * @description Opt in to application tools after capability discovery. Requires thinking=false and is mutually exclusive with all plugin-mode fields.
+             * @enum {integer}
+             */
+            app_tools_version?: 1;
+            app_context?: components["schemas"]["AppToolContext"][];
+            /**
+             * @description Only with application version 1 and nonempty app_context. Disable further tool proposals and explain already obtained public results; used for explicit resume without re-querying.
+             * @default false
+             */
+            app_final_only: boolean;
         };
         AiUsage: {
             prompt_tokens: number;
@@ -1822,6 +1838,119 @@ export interface components {
         InsuranceConversationRequest: {
             /** @description Trimmed Unicode character count; NUL forbidden. Do not send personal or medical information. */
             message: string;
+        };
+        AppMarketQuery: {
+            /** @enum {string} */
+            kind: "crypto";
+            /** @enum {string} */
+            asset: "BTC" | "ETH" | "SOL";
+        } | {
+            /** @enum {string} */
+            kind: "filings";
+            /** @enum {string} */
+            company: "AAPL" | "MSFT" | "NVDA";
+        } | {
+            /** @enum {string} */
+            kind: "news";
+            /** @enum {string} */
+            topic: "fed" | "markets" | "crypto" | "technology";
+        };
+        /** @description One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization. */
+        AppToolProposal: {
+            /** @enum {string} */
+            name: "app_info";
+            arguments: {
+                /** @enum {string} */
+                module: "all" | "chat" | "history" | "market-data" | "insurance" | "installments" | "finance" | "wallet" | "plugins" | "plugin-workbench" | "video" | "creators" | "keys" | "social" | "profile";
+            };
+        } | {
+            /** @enum {string} */
+            name: "insurance_search";
+            arguments: {
+                query: string;
+                /** @enum {string} */
+                group?: "all" | "health" | "accident" | "life" | "motor" | "home" | "business" | "engineering" | "agriculture";
+            };
+        } | {
+            /** @enum {string} */
+            name: "insurance_compare";
+            arguments: {
+                ids: ("medical" | "outpatient" | "premium-medical" | "critical" | "cancer" | "city-medical" | "care" | "special-drug" | "personal-accident" | "travel" | "overseas" | "transport" | "senior-accident" | "term-life" | "whole-life" | "annuity" | "pension" | "participating" | "compulsory" | "motor-third" | "motor-damage" | "motor-occupant" | "ev" | "motor-riders" | "home-property" | "home-liability" | "pet" | "employer" | "group" | "public-liability" | "product-liability" | "professional" | "business-property" | "cyber" | "construction" | "machinery" | "cargo" | "marine" | "crop" | "livestock" | "forest" | "credit" | "surety")[];
+            };
+        } | {
+            /** @enum {string} */
+            name: "market_query";
+            arguments: components["schemas"]["AppMarketQuery"];
+        } | {
+            /** @enum {string} */
+            name: "app_open";
+            arguments: {
+                /** @enum {string} */
+                module: "chat" | "history" | "installments" | "finance" | "wallet" | "plugins" | "plugin-workbench" | "video" | "creators" | "keys" | "social" | "profile";
+            } | {
+                /** @enum {string} */
+                module: "insurance";
+                query?: string;
+            } | {
+                /** @enum {string} */
+                module: "insurance";
+                insuranceIds: ("medical" | "outpatient" | "premium-medical" | "critical" | "cancer" | "city-medical" | "care" | "special-drug" | "personal-accident" | "travel" | "overseas" | "transport" | "senior-accident" | "term-life" | "whole-life" | "annuity" | "pension" | "participating" | "compulsory" | "motor-third" | "motor-damage" | "motor-occupant" | "ev" | "motor-riders" | "home-property" | "home-liability" | "pet" | "employer" | "group" | "public-liability" | "product-liability" | "professional" | "business-property" | "cyber" | "construction" | "machinery" | "cargo" | "marine" | "crop" | "livestock" | "forest" | "credit" | "surety")[];
+            } | {
+                /** @enum {string} */
+                module: "market-data";
+                marketQuery?: components["schemas"]["AppMarketQuery"];
+            };
+        };
+        /** @description Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. */
+        AppToolContext: {
+            /** @enum {string} */
+            name: "app_info";
+            arguments: {
+                /** @enum {string} */
+                module: "all" | "chat" | "history" | "market-data" | "insurance" | "installments" | "finance" | "wallet" | "plugins" | "plugin-workbench" | "video" | "creators" | "keys" | "social" | "profile";
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "insurance_search";
+            arguments: {
+                query: string;
+                /** @enum {string} */
+                group?: "all" | "health" | "accident" | "life" | "motor" | "home" | "business" | "engineering" | "agriculture";
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "insurance_compare";
+            arguments: {
+                ids: ("medical" | "outpatient" | "premium-medical" | "critical" | "cancer" | "city-medical" | "care" | "special-drug" | "personal-accident" | "travel" | "overseas" | "transport" | "senior-accident" | "term-life" | "whole-life" | "annuity" | "pension" | "participating" | "compulsory" | "motor-third" | "motor-damage" | "motor-occupant" | "ev" | "motor-riders" | "home-property" | "home-liability" | "pet" | "employer" | "group" | "public-liability" | "product-liability" | "professional" | "business-property" | "cyber" | "construction" | "machinery" | "cargo" | "marine" | "crop" | "livestock" | "forest" | "credit" | "surety")[];
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "market_query";
+            arguments: components["schemas"]["AppMarketQuery"];
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "app_open";
+            arguments: {
+                /** @enum {string} */
+                module: "chat" | "history" | "installments" | "finance" | "wallet" | "plugins" | "plugin-workbench" | "video" | "creators" | "keys" | "social" | "profile";
+            } | {
+                /** @enum {string} */
+                module: "insurance";
+                query?: string;
+            } | {
+                /** @enum {string} */
+                module: "insurance";
+                insuranceIds: ("medical" | "outpatient" | "premium-medical" | "critical" | "cancer" | "city-medical" | "care" | "special-drug" | "personal-accident" | "travel" | "overseas" | "transport" | "senior-accident" | "term-life" | "whole-life" | "annuity" | "pension" | "participating" | "compulsory" | "motor-third" | "motor-damage" | "motor-occupant" | "ev" | "motor-riders" | "home-property" | "home-liability" | "pet" | "employer" | "group" | "public-liability" | "product-liability" | "professional" | "business-property" | "cyber" | "construction" | "machinery" | "cargo" | "marine" | "crop" | "livestock" | "forest" | "credit" | "surety")[];
+            } | {
+                /** @enum {string} */
+                module: "market-data";
+                marketQuery?: components["schemas"]["AppMarketQuery"];
+            };
+            result: string;
         };
     };
     responses: never;
