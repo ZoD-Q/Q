@@ -562,12 +562,14 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           {!active ? <View style={{ flex: 1 }} /> : page === "chat" ? (
             <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} />
           ) : page === 'market-data' ? (
-            <MarketDataPage active={active} onAnalyze={draft => {
-              chat.newFinancialAi();
-              chat.setDraft(draft);
-              navigate('chat');
-              return true;
-            }} />
+            <MarketDataPage key={chat.privacyEpoch} active={active} signedIn={Boolean(chat.session)}
+              conversations={chat.items.filter(item => !item.localOnly && !item.plugin && !item.messages.some(message => message.localFinance || message.financeResult)).map(item => ({ id: item.id, title: item.title }))}
+              historyBusy={chat.historyBusy} historyError={Boolean(chat.historyError)} hasMoreHistory={Boolean(chat.historyCursor)} onLoadHistory={more => { void chat.loadHistory(more); }}
+              onAnalyze={async (draft, conversationId, signal) => {
+                const prepared = await chat.prepareResearchDraft(draft, conversationId, signal);
+                if (prepared && !signal?.aborted) navigate('chat');
+                return prepared;
+              }} />
           ) : page === "video" ? (
             <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
           ) : page === "creators" ? (

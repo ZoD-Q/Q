@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Linking, Pressable, View } from 'react-native';
-import { ExternalLink, type LucideIcon } from 'lucide-react-native';
+import { ExternalLink, MessageSquare, type LucideIcon } from 'lucide-react-native';
 import { Page, Row, Sheet, Type, useDesign } from '../design';
 import { buildResearchDraft, marketErrorText, marketLimitationText, marketQueryKey, type MarketQuery, type MarketReport } from './core';
 import { useMarketData } from './use-market-data';
@@ -54,12 +54,12 @@ function ResultRecords({ report, preview }: { report: MarketReport; preview: (li
     {report.records.slice(0, 20).map(record => <View key={record.id} style={{ gap: 16 }}>
       <Type size={17} weight="600">{record.name} · {record.symbol}</Type>
       <View style={{ gap: 2 }}><Type size={32} weight="600" selectable>{number(record.priceUsd, true)}</Type><Type size={13} muted>{text('报价币种：USD（美元）', 'Quote currency: USD')}</Type></View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
+      {record.change24hPct !== null || record.volume24hUsd !== null || record.marketCapUsd !== null ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
         <View style={{ gap: 4 }}><Type size={13} muted>{text('24 小时变化', '24-hour change')}</Type><Type selectable weight="500">{record.change24hPct === null ? unavailable : `${record.change24hPct > 0 ? '+' : ''}${number(record.change24hPct)}%`}</Type></View>
         <View style={{ gap: 4 }}><Type size={13} muted>{text('24 小时成交量 · USD', '24-hour volume · USD')}</Type><Type selectable>{number(record.volume24hUsd, true)}</Type></View>
         <View style={{ gap: 4 }}><Type size={13} muted>{text('市值 · USD', 'Market cap · USD')}</Type><Type selectable>{number(record.marketCapUsd, true)}</Type></View>
-      </View>
-      <Type size={13} muted>{text('源方报价时间：', 'Provider quote time: ')}{timestamp(record.asOf, unavailable)}</Type>
+      </View> : null}
+      <Type size={13} muted>{text('源方更新时间：', 'Provider quote time: ')}{timestamp(record.asOf, unavailable)}</Type>
     </View>)}
   </View>;
   if (report.kind === 'filings') return <View style={{ gap: 20 }}>
@@ -89,28 +89,55 @@ function ResultRecords({ report, preview }: { report: MarketReport; preview: (li
   </View>;
 }
 
-export function MarketDataPage({ active, onAnalyze }: { active: boolean; onAnalyze: (draft: string) => boolean }) {
+export function MarketDataPage({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false }: {
+  active: boolean; onAnalyze: (draft: string, conversationId?: string, signal?: AbortSignal) => Promise<boolean>;
+  conversations?: { id: string; title: string }[]; historyBusy?: boolean; historyError?: boolean; hasMoreHistory?: boolean;
+  onLoadHistory?: (more: boolean) => void; signedIn?: boolean;
+}) {
   const { text, colors, locale } = useDesign();
   const [query, setQuery] = useState<MarketQuery>({ kind: 'crypto', asset: 'BTC' });
   const [outbound, setOutbound] = useState<Outbound | null>(null);
   const [sourceDetails, setSourceDetails] = useState(false);
   const [linkError, setLinkError] = useState(false);
   const [handoffError, setHandoffError] = useState(false);
+  const [handoffReport, setHandoffReport] = useState<MarketReport | null>(null);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const handoff = useRef<AbortController | null>(null);
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    if (!active) { setHandoffReport(null); setHandoffBusy(false); }
+  }
+  useEffect(() => {
+    if (!active) { handoff.current?.abort(); handoff.current = null; }
+    return () => { handoff.current?.abort(); handoff.current = null; };
+  }, [active]);
   const market = useMarketData(query, active);
-  const blocked = query.kind === 'crypto' && !__DEV__;
   const loading = market.phase === 'loading';
   const oldResult = Boolean(market.report && (market.stale || market.phase === 'error' || market.phase === 'cancelled'));
-  const currentProvider = query.kind === 'crypto' ? 'CoinPaprika' : query.kind === 'filings' ? 'SEC EDGAR' : query.topic === 'fed' ? text('美联储', 'Federal Reserve') : 'GDELT';
-  const providerUrl = query.kind === 'crypto' ? 'https://docs.coinpaprika.com/' : query.kind === 'filings' ? 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' : query.topic === 'fed' ? 'https://www.federalreserve.gov/feeds/feeds.htm' : 'https://www.gdeltproject.org/';
+  const currentProvider = query.kind === 'crypto' ? 'Chainlink · Ethereum' : query.kind === 'filings' ? 'SEC EDGAR' : query.topic === 'fed' ? text('美联储', 'Federal Reserve') : 'GDELT';
+  const providerUrl = query.kind === 'crypto' ? 'https://docs.chain.link/data-feeds/using-data-feeds' : query.kind === 'filings' ? 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' : query.topic === 'fed' ? 'https://www.federalreserve.gov/feeds/feeds.htm' : 'https://www.gdeltproject.org/';
   const choose = (next: MarketQuery) => { if (marketQueryKey(next) === marketQueryKey(query)) return; market.cancel(); setHandoffError(false); setQuery(next); };
   const preview = (link: Outbound) => { setLinkError(false); setSourceDetails(false); setOutbound(link); };
   const openLink = async () => {
     if (!outbound || !publicHost(outbound.url)) { setLinkError(true); return; }
     try { await Linking.openURL(outbound.url); setOutbound(null); } catch { setLinkError(true); }
   };
-  const sendToChat = () => {
-    if (!market.report || loading || !active) return;
-    setHandoffError(!onAnalyze(buildResearchDraft({ ...market.report, freshness: oldResult ? 'stale' : market.report.freshness }, locale)));
+  const closeHandoff = () => { handoff.current?.abort(); handoff.current = null; setHandoffReport(null); setHandoffBusy(false); setHandoffError(false); };
+  const openHandoff = () => {
+    if (!market.report?.records.length || loading || !active) return;
+    setHandoffError(false);
+    setHandoffReport({ ...market.report, freshness: oldResult ? 'stale' : market.report.freshness });
+  };
+  const sendToChat = async (conversationId?: string) => {
+    if (!handoffReport || !active || handoff.current) return;
+    const controller = new AbortController(); handoff.current = controller;
+    setHandoffBusy(true); setHandoffError(false);
+    try {
+      const ok = await onAnalyze(buildResearchDraft(handoffReport, locale), conversationId, controller.signal);
+      if (!controller.signal.aborted) { if (ok) setHandoffReport(null); else setHandoffError(true); }
+    } catch { if (!controller.signal.aborted) setHandoffError(true); }
+    finally { if (handoff.current === controller) { handoff.current = null; setHandoffBusy(false); } }
   };
   return <Page title={text('市场资料', 'Market research')} description={text('按需查看公开行情、公司公告和新闻标题，核对来源后整理分析草稿。', 'Look up public quotes, company filings and news headlines, then prepare a research draft with its sources.')} action={<Button label={text('数据来源', 'Data sources')} onPress={() => setSourceDetails(true)} />}>
     <Group>
@@ -126,13 +153,13 @@ export function MarketDataPage({ active, onAnalyze }: { active: boolean; onAnaly
         {query.kind === 'news' ? ([['fed', '美联储', 'Federal Reserve'], ['markets', '金融市场', 'Markets'], ['crypto', '加密资产', 'Crypto'], ['technology', '科技', 'Technology']] as const).map(([topic, zh, en]) => <Button key={topic} label={text(zh, en)} selected={query.topic === topic} onPress={() => choose({ kind: 'news', topic })} />) : null}
       </Group>
       <Type size={13} muted>{text('来源：', 'Source: ')}{currentProvider}{text(' · 仅公开资料 · 点击后查询', ' · Public data only · Query on tap')}</Type>
-      {query.kind === 'crypto' ? <Type size={13} muted>{blocked ? text('正式版本暂停 CoinPaprika 查询：商业使用许可仍待核实。可查看公开说明，不能获取行情。', 'CoinPaprika queries are disabled in release builds while commercial-use permission is unverified. Public documentation remains available.') : text('开发研究模式：CoinPaprika 仅供非商业开发研究；报价可能延迟，不是实时交易报价。', 'Development research only: CoinPaprika is restricted to noncommercial development research. Quotes may be delayed and are not live trading prices.')}</Type> : null}
+      {query.kind === 'crypto' ? <Type size={13} muted>{text('读取以太坊上的 Chainlink 美元参考价，仅提供价格与更新时间；这是预言机参考值，不是交易所实时成交报价。', 'Reads Chainlink USD reference prices on Ethereum, with price and update time only. These oracle values are not live exchange trade quotes.')}</Type> : null}
       {query.kind === 'filings' ? <Type size={13} muted>{text('查询 SEC 公开申报摘要，不包含股票报价。', 'Queries SEC public filing metadata; stock prices are not included.')}</Type> : null}
       {query.kind === 'news' && query.topic !== 'fed' ? <Type size={13} muted>{text('GDELT 仅提供标题与索引信息。限流或暂不可用时会显示错误，不替换为其他来源。', 'GDELT supplies headline and index metadata. Rate limits or unavailable data are shown explicitly; no other source is substituted.')}</Type> : null}
     </View>
     <View style={{ gap: 12 }}>
       <Group>
-        <Button primary label={loading ? text('正在查询…', 'Querying…') : market.report ? text('刷新资料', 'Refresh data') : market.phase === 'error' ? text('重试查询', 'Retry query') : text('查询公开资料', 'Query public data')} disabled={!active || blocked || loading || market.coolingDown} onPress={market.run} />
+        <Button primary label={loading ? text('正在查询…', 'Querying…') : market.report ? text('刷新资料', 'Refresh data') : market.phase === 'error' ? text('重试查询', 'Retry query') : text('查询公开资料', 'Query public data')} disabled={!active || loading || market.coolingDown} onPress={market.run} />
         {loading ? <Button label={text('取消查询', 'Cancel query')} onPress={market.cancel} /> : null}
         <Button icon={ExternalLink} label={text('来源说明', 'Source details')} onPress={() => preview({ title: currentProvider, url: providerUrl })} />
       </Group>
@@ -153,19 +180,33 @@ export function MarketDataPage({ active, onAnalyze }: { active: boolean; onAnaly
         <Type size={13} muted selectable>{text('资料截至（源方）：', 'As of (provider): ')}{timestamp(market.report.asOf, text('未提供', 'Not provided'))}</Type>
         <Type size={13} muted selectable>{text('本次获取：', 'Fetched at: ')}{timestamp(market.report.fetchedAt, text('未提供', 'Not provided'))}</Type>
         <Type size={13} muted>{market.stale ? text('资料已过期或源方时间较旧，请在允许时刷新。', 'Data has expired or the provider timestamp is old. Refresh when available.') : market.report.freshness === 'unknown' ? text('无法确认资料新鲜度。', 'Data freshness cannot be confirmed.') : text('仍可能存在源方延迟；不保证实时。', 'Provider delays may still apply; real-time data is not guaranteed.')}</Type>
-        <View style={{ alignSelf: 'flex-start' }}><Button icon={ExternalLink} label={text('本次资料来源', 'Source of this result')} onPress={() => preview({ title: market.report!.source.name, url: market.report!.source.url })} /></View>
+        <Group>
+          <Button icon={ExternalLink} label={text('本次资料来源', 'Source of this result')} onPress={() => preview({ title: market.report!.source.name, url: market.report!.source.referenceUrl ?? market.report!.source.url })} />
+          <Button primary icon={MessageSquare} label={text('用于对话', 'Use in chat')} disabled={!active || loading || market.report.records.length === 0} onPress={openHandoff} />
+        </Group>
+        <Type size={13} muted>{text('选择新对话或历史对话，资料会填入草稿，由你确认发送。', 'Choose a new or existing chat. Review the draft before sending it yourself.')}</Type>
       </View>
       {!market.report.records.length ? <Type muted>{text('此次查询没有返回记录。', 'No records returned by this query.')}</Type> : <ResultRecords report={market.report} preview={preview} />}
       <View style={{ gap: 6 }}>{market.report.limitations.map(item => <Type key={item} size={13} muted>{marketLimitationText(item, locale)}</Type>)}</View>
       <View style={{ gap: 10, alignItems: 'flex-start' }}>
-        <Button primary label={text('交给小Q分析', 'Analyze with Q')} disabled={!active || loading || market.report.records.length === 0} onPress={sendToChat} />
-        <Type size={13} muted>{text('仅将这份公开资料整理成新对话草稿，不会自动发送。可先检查、修改，再自行发送。', 'Prepares a new chat draft with this public data only. It is not sent automatically; review and edit it before sending.')}</Type>
-        {handoffError ? <Type color={colors.danger} size={13}>{text('暂时无法打开分析草稿，请先结束正在进行的对话，再重试。', 'Cannot open the research draft right now. Finish the current conversation activity and retry.')}</Type> : null}
+        <Button primary label={text('用于对话', 'Use in chat')} disabled={!active || loading || market.report.records.length === 0} onPress={openHandoff} />
       </View>
     </View> : null}
+    <Sheet visible={active && Boolean(handoffReport)} title={text('选择对话', 'Choose a chat')} onClose={closeHandoff}>
+      <Type muted>{text('只带入这次查询的公开资料。不会自动发送，也不会覆盖已有草稿。', 'Use only this public result. Nothing is sent automatically and existing drafts are preserved.')}</Type>
+      <Button primary icon={MessageSquare} label={handoffBusy ? text('正在准备草稿…', 'Preparing draft…') : text('新建小Q对话', 'New chat with Q')} disabled={handoffBusy || historyBusy} onPress={() => void sendToChat()} />
+      <Type weight="600">{text('历史对话', 'Existing chats')}</Type>
+      {!signedIn ? <Type muted>{text('登录后可选择历史对话；也可先新建对话。', 'Sign in to use chat history, or start a new chat.')}</Type> : null}
+      {historyBusy ? <Type muted>{text('正在读取历史对话…', 'Loading chat history…')}</Type> : null}
+      {historyError ? <><Type color={colors.danger}>{text('历史对话暂时无法读取。', 'Chat history could not be loaded.')}</Type><Button label={text('重新读取', 'Retry history')} disabled={handoffBusy || historyBusy} onPress={() => onLoadHistory?.(false)} /></> : null}
+      {conversations.map(item => <Button key={item.id} label={item.title} disabled={handoffBusy || historyBusy} onPress={() => void sendToChat(item.id)} />)}
+      {signedIn && !historyBusy && !historyError && !conversations.length ? <Type muted>{text('暂无可用的普通 AI 对话；本地记录和插件对话不在此列。', 'No ordinary AI chats available. Local records and plugin chats are excluded.')}</Type> : null}
+      {hasMoreHistory ? <Button label={text('加载更多对话', 'Load more chats')} disabled={handoffBusy || historyBusy} onPress={() => onLoadHistory?.(true)} /> : null}
+      {handoffError ? <Type color={colors.danger}>{text('未能带入资料。请先处理未发送的草稿或进行中的对话；也可重新读取历史后再试。', 'Could not prepare the draft. Finish any ongoing chat or unsent draft, or reload history and retry.')}</Type> : null}
+    </Sheet>
     <Sheet visible={active && sourceDetails} title={text('来源与可用范围', 'Sources and availability')} onClose={() => setSourceDetails(false)}>
       <Type size={14} muted>{text('公开网址不等于业务已连接。来源只有在查询成功后才显示获取时间；本页不读取账户、凭据或个人财务资料。', 'A public URL does not establish a connection. A fetch time appears only after a successful query. This page does not read accounts, credentials or personal financial records.')}</Type>
-      <Row title="CoinPaprika" subtitle={text('仅开发研究；正式版本禁用，商业许可待核实。', 'Development research only; disabled in release builds while commercial permission is unverified.')} onPress={() => preview({ title: 'CoinPaprika', url: 'https://docs.coinpaprika.com/' })} />
+      <Row title="Chainlink · Ethereum" subtitle={text('公开链上只读参考价；无需钱包或交易，来源更新时间与获取时间分开显示。', 'Public on-chain reference prices, read-only without a wallet or transaction. Source update and retrieval times are shown separately.')} onPress={() => preview({ title: 'Chainlink Data Feeds', url: 'https://docs.chain.link/data-feeds/using-data-feeds' })} />
       <Row title="SEC EDGAR" subtitle={text('按需查询公开申报元数据；未查询不代表已连接。', 'On-demand public filing metadata. Availability is not a completed connection.')} onPress={() => preview({ title: 'SEC EDGAR', url: 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' })} />
       <Row title={text('美联储 / GDELT', 'Federal Reserve / GDELT')} subtitle={text('公开新闻源；GDELT 可能限流，未抓取文章全文。', 'Public news sources; GDELT may rate-limit requests. Article bodies are not fetched.')} last />
       <Type size={16} weight="600">{text('需官方权限，未连接', 'Official access required · Not connected')}</Type>

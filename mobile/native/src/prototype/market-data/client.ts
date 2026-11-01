@@ -1,5 +1,5 @@
 import {
-  MarketDataError, marketSource, parseCryptoReport, parseFedReport, parseFilingsReport,
+  MarketDataError, marketSource, cryptoReadRequest, parseCryptoReport, parseFedReport, parseFilingsReport,
   parseGdeltReport, validateMarketQuery,
 } from './core';
 import type { MarketQuery, MarketReport } from './core';
@@ -10,7 +10,6 @@ export const MARKET_TIMEOUT_MS = 10_000;
 export type MarketRequestOptions = {
   transport: typeof fetch;
   signal?: AbortSignal;
-  allowDevelopmentSources?: boolean;
 };
 
 function retryAfter(value: string | null): number | null {
@@ -62,13 +61,12 @@ async function readBounded(response: Response, signal: AbortSignal, abortError: 
   }
 }
 
-/** One anonymous fixed-source GET. No account, credential, storage or retry access. */
+/** One anonymous fixed-source read request. No account, credential, storage or retry access. */
 export async function requestMarketReport(query: MarketQuery, options: MarketRequestOptions): Promise<MarketReport> {
   let valid: MarketQuery;
   try { valid = validateMarketQuery(query); }
   catch { throw new MarketDataError('invalid_query'); }
   const source = marketSource(valid);
-  if (source.developmentOnly && options.allowDevelopmentSources !== true) throw new MarketDataError('development_only');
   if (options.signal?.aborted) throw new MarketDataError('cancelled');
   const controller = new AbortController();
   let timedOut = false;
@@ -79,8 +77,10 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
   try {
     const headers: Record<string, string> = { Accept: source.id === 'federal-reserve' ? 'application/rss+xml, application/xml, text/xml' : 'application/json' };
     if (source.id === 'sec') headers['User-Agent'] = 'Q-Public-Research/0.1 (+https://q.kaicloudpay.com)';
+    if (valid.kind === 'crypto') headers['Content-Type'] = 'application/json';
     const pending = options.transport(source.url, {
-      method: 'GET', headers, credentials: 'omit', redirect: 'error', cache: 'no-store',
+      method: valid.kind === 'crypto' ? 'POST' : 'GET',
+      ...(valid.kind === 'crypto' ? { body: JSON.stringify(cryptoReadRequest(valid)) } : {}), headers, credentials: 'omit', redirect: 'error', cache: 'no-store',
       referrerPolicy: 'no-referrer', signal: controller.signal,
     }).then(response => {
       if (controller.signal.aborted) {

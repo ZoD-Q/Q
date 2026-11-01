@@ -22,7 +22,7 @@ export const createMarketDataMemory = (): MarketDataMemory => ({ cache: new Map(
 const publicMemory = createMarketDataMemory();
 
 const idle = (key: string): MarketDataState => ({ key, phase: 'idle', report: null, error: null, fromCache: false, expiresAt: null, nextAllowedAt: null });
-const sourceKey = (query: MarketQuery) => query.kind === 'news' ? query.topic === 'fed' ? 'federal-reserve' : 'gdelt' : query.kind === 'filings' ? 'sec' : 'coinpaprika';
+const sourceKey = (query: MarketQuery) => query.kind === 'news' ? query.topic === 'fed' ? 'federal-reserve' : 'gdelt' : query.kind === 'filings' ? 'sec' : 'chainlink';
 const lifetime = (query: MarketQuery) => query.kind === 'news' && query.topic !== 'fed' ? 15 * 60_000 : 5 * 60_000;
 const minimumInterval = (query: MarketQuery) => query.kind === 'filings' ? 1_000 : query.kind === 'news' && query.topic !== 'fed' ? 5_000 : 2_000;
 
@@ -142,7 +142,7 @@ export function useMarketData(query: MarketQuery, active: boolean) {
     current.current = { query, key, active };
     if (!session.current) {
       session.current = new MarketDataSession(query, {
-        request: (selected, signal) => requestMarketReport(selected, { transport: expoFetch, signal, allowDevelopmentSources: __DEV__ }),
+        request: (selected, signal) => requestMarketReport(selected, { transport: expoFetch, signal }),
         onChange: next => { setState(next); setClock(Date.now()); },
         isCurrent: selectedKey => current.current.active && foreground.current && current.current.key === selectedKey,
         memory: publicMemory,
