@@ -724,7 +724,7 @@
             }
           }
         },
-        "description": "Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. By default a proposal is persisted without execution. When automatic_readonly_tools is opted in after capability discovery, the host may complete only its trusted built-in balance/history reads and mark automatic=true; transfers and untrusted remote tools still await confirmation. Clients read the saved invocation and may continue once using completed invocation IDs, after durable history save. Images/resources are displayed natively; raw tool results are not client-supplied model context."
+        "description": "Optional plugin mode emits tool_proposal (PluginToolProposal) before done with finish_reason=tool_calls. By default a proposal is persisted without execution. When automatic_readonly_tools is opted in after capability discovery, the host may complete only its trusted built-in balance/history reads and mark automatic=true; transfers and untrusted remote tools still await confirmation. Clients read the saved invocation and may continue once using completed invocation IDs, after durable history save. Images/resources are displayed natively; raw tool results are not client-supplied model context. Version-1 application mode additionally emits app_tool (AppToolProposal), followed by done with finish_reason=tool_calls. The client may execute only its fixed public read handlers; app_open produces a user-clicked native navigation card. It may continue with at most three bounded AppToolContext records. Reloading history never replays an application tool. Application context is separate from server-owned plugin invocation results."
       }
     },
     "/v1/plugins/status": {
@@ -4504,6 +4504,13 @@
           "automatic_readonly_tools": {
             "type": "boolean",
             "description": "Host support for explicitly opted-in automatic trusted read-only plugin queries. Missing on older servers; clients must omit the request flag unless true."
+          },
+          "app_tools_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ],
+            "description": "Support for version-1 public application tools. Missing on older servers; the client must discover this version before opting in."
           }
         }
       },
@@ -4569,9 +4576,28 @@
           "automatic_readonly_tools": {
             "type": "boolean",
             "description": "Optional host opt-in, valid only with plugin_connection_id. The server may execute its trusted built-in bank balance/history reads before returning a saved proposal. Transfer and untrusted remote tools still require explicit confirmation; readOnlyHint alone never authorizes automatic execution."
+          },
+          "app_tools_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ],
+            "description": "Opt in to application tools after capability discovery. Requires thinking=false and is mutually exclusive with all plugin-mode fields."
+          },
+          "app_context": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/AppToolContext"
+            }
+          },
+          "app_final_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "Only with application version 1 and nonempty app_context. Disable further tool proposals and explain already obtained public results; used for explicit resume without re-querying."
           }
         },
-        "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool."
+        "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions."
       },
       "AiUsage": {
         "type": "object",
@@ -6887,6 +6913,801 @@
             "description": "Trimmed Unicode character count; NUL forbidden. Do not send personal or medical information."
           }
         }
+      },
+      "AppMarketQuery": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "asset"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "crypto"
+                ]
+              },
+              "asset": {
+                "type": "string",
+                "enum": [
+                  "BTC",
+                  "ETH",
+                  "SOL"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "company"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "filings"
+                ]
+              },
+              "company": {
+                "type": "string",
+                "enum": [
+                  "AAPL",
+                  "MSFT",
+                  "NVDA"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "topic"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "news"
+                ]
+              },
+              "topic": {
+                "type": "string",
+                "enum": [
+                  "fed",
+                  "markets",
+                  "crypto",
+                  "technology"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "AppToolProposal": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "app_info"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "module"
+                ],
+                "properties": {
+                  "module": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "chat",
+                      "history",
+                      "market-data",
+                      "insurance",
+                      "installments",
+                      "finance",
+                      "wallet",
+                      "plugins",
+                      "plugin-workbench",
+                      "video",
+                      "creators",
+                      "keys",
+                      "social",
+                      "profile"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "insurance_search"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "group": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "health",
+                      "accident",
+                      "life",
+                      "motor",
+                      "home",
+                      "business",
+                      "engineering",
+                      "agriculture"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "insurance_compare"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ids"
+                ],
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 3,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "medical",
+                        "outpatient",
+                        "premium-medical",
+                        "critical",
+                        "cancer",
+                        "city-medical",
+                        "care",
+                        "special-drug",
+                        "personal-accident",
+                        "travel",
+                        "overseas",
+                        "transport",
+                        "senior-accident",
+                        "term-life",
+                        "whole-life",
+                        "annuity",
+                        "pension",
+                        "participating",
+                        "compulsory",
+                        "motor-third",
+                        "motor-damage",
+                        "motor-occupant",
+                        "ev",
+                        "motor-riders",
+                        "home-property",
+                        "home-liability",
+                        "pet",
+                        "employer",
+                        "group",
+                        "public-liability",
+                        "product-liability",
+                        "professional",
+                        "business-property",
+                        "cyber",
+                        "construction",
+                        "machinery",
+                        "cargo",
+                        "marine",
+                        "crop",
+                        "livestock",
+                        "forest",
+                        "credit",
+                        "surety"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "market_query"
+                ]
+              },
+              "arguments": {
+                "$ref": "#/components/schemas/AppMarketQuery"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "app_open"
+                ]
+              },
+              "arguments": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "history",
+                          "installments",
+                          "finance",
+                          "wallet",
+                          "plugins",
+                          "plugin-workbench",
+                          "video",
+                          "creators",
+                          "keys",
+                          "social",
+                          "profile"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "insurance"
+                        ]
+                      },
+                      "query": {
+                        "type": "string",
+                        "maxLength": 120
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module",
+                      "insuranceIds"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "insurance"
+                        ]
+                      },
+                      "insuranceIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 3,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "medical",
+                            "outpatient",
+                            "premium-medical",
+                            "critical",
+                            "cancer",
+                            "city-medical",
+                            "care",
+                            "special-drug",
+                            "personal-accident",
+                            "travel",
+                            "overseas",
+                            "transport",
+                            "senior-accident",
+                            "term-life",
+                            "whole-life",
+                            "annuity",
+                            "pension",
+                            "participating",
+                            "compulsory",
+                            "motor-third",
+                            "motor-damage",
+                            "motor-occupant",
+                            "ev",
+                            "motor-riders",
+                            "home-property",
+                            "home-liability",
+                            "pet",
+                            "employer",
+                            "group",
+                            "public-liability",
+                            "product-liability",
+                            "professional",
+                            "business-property",
+                            "cyber",
+                            "construction",
+                            "machinery",
+                            "cargo",
+                            "marine",
+                            "crop",
+                            "livestock",
+                            "forest",
+                            "credit",
+                            "surety"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "market-data"
+                        ]
+                      },
+                      "marketQuery": {
+                        "$ref": "#/components/schemas/AppMarketQuery"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization."
+      },
+      "AppToolContext": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "app_info"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "module"
+                ],
+                "properties": {
+                  "module": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "chat",
+                      "history",
+                      "market-data",
+                      "insurance",
+                      "installments",
+                      "finance",
+                      "wallet",
+                      "plugins",
+                      "plugin-workbench",
+                      "video",
+                      "creators",
+                      "keys",
+                      "social",
+                      "profile"
+                    ]
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "insurance_search"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "group": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "health",
+                      "accident",
+                      "life",
+                      "motor",
+                      "home",
+                      "business",
+                      "engineering",
+                      "agriculture"
+                    ]
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "insurance_compare"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ids"
+                ],
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 3,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "medical",
+                        "outpatient",
+                        "premium-medical",
+                        "critical",
+                        "cancer",
+                        "city-medical",
+                        "care",
+                        "special-drug",
+                        "personal-accident",
+                        "travel",
+                        "overseas",
+                        "transport",
+                        "senior-accident",
+                        "term-life",
+                        "whole-life",
+                        "annuity",
+                        "pension",
+                        "participating",
+                        "compulsory",
+                        "motor-third",
+                        "motor-damage",
+                        "motor-occupant",
+                        "ev",
+                        "motor-riders",
+                        "home-property",
+                        "home-liability",
+                        "pet",
+                        "employer",
+                        "group",
+                        "public-liability",
+                        "product-liability",
+                        "professional",
+                        "business-property",
+                        "cyber",
+                        "construction",
+                        "machinery",
+                        "cargo",
+                        "marine",
+                        "crop",
+                        "livestock",
+                        "forest",
+                        "credit",
+                        "surety"
+                      ]
+                    }
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "market_query"
+                ]
+              },
+              "arguments": {
+                "$ref": "#/components/schemas/AppMarketQuery"
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "app_open"
+                ]
+              },
+              "arguments": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "history",
+                          "installments",
+                          "finance",
+                          "wallet",
+                          "plugins",
+                          "plugin-workbench",
+                          "video",
+                          "creators",
+                          "keys",
+                          "social",
+                          "profile"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "insurance"
+                        ]
+                      },
+                      "query": {
+                        "type": "string",
+                        "maxLength": 120
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module",
+                      "insuranceIds"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "insurance"
+                        ]
+                      },
+                      "insuranceIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 3,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "medical",
+                            "outpatient",
+                            "premium-medical",
+                            "critical",
+                            "cancer",
+                            "city-medical",
+                            "care",
+                            "special-drug",
+                            "personal-accident",
+                            "travel",
+                            "overseas",
+                            "transport",
+                            "senior-accident",
+                            "term-life",
+                            "whole-life",
+                            "annuity",
+                            "pension",
+                            "participating",
+                            "compulsory",
+                            "motor-third",
+                            "motor-damage",
+                            "motor-occupant",
+                            "ev",
+                            "motor-riders",
+                            "home-property",
+                            "home-liability",
+                            "pet",
+                            "employer",
+                            "group",
+                            "public-liability",
+                            "product-liability",
+                            "professional",
+                            "business-property",
+                            "cyber",
+                            "construction",
+                            "machinery",
+                            "cargo",
+                            "marine",
+                            "crop",
+                            "livestock",
+                            "forest",
+                            "credit",
+                            "surety"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "module"
+                    ],
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "enum": [
+                          "market-data"
+                        ]
+                      },
+                      "marketQuery": {
+                        "$ref": "#/components/schemas/AppMarketQuery"
+                      }
+                    }
+                  }
+                ]
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
+          }
+        ],
+        "description": "Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results."
       }
     }
   }

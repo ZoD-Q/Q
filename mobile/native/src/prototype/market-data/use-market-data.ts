@@ -19,7 +19,7 @@ type Entry = { report: MarketReport; expiresAt: number };
 type MarketDataMemory = { cache: Map<string, Entry>; cooldowns: Map<string, number> };
 export const createMarketDataMemory = (): MarketDataMemory => ({ cache: new Map(), cooldowns: new Map() });
 // Public data only. Navigation/remounting must not bypass provider cooldowns.
-const publicMemory = createMarketDataMemory();
+export const publicMemory = createMarketDataMemory();
 
 const idle = (key: string): MarketDataState => ({ key, phase: 'idle', report: null, error: null, fromCache: false, expiresAt: null, nextAllowedAt: null });
 const sourceKey = (query: MarketQuery) => query.kind === 'news' ? query.topic === 'fed' ? 'federal-reserve' : 'gdelt' : query.kind === 'filings' ? 'sec' : 'chainlink';

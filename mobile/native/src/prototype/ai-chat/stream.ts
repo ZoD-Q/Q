@@ -1,3 +1,4 @@
+import { validateAppCommand, type AppCommand } from '../app-assistant/core';
 export class ChatError extends Error {
   readonly code: string;
   readonly status: number;
@@ -22,8 +23,10 @@ export type ChatEvent =
   | { type: "status"; phase: "thinking" | "responding" }
   | { type: "delta"; text: string }
   | { type: "tool_proposal"; invocation_id: string; connection_id: string; tool_name: string; arguments: Record<string, unknown>; automatic?: boolean }
+  | ({ type: "app_tool" } & AppCommand)
   | { type: "done"; model: Model; finish_reason: FinishReason; usage?: Usage };
-export type ChatRequest = { model: string; thinking: boolean; messages: { role: "user" | "assistant"; content: string }[]; plugin_connection_id?: string; tool_invocation_ids?: string[]; automatic_readonly_tools?: boolean };
+export type AppToolContext = AppCommand & { result: string };
+export type ChatRequest = { model: string; thinking: boolean; messages: { role: "user" | "assistant"; content: string }[]; plugin_connection_id?: string; tool_invocation_ids?: string[]; automatic_readonly_tools?: boolean; app_tools_version?: 1; app_context?: AppToolContext[]; app_final_only?: boolean };
 export type StreamChatOptions = {
   baseUrl: string;
   token: string;
@@ -49,7 +52,7 @@ function textLength(value: unknown, max: number): number | null {
   return length;
 }
 
-export function decodeAiStatus(value: unknown): { configured: boolean; models: { id: Model; name: string }[]; automatic_readonly_tools?: boolean } {
+export function decodeAiStatus(value: unknown): { configured: boolean; models: { id: Model; name: string }[]; automatic_readonly_tools?: boolean; app_tools_version?: 1 } {
   if (!record(value) || typeof value.configured !== "boolean" || !Array.isArray(value.models) || value.models.length > MODELS.length) return invalidResponse();
   const ids = new Set<string>();
   const models = value.models.map(item => {
@@ -58,7 +61,8 @@ export function decodeAiStatus(value: unknown): { configured: boolean; models: {
     return { id: item.id, name: item.name };
   });
   if (value.automatic_readonly_tools !== undefined && typeof value.automatic_readonly_tools !== 'boolean') return invalidResponse();
-  return { configured: value.configured, models, ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
+  if (value.app_tools_version !== undefined && value.app_tools_version !== 1) return invalidResponse();
+  return { configured: value.configured, models, ...(value.app_tools_version === 1 ? { app_tools_version: 1 as const } : {}), ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
 }
 
 function validateRequest(value: ChatRequest): ChatRequest {
@@ -74,7 +78,32 @@ function validateRequest(value: ChatRequest): ChatRequest {
   if (value.plugin_connection_id !== undefined && (!uuid(value.plugin_connection_id) || value.thinking)) throw new ChatError('VALIDATION_ERROR');
   if (value.tool_invocation_ids !== undefined && (!value.plugin_connection_id || !Array.isArray(value.tool_invocation_ids) || value.tool_invocation_ids.length > 8 || !value.tool_invocation_ids.every(uuid) || new Set(value.tool_invocation_ids).size !== value.tool_invocation_ids.length)) throw new ChatError('VALIDATION_ERROR');
   if (value.automatic_readonly_tools !== undefined && (typeof value.automatic_readonly_tools !== 'boolean' || (value.automatic_readonly_tools && !value.plugin_connection_id))) throw new ChatError('VALIDATION_ERROR');
-  return { model: value.model, thinking: value.thinking, messages, ...(value.plugin_connection_id ? { plugin_connection_id: value.plugin_connection_id, tool_invocation_ids: value.tool_invocation_ids ?? [] } : {}), ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
+  if (value.app_tools_version !== undefined && (value.app_tools_version !== 1 || value.thinking || value.plugin_connection_id !== undefined || value.tool_invocation_ids !== undefined || value.automatic_readonly_tools !== undefined)) throw new ChatError('VALIDATION_ERROR');
+  let appContext: AppToolContext[] | undefined;
+  if (value.app_context !== undefined) {
+    if (value.app_tools_version !== 1 || !Array.isArray(value.app_context) || value.app_context.length > 3) throw new ChatError('VALIDATION_ERROR');
+    let resultChars = 0;
+    appContext = value.app_context.map(item => {
+      if (!record(item) || Object.keys(item).some(key => !['name', 'arguments', 'result'].includes(key)) || typeof item.result !== 'string' || !item.result.trim()) throw new ChatError('VALIDATION_ERROR');
+      const length = textLength(item.result, 10000);
+      if (length === null || (resultChars += length) > 24000) throw new ChatError('VALIDATION_ERROR');
+      try { return { ...validateAppCommand({ name: item.name, arguments: item.arguments }), result: item.result }; }
+      catch { throw new ChatError('VALIDATION_ERROR'); }
+    });
+  }
+  if (value.app_final_only !== undefined && (typeof value.app_final_only !== 'boolean' || value.app_tools_version !== 1 || (value.app_final_only && !appContext?.length))) throw new ChatError('VALIDATION_ERROR');
+  return { model: value.model, thinking: value.thinking, messages, ...(value.app_final_only === undefined ? {} : { app_final_only: value.app_final_only }), ...(value.app_tools_version === 1 ? { app_tools_version: 1 as const, app_context: appContext ?? [] } : {}), ...(value.plugin_connection_id ? { plugin_connection_id: value.plugin_connection_id, tool_invocation_ids: value.tool_invocation_ids ?? [] } : {}), ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
+}
+
+const MAX_REQUEST_BYTES = 128 * 1024;
+const requestBytes = (request: ChatRequest) => new TextEncoder().encode(JSON.stringify(request)).byteLength;
+/** Keep the current user prompt and public results intact; shed only old complete turns. */
+export function fitChatRequestHistory(value: ChatRequest): ChatRequest {
+  const request = validateRequest(value);
+  while (requestBytes(request) > MAX_REQUEST_BYTES && request.messages.length > 2
+    && request.messages[0].role === 'user' && request.messages[1].role === 'assistant') request.messages.splice(0, 2);
+  if (requestBytes(request) > MAX_REQUEST_BYTES) throw new ChatError('REQUEST_TOO_LARGE');
+  return request;
 }
 
 function endpoint(baseUrl: string): string {
@@ -115,8 +144,9 @@ class ChatParser {
   private model: string;
   private pluginId?: string;
   private automaticReadEnabled: boolean;
+  private appToolsEnabled: boolean;
   private emit: (event: ChatEvent) => void;
-  constructor(model: string, emit: (event: ChatEvent) => void, pluginId?: string, automaticReadEnabled = false) { this.model = model; this.emit = emit; this.pluginId = pluginId; this.automaticReadEnabled = automaticReadEnabled; }
+  constructor(model: string, emit: (event: ChatEvent) => void, pluginId?: string, automaticReadEnabled = false, appToolsEnabled = false) { this.appToolsEnabled = appToolsEnabled; this.model = model; this.emit = emit; this.pluginId = pluginId; this.automaticReadEnabled = automaticReadEnabled; }
   push(bytes: Uint8Array) {
     for (const byte of bytes) {
       if (this.finished) return;
@@ -173,6 +203,12 @@ class ChatParser {
       this.responding = true;
       if (value.text.trim()) this.hasAnswer = true;
       this.emit({ type: "delta", text: value.text });
+    } else if (kind === 'app_tool') {
+      if (!this.appToolsEnabled || this.pluginId || this.hasProposal || Object.keys(value).some(key => !['type', 'name', 'arguments'].includes(key))) return invalidResponse();
+      let command: AppCommand;
+      try { command = validateAppCommand({ name: value.name, arguments: value.arguments }); } catch { return invalidResponse(); }
+      this.hasProposal = true;
+      this.emit({ type: 'app_tool', ...command });
     } else if (kind === 'tool_proposal') {
       if (!this.pluginId || value.connection_id !== this.pluginId || this.hasProposal || !uuid(value.invocation_id) || !uuid(value.connection_id) || typeof value.tool_name !== 'string' || !value.tool_name || textLength(value.tool_name, 128) === null || !record(value.arguments)) return invalidResponse();
       this.hasProposal = true;
@@ -192,6 +228,7 @@ class ChatParser {
 export async function streamChat(options: StreamChatOptions): Promise<void> {
   const url = endpoint(options.baseUrl);
   const request = validateRequest(options.request);
+  if (requestBytes(request) > MAX_REQUEST_BYTES) throw new ChatError('REQUEST_TOO_LARGE');
   if (typeof options.token !== "string" || !/^[A-Za-z0-9._~+/-]+=*$/.test(options.token) || options.token.length > 8192) throw new ChatError("UNAUTHORIZED");
   const totalMs = options.totalTimeoutMs ?? 190000;
   const idleMs = options.idleTimeoutMs ?? 40000;
@@ -280,7 +317,7 @@ export async function streamChat(options: StreamChatOptions): Promise<void> {
       if (controller.signal.aborted) throw failure || new ChatError("CANCELLED");
       options.onEvent(event);
       if (controller.signal.aborted) throw failure || new ChatError("CANCELLED");
-    }, request.plugin_connection_id, request.automatic_readonly_tools === true);
+    }, request.plugin_connection_id, request.automatic_readonly_tools === true, request.app_tools_version === 1 && !request.app_final_only && (request.app_context?.length ?? 0) < 3);
     let bytes = 0;
     while (!parser.finished) {
       const chunk = await read();
