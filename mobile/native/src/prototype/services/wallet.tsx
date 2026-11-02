@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
-import { ArrowDownLeft, ArrowUpRight, Check, ChevronDown, CreditCard, Landmark, Plus, RefreshCw, WalletCards } from 'lucide-react-native';
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Check, ChevronDown, CreditCard, Landmark, Plus, RefreshCw, WalletCards } from 'lucide-react-native';
 import { Action, Choice, Divider, IconAction, Input, Page, Row, Sheet, Tabs, Type, useDesign } from '../design';
 import { useQAccount } from '../account/account-state';
+import { PaymentWalletEntry } from '../payments/wallet-entry';
 import { BANKS, getBank } from '../banking/catalog';
 import { BankCardArt, hasBankCardImage } from '../banking/cards';
 import { formatHKD } from '../banking/core';
@@ -12,9 +13,21 @@ type Snapshot = { token: string; bankId: string; wallet: BankWallet; receipts: B
 export function WalletPage({ onTransfer }: { onTransfer: (account: BankAccount) => void }) {
   const { text, colors } = useDesign();
   const account = useQAccount();
-  if (!account.session) return <Page title={text('钱包', 'Wallet')}><View style={{ gap: 20, paddingVertical: 30 }}><WalletCards size={40} strokeWidth={1.3} color={colors.accent} /><Type size={24} weight="500">{text('你的银行卡和每一笔流水。', 'Your cards and every transaction.')}</Type><Type muted style={{ lineHeight: 24 }}>{text('登录 Q 后添加银行插件，查看属于你的模拟港币账户。', 'Sign in to Q to add bank plugins and view your simulated HKD accounts.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} disabled={account.authBusy} onPress={account.requestAuth} /></View></Page>;
+  if (!account.session) return <Page title={text('钱包', 'Wallet')}><View style={{ gap: 20, paddingVertical: 30 }}><WalletCards size={40} strokeWidth={1.3} color={colors.accent} /><Type size={24} weight="500">{text('你的港币支付余额与独立模拟账户。', 'Your HKD payment balance and separate demo accounts.')}</Type><Type muted style={{ lineHeight: 24 }}>{text('登录 Q 后查看港币支付余额、充值订单及独立的模拟银行账户。', 'Sign in to Q to view your HKD payment balance, funding orders and separate simulated bank accounts.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} disabled={account.authBusy} onPress={account.requestAuth} /></View></Page>;
   // A new identity gets a fresh view immediately, before effects can run.
-  return <BankWalletContent key={account.session.token} token={account.session.token} onTransfer={onTransfer} />;
+  return <AuthenticatedWallet key={`${account.session.user.id}:${account.session.token}`} token={account.session.token} ownerId={account.session.user.id} onTransfer={onTransfer} />;
+}
+function AuthenticatedWallet({ token, ownerId, onTransfer }: { token: string; ownerId: string; onTransfer: (account: BankAccount) => void }) {
+  const { text, phone } = useDesign();
+  const [showDemo, setShowDemo] = useState(false);
+  if (!showDemo) return <PaymentWalletEntry token={token} ownerId={ownerId} onShowDemo={() => setShowDemo(true)} />;
+  // Only one wallet page is mounted. Demo balances and transfers keep their original path.
+  return <View style={{ flex: 1 }}>
+    <View style={{ paddingHorizontal: phone ? 24 : 48, paddingTop: 12, alignItems: 'flex-start' }}>
+      <Action kind="ghost" icon={ArrowLeft} label={text('返回支付钱包', 'Back to payment wallet')} onPress={() => setShowDemo(false)} />
+    </View>
+    <BankWalletContent token={token} onTransfer={onTransfer} />
+  </View>;
 }
 function BankWalletContent({ token, onTransfer }: { token: string; onTransfer: (account: BankAccount) => void }) {
   const { text, colors, phone, locale } = useDesign();

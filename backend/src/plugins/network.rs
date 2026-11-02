@@ -30,6 +30,8 @@ struct RequestPlan<'a> {
 pub struct SafeHttp {
     #[cfg(any(test, feature = "plugin-test-fixtures"))]
     fixture_origins: Vec<String>,
+    #[cfg(any(test, feature = "plugin-test-fixtures"))]
+    fixture_routes: std::collections::HashMap<String, String>,
 }
 
 /// Intentionally not Debug: OAuth token responses can contain secrets.
@@ -157,9 +159,22 @@ impl SafeHttp {
         }
         Ok(Self {
             fixture_origins: allowed,
+            fixture_routes: Default::default(),
         })
     }
 
+    /// Test-only exact endpoint substitution; target must be an explicitly enabled loopback origin.
+    #[cfg(any(test, feature = "plugin-test-fixtures"))]
+    pub fn with_test_route(mut self, source: &str, target: &str) -> McpResult<Self> {
+        let source = self.canonical_url(source)?;
+        let target =
+            Url::parse(&self.canonical_url(target)?).map_err(|_| McpError::unsafe_url())?;
+        if !self.fixture(&target) {
+            return Err(McpError::unsafe_url());
+        }
+        self.fixture_routes.insert(source, target.to_string());
+        Ok(self)
+    }
     fn fixture(&self, url: &Url) -> bool {
         #[cfg(any(test, feature = "plugin-test-fixtures"))]
         {
@@ -225,6 +240,12 @@ impl SafeHttp {
     }
 
     pub async fn validate_destination(&self, value: &str) -> McpResult<()> {
+        #[cfg(any(test, feature = "plugin-test-fixtures"))]
+        let value = self
+            .fixture_routes
+            .get(value)
+            .map(String::as_str)
+            .unwrap_or(value);
         let url = Url::parse(&self.canonical_url(value)?).map_err(|_| McpError::unsafe_url())?;
         self.addresses(&url).await.map(|_| ())
     }
@@ -300,6 +321,23 @@ impl SafeHttp {
         .await
     }
 
+    pub(crate) async fn delete_session(
+        &self,
+        url: &str,
+        bearer: Option<&RemoteBearer>,
+        headers: HeaderMap,
+    ) -> McpResult<HttpResponse> {
+        self.bounded_request(RequestPlan {
+            url,
+            method: Method::DELETE,
+            body: None,
+            bearer,
+            headers,
+            redirects: 0,
+            observer: None,
+        })
+        .await
+    }
     pub async fn post_form(
         &self,
         url: &str,
@@ -362,6 +400,11 @@ impl SafeHttp {
         } = plan;
         let mut url =
             Url::parse(&self.canonical_url(value)?).map_err(|_| McpError::unsafe_url())?;
+        let authorized_url = url.clone();
+        #[cfg(any(test, feature = "plugin-test-fixtures"))]
+        if let Some(target) = self.fixture_routes.get(url.as_str()) {
+            url = Url::parse(target).map_err(|_| McpError::unsafe_url())?;
+        }
         for hop in 0..=redirects {
             let pinned = self.addresses(&url).await?;
             let host = url
@@ -384,7 +427,7 @@ impl SafeHttp {
                 .request(method.clone(), url.clone())
                 .headers(headers.clone());
             if let Some(token) = bearer {
-                request = request.bearer_auth(token.token_for(&url)?);
+                request = request.header(header::AUTHORIZATION, token.header_for(&authorized_url)?);
             }
             if let Some(bytes) = &body {
                 request = request.body(bytes.clone());

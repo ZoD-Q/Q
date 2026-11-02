@@ -594,7 +594,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "plugin-workbench" ? (
             <PluginWorkbenchPage onBack={() => navigate("plugins")} onConnect={intent => { updatePluginIntent({ type: "received", intent }); navigate("plugins"); }} />
           ) : page === "plugins" ? (
-            <PluginHostPage chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
+            <PluginHostPage active={active} chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
           ) : (
             <ServicePage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} page={page} insuranceEntry={entry?.module === 'insurance' ? entry : undefined} onOpenWorkbench={() => navigate("plugin-workbench")} onBankTransfer={account => {
               if (!account.connection_id) return;

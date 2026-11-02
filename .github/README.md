@@ -7,7 +7,7 @@
 | `source-check` | 完整 checkout，检查 PR 合并基线或 push 前后提交的差异格式 |
 | `web-check` | Node 24，类型、lint、单元测试、部署脚本、构建、Chromium 桌面/窄屏交互，核对制品版本并保存静态文件与校验和 |
 | `mobile-check` | Node 24，类型、lint、全部现有功能测试、OpenAPI 类型再生一致性、Expo Web 导出 |
-| `backend-check (PostgreSQL 17/18)` | 两个独立作业，Rust fmt / 各功能 clippy / 单元与示例测试，以及身份、账本、账号生命周期、AI 历史、社交、实际备份恢复、视频、AI、插件和可信只读策略的隔离数据库测试 |
+| `backend-check (PostgreSQL 17/18)` | 两个独立作业，Rust fmt / 各功能 clippy / 单元与示例测试，以及身份、账本、账号生命周期、AI 历史、社交、实际备份恢复、视频、AI、插件、固定金融供应商适配和可信只读策略的隔离数据库测试 |
 | `deploy-check` | Nginx 配置及发布、备份、监控、接收器和 Web 部署工具测试；不执行部署 |
 | `ci-check` | 等待上述全部作业，只有全部成功才通过；失败、跳过或取消不能算通过 |
 

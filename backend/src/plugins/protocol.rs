@@ -60,7 +60,7 @@ fn string(value: Option<&Value>, max: usize) -> McpResult<&str> {
         .ok_or_else(McpError::protocol)
 }
 
-fn schema_validator(schema: &Value) -> McpResult<jsonschema::Validator> {
+pub(crate) fn schema_validator(schema: &Value) -> McpResult<jsonschema::Validator> {
     if !schema.is_object() {
         return Err(McpError::unsupported());
     }
@@ -509,7 +509,7 @@ fn rpc_message(value: Value, id: &str) -> McpResult<Option<Value>> {
     Ok(Some(result))
 }
 
-struct RpcSse {
+pub(crate) struct RpcSse {
     id: String,
     line: Vec<u8>,
     data: Vec<String>,
@@ -520,7 +520,7 @@ struct RpcSse {
     outcome: Option<McpResult<Value>>,
 }
 impl RpcSse {
-    fn new(id: String) -> Self {
+    pub(crate) fn new(id: String) -> Self {
         Self {
             id,
             line: Vec::new(),
@@ -532,7 +532,7 @@ impl RpcSse {
             outcome: None,
         }
     }
-    fn push(&mut self, bytes: &[u8]) {
+    pub(crate) fn push(&mut self, bytes: &[u8]) {
         if self.outcome.is_some() {
             return;
         }
@@ -604,6 +604,9 @@ impl RpcSse {
         self.line.clear();
         Ok(())
     }
+    pub(crate) fn finished(&self) -> bool {
+        self.outcome.is_some()
+    }
     fn finish(mut self) -> McpResult<Value> {
         if self.pending_cr && self.outcome.is_none() {
             self.end_line()?;
@@ -618,7 +621,7 @@ impl RpcSse {
     }
 }
 
-fn http_result(response: HttpResponse, id: &str) -> McpResult<Value> {
+pub(crate) fn http_result(response: HttpResponse, id: &str) -> McpResult<Value> {
     if response.status == 401 || response.status == 403 {
         let mut error = McpError::new(
             if response.status == 401 {

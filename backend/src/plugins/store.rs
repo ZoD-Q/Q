@@ -26,6 +26,7 @@ pub(crate) struct StoredConnection {
     pub user_id: Uuid,
     pub connection_kind: String,
     pub builtin_service_id: Option<String>,
+    pub financial_provider_id: Option<String>,
     pub candidate: Value,
     pub pending_candidate: Option<Value>,
     pub tools_snapshot: Option<Value>,
@@ -40,7 +41,7 @@ pub(crate) struct StoredConnection {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-pub(crate) const CONNECTION_FIELDS: &str = "id,user_id,connection_kind,builtin_service_id,candidate,pending_candidate,tools_snapshot,pending_tools,schema_fingerprint,revision,status,auth_status,auth_challenge,requested_scopes,last_error_code,created_at,updated_at";
+pub(crate) const CONNECTION_FIELDS: &str = "id,user_id,connection_kind,builtin_service_id,financial_provider_id,candidate,pending_candidate,tools_snapshot,pending_tools,schema_fingerprint,revision,status,auth_status,auth_challenge,requested_scopes,last_error_code,created_at,updated_at";
 impl StoredConnection {
     /// Only server-created connection columns select an internal runtime. Card metadata never does.
     pub(crate) fn bank_service_id(&self) -> ApiResult<Option<&str>> {
@@ -88,6 +89,9 @@ impl StoredConnection {
     }
     pub(crate) fn dto(&self) -> ApiResult<Connection> {
         self.bank_service_id()?;
+        if self.financial_provider_id.is_some() {
+            super::financial::binding(self)?;
+        }
         let card = self.card()?;
         let pending_update = self.pending_candidate.is_some() || self.pending_tools.is_some();
         let pending_update_details = if pending_update {
@@ -128,6 +132,7 @@ impl StoredConnection {
             id: self.id,
             connection_kind: self.connection_kind.clone(),
             builtin_service_id: self.builtin_service_id.clone(),
+            financial_provider_id: self.financial_provider_id.clone(),
             card_url: card.card_url,
             name: card.name,
             title: card.title,
@@ -151,6 +156,7 @@ pub struct Connection {
     pub id: Uuid,
     pub connection_kind: String,
     pub builtin_service_id: Option<String>,
+    pub financial_provider_id: Option<String>,
     pub card_url: String,
     pub name: String,
     pub title: String,
@@ -437,6 +443,11 @@ pub async fn revoke(
     if changed.rows_affected() == 0 {
         return Err(not_found());
     }
+    sqlx::query("DELETE FROM plugin_financial_credentials WHERE connection_id=$1 AND user_id=$2")
+        .bind(id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM plugin_oauth_tokens WHERE connection_id=$1 AND user_id=$2")
         .bind(id)
         .bind(auth.user_id)
@@ -461,6 +472,10 @@ pub async fn refresh(
         if connection.status != "needs_review" {
             load_tools_for_user(&state, auth.user_id, id).await?;
         }
+        return Ok(Json(owned(&state, auth.user_id, id).await?.dto()?));
+    }
+    if connection.financial_provider_id.is_some() {
+        super::financial::refresh(&state, &connection).await?;
         return Ok(Json(owned(&state, auth.user_id, id).await?.dto()?));
     }
     let runtime = runtime(&state)?;
@@ -498,6 +513,11 @@ pub(crate) async fn mark_changed(
     if update.rows_affected() != 1 {
         return Err(changed());
     }
+    sqlx::query("DELETE FROM plugin_financial_credentials WHERE connection_id=$1 AND user_id=$2")
+        .bind(connection.id)
+        .bind(connection.user_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM plugin_oauth_tokens WHERE connection_id=$1 AND user_id=$2")
         .bind(connection.id)
         .bind(connection.user_id)
@@ -541,6 +561,9 @@ pub(crate) async fn record_remote_error(
     error: &McpError,
 ) -> ApiResult<()> {
     connection.require_remote()?;
+    if connection.financial_provider_id.is_some() {
+        return super::financial::record_error(state, connection, error).await;
+    }
     let auth =
         error.category == ErrorCategory::Authorization || matches!(error.status, Some(401 | 403));
     if auth {
@@ -583,6 +606,8 @@ pub async fn load_tools_for_user(state: &AppState, user: Uuid, id: Uuid) -> ApiR
     connection.usable()?;
     let tools = if let Some(service) = connection.bank_service_id()? {
         crate::banking::tools(service)?
+    } else if connection.financial_provider_id.is_some() {
+        super::financial::tools(state, &connection).await?
     } else {
         let runtime = runtime(state)?;
         let bearer = oauth::bearer_for(state, &connection).await?;
@@ -630,6 +655,9 @@ async fn authorized(
     let connection = owned(state, user, id).await?;
     connection.usable()?;
     connection.require_remote()?;
+    if connection.financial_provider_id.is_some() {
+        return Err(mcp_error(McpError::unsupported()));
+    }
     let bearer = oauth::bearer_for(state, &connection).await?;
     Ok((connection, bearer))
 }
