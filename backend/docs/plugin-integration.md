@@ -223,3 +223,8 @@ Q 负责实现符合所选版本的 Apps 宿主，声明客户端能力 `io.mode
 来源原件：用户于本次任务提供的《做插件前喂给GPT的文档.md》，其中声明基础文本提供日期为 2026-10-15。原件保留其原称谓与示例；如存在实现层面的版本差异，以明确选定的标准版本核对并记录，不伪造缺失内容或把示例当作已部署端点。
 
 原件 SHA-256：`3fad49cb305f9f025584a3bf82f888baa4e659ef2aebea12b032506b15816949`。
+# Fixed financial provider compatibility added 2026-11-02
+
+The six user-requested financial services use a separate trusted profile adapter: iFinD, Jin10, Massive, Alpha Vantage, Twelve Data and CoinGecko. Profiles select bounded 2025 MCP initialization/session behavior without changing the ordinary 2026 Card/Catalog client. Their Q-curated descriptions do not claim vendors publish Q-compatible Server Cards. Only the dedicated add endpoint writes the profile column; each use checks the server-owned identity and fixed endpoint.
+
+API keys use a separate encrypted table, never fabricated OAuth records. Twelve retains CIMD. Massive/Alpha alone may use fixed official dynamic-registration endpoints with public clients, S256 PKCE, state and resource binding; no client secrets or generic automatic downgrade. New migration fields are additive, and revoke/account deletion clears credentials. Third-party tool execution always requires concrete confirmation. This does not authorize trading, purchase, deployment, or use beyond each user's provider entitlements.

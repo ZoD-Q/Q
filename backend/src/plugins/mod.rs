@@ -23,7 +23,9 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 pub mod discovery;
+pub mod financial;
 pub mod invocations;
+mod legacy;
 pub mod network;
 pub mod oauth;
 pub mod protocol;
@@ -237,6 +239,15 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
 }
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/v1/plugins/financial/providers", get(financial::providers))
+        .route(
+            "/v1/plugins/financial/connections",
+            post(financial::connect),
+        )
+        .route(
+            "/v1/plugins/connections/{id}/credential",
+            post(financial::credential),
+        )
         .route("/v1/plugins/status", get(status))
         .route("/v1/plugins/discover", post(store::discover))
         .route(

@@ -267,9 +267,32 @@ async fn api_auth_profiles_privacy_transfers_and_revocation() {
     let (_, bhistory) = h
         .request("GET", "/v1/wallet/transactions", Some(&bob), None)
         .await;
-    assert_eq!(ahistory["items"][0]["direction"], "out");
-    assert_eq!(bhistory["items"][0]["direction"], "in");
-    assert_eq!(ahistory["items"][0]["id"], bhistory["items"][0]["id"]);
+    // Timestamp ordering does not identify a transfer: equal timestamps or a clock
+    // correction can place the welcome credit first. Check the returned receipt ID.
+    for (history, direction, counterparty) in
+        [(&ahistory, "out", "bob"), (&bhistory, "in", "alice")]
+    {
+        let items = history["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        let transfer = items
+            .iter()
+            .find(|item| item["id"] == first["transfer_id"])
+            .expect("the owner's history must contain the original transfer");
+        assert_eq!(transfer["direction"], direction);
+        assert_eq!(transfer["amount_minor"], 1234);
+        assert_eq!(transfer["counterparty_handle"], counterparty);
+        assert_eq!(transfer["memo"], "test transfer");
+        for pair in items.windows(2) {
+            let sort_key = |item: &Value| {
+                (
+                    chrono::DateTime::parse_from_rfc3339(item["created_at"].as_str().unwrap())
+                        .unwrap(),
+                    Uuid::parse_str(item["id"].as_str().unwrap()).unwrap(),
+                )
+            };
+            assert!(sort_key(&pair[0]) >= sort_key(&pair[1]));
+        }
+    }
     for (amount, recipient_handle, expected) in [
         (99_000, "bob", "INSUFFICIENT_FUNDS"),
         (1, "alice", "SELF_TRANSFER"),

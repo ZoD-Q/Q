@@ -114,6 +114,7 @@ struct AuthorizationMetadata {
     token_endpoint: String,
     scopes: Vec<String>,
     require_response_iss: bool,
+    registration_endpoint: Option<String>,
 }
 
 fn scopes(value: &str) -> ApiResult<Vec<String>> {
@@ -188,6 +189,14 @@ async fn discover_metadata(
     runtime: &PluginRuntime,
     connection: &StoredConnection,
 ) -> ApiResult<AuthorizationMetadata> {
+    let financial = connection
+        .financial_provider_id
+        .as_ref()
+        .map(|_| super::financial::binding(connection))
+        .transpose()?;
+    if financial.is_some_and(|p| p.auth != "oauth") {
+        return Err(invalid_metadata());
+    }
     let card = connection.card()?;
     let endpoint = runtime
         .http
@@ -226,6 +235,9 @@ async fn discover_metadata(
     }
     let issuers = string_array(resource_metadata.get("authorization_servers"))?;
     let issuer = issuers.first().ok_or_else(invalid_metadata)?.clone();
+    if financial.is_some_and(|p| p.issuer != Some(issuer.as_str())) {
+        return Err(invalid_metadata());
+    }
     runtime.http.canonical_url(&issuer).map_err(mcp_error)?;
     let issuer_url = Url::parse(&issuer).map_err(|_| invalid_metadata())?;
     if issuer_url.query().is_some() {
@@ -244,10 +256,11 @@ async fn discover_metadata(
     let metadata = metadata_at(runtime, &urls).await?;
     // OAuth issuer comparison is deliberately an exact string comparison, not URL normalization.
     if metadata.get("issuer").and_then(Value::as_str) != Some(issuer.as_str())
-        || metadata
+        || (metadata
             .get("client_id_metadata_document_supported")
             .and_then(Value::as_bool)
             != Some(true)
+            && !financial.is_some_and(|p| p.registration.is_some()))
         || !contains(&metadata, "code_challenge_methods_supported", "S256")?
         || !contains(&metadata, "response_types_supported", "code")?
         || (metadata.get("grant_types_supported").is_some()
@@ -277,6 +290,32 @@ async fn discover_metadata(
                 .ok_or_else(invalid_metadata)?,
         )
         .map_err(mcp_error)?;
+    if financial.is_some_and(|p| {
+        [&authorization_endpoint, &token_endpoint]
+            .iter()
+            .any(|url| {
+                reqwest::Url::parse(url)
+                    .ok()
+                    .map(|u| u.origin().ascii_serialization())
+                    != p.issuer.map(str::to_owned)
+            })
+    }) {
+        return Err(invalid_metadata());
+    }
+    let registration_endpoint = financial
+        .and_then(|p| p.registration)
+        .map(|expected| {
+            if metadata
+                .get("registration_endpoint")
+                .and_then(Value::as_str)
+                == Some(expected)
+            {
+                Ok(expected.to_owned())
+            } else {
+                Err(invalid_metadata())
+            }
+        })
+        .transpose()?;
     runtime
         .http
         .validate_destination(&authorization_endpoint)
@@ -311,6 +350,7 @@ async fn discover_metadata(
         token_endpoint,
         scopes: requested,
         require_response_iss,
+        registration_endpoint,
     })
 }
 
@@ -324,8 +364,32 @@ pub async fn start(
     connection.usable()?;
     connection.require_remote()?;
     let runtime = runtime(&state)?;
-    let (client_id, redirect_uri) = public_urls(&runtime)?;
+    let (mut client_id, redirect_uri) = public_urls(&runtime)?;
     let metadata = discover_metadata(&runtime, &connection).await?;
+    if let Some(endpoint) = &metadata.registration_endpoint {
+        let response=runtime.http.post_json(endpoint,&json!({"client_name":"Q","redirect_uris":[redirect_uri],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}),None,HeaderMap::new()).await.map_err(mcp_error)?;
+        if !matches!(response.status, 200 | 201) || response.media_type() != "application/json" {
+            return Err(invalid_metadata());
+        }
+        let registered = response.json().map_err(|_| invalid_metadata())?;
+        if registered
+            .get("token_endpoint_auth_method")
+            .and_then(Value::as_str)
+            != Some("none")
+            || registered
+                .get("client_secret")
+                .is_some_and(|s| s.as_str() != Some(""))
+            || registered.get("redirect_uris") != Some(&json!([redirect_uri]))
+        {
+            return Err(invalid_metadata());
+        }
+        client_id = registered
+            .get("client_id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty() && s.len() <= 2048 && s.bytes().all(|b| b.is_ascii_graphic()))
+            .ok_or_else(invalid_metadata)?
+            .to_owned();
+    }
     let state_secret = random_secret();
     let verifier = random_secret();
     let attempt_id = Uuid::new_v4();
@@ -491,6 +555,12 @@ async fn finish_callback(state: &AppState, query: CallbackParams) -> ApiResult<(
         .ok_or_else(exchange_failed)?;
     let saved: SavedAttempt = sqlx::query_as("SELECT id,user_id,connection_id,connection_revision,encrypted_verifier,issuer,resource,token_endpoint,client_id,redirect_uri,scopes,require_response_iss FROM plugin_oauth_attempts WHERE state_hash=$1")
         .bind(hash(state_value.as_bytes())).fetch_optional(&state.pool).await?.ok_or_else(exchange_failed)?;
+    let bound = store::owned(state, saved.user_id, saved.connection_id).await?;
+    let client_id = if super::financial::is_dcr(&bound, &saved.issuer)? {
+        saved.client_id.clone()
+    } else {
+        client_id
+    };
     let mut tx = state.pool.begin().await?;
     let current: Option<(i64, String, Value)> = sqlx::query_as("SELECT revision,status,candidate FROM plugin_connections WHERE id=$1 AND user_id=$2 FOR UPDATE")
         .bind(saved.connection_id).bind(saved.user_id).fetch_optional(&mut *tx).await?;
@@ -705,6 +775,11 @@ pub(crate) async fn bearer_for(
 ) -> ApiResult<Option<RemoteBearer>> {
     connection.usable()?;
     connection.require_remote()?;
+    if connection.financial_provider_id.is_some()
+        && super::financial::binding(connection)?.auth != "oauth"
+    {
+        return Err(auth_required());
+    }
     if connection.auth_status == "none" {
         return Ok(None);
     }
@@ -727,7 +802,7 @@ pub(crate) async fn bearer_for(
     let saved: SavedToken = sqlx::query_as("SELECT connection_revision,issuer,resource,token_endpoint,client_id,encrypted_tokens,scopes,expires_at,refresh_state,refresh_deadline FROM plugin_oauth_tokens WHERE connection_id=$1 AND user_id=$2 FOR UPDATE")
         .bind(connection.id).bind(connection.user_id).fetch_optional(&mut *tx).await?.ok_or_else(auth_required)?;
     if saved.connection_revision != connection.revision
-        || saved.client_id != client_id
+        || (saved.client_id != client_id && !super::financial::is_dcr(connection, &saved.issuer)?)
         || runtime
             .http
             .canonical_url(&saved.resource)

@@ -40,6 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Environment-backed provider configuration is deliberately limited to executable startup.
     state.ai = AiRuntime::from_env()?.map(Arc::new);
     state.plugins = Some(Arc::new(PluginRuntime::from_env()?));
+    state.payments = xiaoq_backend::payments::PaymentRuntime::from_env()?.map(Arc::new);
     if env::var("Q_SEED_DEMO").as_deref() == Ok("true") {
         identity::seed_demo(&state)
             .await
@@ -48,6 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let listener = tokio::net::TcpListener::bind(bind).await?;
     let social_cleanup = xiaoq_backend::social::spawn_cleanup(pool.clone());
+    let payments_worker = state
+        .payments
+        .clone()
+        .map(|runtime| xiaoq_backend::payments::jobs::spawn(pool.clone(), runtime));
     tracing::info!(%bind, mode = "demo", "小Q API listening");
     axum::serve(
         listener,
@@ -59,6 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .await?;
     social_cleanup.abort();
     let _ = social_cleanup.await;
+    if let Some(worker) = payments_worker {
+        worker.abort();
+        let _ = worker.await;
+    }
     pool.close().await;
     Ok(())
 }

@@ -254,8 +254,18 @@ test('global search, list query, status filtering, and preview error recovery wo
   await listSearch.fill('iPhone')
   await expect(page.getByRole('button', { name: '林间 · iPhone 会话', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '海盐 · 浏览器会话', exact: true })).toHaveCount(0)
-  await listSearch.fill('')
-  await page.getByRole('combobox', { name: '状态', exact: true }).selectOption('expired')
+  // Dispatch consecutive control changes before the router's deferred render can commit.
+  await listSearch.evaluate((input, select) => {
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Missing status filter')
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    if (!setValue) throw new Error('Missing input setter')
+    setValue.call(input, '')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    select.value = 'expired'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  }, await page.getByRole('combobox', { name: '状态', exact: true }).elementHandle())
+  await expect(page).toHaveURL(url => !url.searchParams.has('q') && url.searchParams.get('status') === 'expired')
+  await expect(listSearch).toHaveValue('')
   await expect(page.getByRole('button', { name: '海盐 · 浏览器会话', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '林间 · iPhone 会话', exact: true })).toHaveCount(0)
   await page.getByRole('combobox', { name: '预览场景', exact: true }).selectOption('error')

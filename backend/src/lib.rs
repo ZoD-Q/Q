@@ -28,6 +28,7 @@ pub mod error;
 pub mod identity;
 pub mod insurance;
 pub mod ledger;
+pub mod payments;
 pub mod plugins;
 pub mod profiles;
 pub mod social;
@@ -46,6 +47,7 @@ pub struct AppState {
     pub video: Option<Arc<video::VideoRuntime>>,
     pub ai: Option<Arc<ai::AiRuntime>>,
     pub plugins: Option<Arc<plugins::PluginRuntime>>,
+    pub payments: Option<Arc<payments::PaymentRuntime>>,
 }
 
 impl AppState {
@@ -64,6 +66,7 @@ impl AppState {
             video: None,
             ai: None,
             plugins: None,
+            payments: None,
         })
     }
     fn limit_auth(&self, key: String, limit: u32) -> ApiResult<()> {
@@ -201,6 +204,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         )
         .merge(plugins::routes())
         .merge(banking::router().layer(middleware::from_fn(private_response)))
+        .merge(payments::router().layer(middleware::from_fn(private_response)))
         .layer(cors)
         .with_state(state)
 }

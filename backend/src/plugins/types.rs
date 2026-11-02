@@ -116,6 +116,7 @@ impl std::error::Error for McpError {}
 #[derive(Clone)]
 pub struct RemoteBearer {
     token: String,
+    raw_authorization: bool,
     endpoint: String,
 }
 impl RemoteBearer {
@@ -133,7 +134,29 @@ impl RemoteBearer {
         }
         Ok(Self {
             token,
+            raw_authorization: false,
             endpoint: url.to_string(),
+        })
+    }
+    pub(crate) fn raw_authorization(value: String, endpoint: &str) -> McpResult<Self> {
+        if value.is_empty()
+            || value.len() > 8192
+            || value.trim() != value
+            || !value.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
+        {
+            return Err(McpError::validation());
+        }
+        let mut token = Self::new("placeholder".into(), endpoint)?;
+        token.token = value;
+        token.raw_authorization = true;
+        Ok(token)
+    }
+    pub(crate) fn header_for(&self, url: &Url) -> McpResult<String> {
+        let token = self.token_for(url)?;
+        Ok(if self.raw_authorization {
+            token.to_owned()
+        } else {
+            format!("Bearer {token}")
         })
     }
     pub(crate) fn token_for(&self, url: &Url) -> McpResult<&str> {
