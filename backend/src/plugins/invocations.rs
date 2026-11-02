@@ -137,6 +137,7 @@ pub async fn prepare_invocation(
         })?;
     protocol::validate_arguments(&tool, &arguments).map_err(super::mcp_error)?;
     let connection = store::owned(state, user, connection_id).await?;
+    super::financial::validate_profile_arguments(&connection, &tool, &arguments)?;
     connection.usable()?;
     if connection.revision != initial_revision {
         return Err(changed());
@@ -309,10 +310,15 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
     let tool: Tool =
         serde_json::from_value(proposal.tool_snapshot.clone()).map_err(|_| ApiError::internal())?;
     protocol::validate_arguments(&tool, &proposal.arguments).map_err(super::mcp_error)?;
+    super::financial::validate_profile_arguments(&connection, &tool, &proposal.arguments)?;
     if connection.bank_service_id()?.is_some() {
         return confirm_bank(state, user, &connection, &proposal, &tool, false).await;
     }
-    let bearer = oauth::bearer_for(state, &connection).await?;
+    let bearer = if connection.financial_provider_id.is_some() {
+        super::financial::token(state, &connection).await?
+    } else {
+        oauth::bearer_for(state, &connection).await?
+    };
     let runtime = runtime(state)?;
     let mut tx = state.pool.begin().await?;
     let ready:Option<Uuid>=sqlx::query_scalar("SELECT id FROM plugin_connections WHERE id=$1 AND user_id=$2 AND revision=$3 AND status='ready' FOR SHARE")
@@ -328,15 +334,26 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
     }
     // This committed reservation survives disconnects and crashes. A second confirmation
     // only reads it; it never dispatches another tools/call or fabricates rollback.
-    let result = runtime
-        .client
-        .call_tool(
-            &connection.card()?.endpoint_url,
+    let result = if connection.financial_provider_id.is_some() {
+        super::financial::call(
+            state,
+            &connection,
             &tool,
             &proposal.arguments,
             bearer.as_ref(),
         )
-        .await;
+        .await
+    } else {
+        runtime
+            .client
+            .call_tool(
+                &connection.card()?.endpoint_url,
+                &tool,
+                &proposal.arguments,
+                bearer.as_ref(),
+            )
+            .await
+    };
     let (status, result, error_code) = match result {
         Ok(result) => {
             if serde_json::to_vec(&result)

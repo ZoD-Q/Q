@@ -150,6 +150,7 @@ test('completed bank errors can continue with the model but never repeat confirm
     './result-view': { PluginResultView: 'PluginResultView', ResourceViewer: 'ResourceViewer' },
     '../plugin-workbench/materials': {}, '../banking/proposal': { BankProposalView: 'BankProposalView' },
     '../banking/plugin-catalog': { BankPluginCatalog: 'BankPluginCatalog' },
+    '../financial-plugins/page': { FinancialPluginCatalog: 'FinancialPluginCatalog' },
   });
   for (const status of ['succeeded', 'tool_error', 'awaiting_confirmation', 'running', 'unknown', 'failed', 'cancelled', 'expired']) {
     const invocation = { ...bank, id: '55555555-5555-4555-8555-555555555555', connection_id: bank.id, connection_title: bank.title, card_url: bank.endpoint_url, tool_name: 'bank_transfer', arguments: { to_bank_id: 'bochk', recipient: 'demo_chen', amount_minor: 20000 }, status, result: { content: [] } };

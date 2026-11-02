@@ -31,7 +31,7 @@ function harness(selectedConnection = connection) {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { ActivityIndicator: 'Spinner', View: 'View', Linking: { openURL: async url => { opened.push(url); } } },
     'expo-crypto': { randomUUID: () => invocationId }, 'lucide-react-native': { ArrowLeft: 'Left', Plus: 'Plus', RefreshCw: 'Refresh' },
     '../design': design, '../api-workbench/core': workbench, '../ai-chat/auth-sheet': { ChatAuthSheet: 'ChatAuthSheet' }, '../services/plugins': { PluginsPage: 'PluginsPage' }, './core': core,
-    './result-view': { PluginResultView: 'PluginResultView', ResourceViewer: 'ResourceViewer' }, '../plugin-workbench/materials': materials, '../banking/proposal': { BankProposalView: 'BankProposalView' }, '../banking/plugin-catalog': { BankPluginCatalog: 'BankPluginCatalog' },
+    './result-view': { PluginResultView: 'PluginResultView', ResourceViewer: 'ResourceViewer' }, '../plugin-workbench/materials': materials, '../banking/proposal': { BankProposalView: 'BankProposalView' }, '../banking/plugin-catalog': { BankPluginCatalog: 'BankPluginCatalog' }, '../financial-plugins/page': { FinancialPluginCatalog: 'FinancialPluginCatalog' },
     './client': { pluginRequest: async (token, path, decode, options) => {
       calls.push({ path, ...options });
       let value;
@@ -61,7 +61,7 @@ function harness(selectedConnection = connection) {
   const render = () => { if (dirty) { dirty = false; cursor = 0; tree = connected.type(connected.props); effects.splice(0).forEach(callback => callback()); } return tree; };
   render();
   return {
-    calls, opened, nodes: () => walk(render()), text: () => walk(render()).filter(node => node.type === 'Type').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join(' '),
+    calls, opened, hostTabs: walk(host).find(node => node.type === 'Tabs').props.items, nodes: () => walk(render()), text: () => walk(render()).filter(node => node.type === 'Type').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join(' '),
     async flush() { for (let n = 0; n < 40; n++) { await Promise.resolve(); render(); } },
     select() { const row = walk(render()).find(node => node.type === 'Row' && node.props.title === selectedConnection.title); assert.ok(row); row.props.onPress(); },
     press(label) { const action = walk(render()).find(node => node.type === 'Action' && node.props.label === label); assert.ok(action, label); assert.equal(!!action.props.disabled, false, label); action.props.onPress(); },
@@ -122,4 +122,18 @@ test('remote provider identity is concise in the list and detail while full decl
   assert.doesNotMatch(view.text(), /发布者自声明|Reservations/);
   view.press('高级设置'); await view.flush();
   assert.match(view.text(), /所有者：Tickets Ltd（发布者自声明）/); assert.match(view.text(), /Reservations/);
+});
+
+
+test('financial plugins are adjacent to banks and key-managed connections do not offer OAuth', async () => {
+ const view=harness({...connection,financial_provider_id:'ifind',status:'auth_required',auth_status:'required'}); await view.flush();
+ const ids=view.hostTabs.map(item=>item.id);assert.equal(ids.indexOf('finance'),ids.indexOf('banks')+1);
+ view.select();await view.flush();assert.equal(view.nodes().some(node=>node.props?.label==='授权插件'),false);assert.ok(view.nodes().some(node=>node.props?.label==='管理金融插件'));
+});
+
+
+test('managed financial profiles label host-maintained documentation without publisher Card claims', async () => {
+ const view=harness({...connection,financial_provider_id:'ifind',owner_name:null,card_url:'https://mcp.51ifind.com/',endpoint_url:'https://api-mcp.51ifind.com:8643/mcp'});await view.flush();view.select();await view.flush();
+ assert.match(view.text(),/官方说明来源/);assert.doesNotMatch(view.text(),/说明文件来源|发布者自声明/);
+ view.press('高级设置');await view.flush();assert.match(view.text(),/服务资料|小Q预配置/);assert.doesNotMatch(view.text(),/所有者未声明|发布者自声明|所有者是发布者/);
 });

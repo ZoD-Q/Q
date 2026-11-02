@@ -3821,6 +3821,173 @@
           }
         }
       }
+    },
+    "/v1/plugins/financial/providers": {
+      "get": {
+        "operationId": "listFinancialProviders",
+        "tags": [
+          "plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialProviderCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/financial/connections": {
+      "post": {
+        "operationId": "connectFinancialProvider",
+        "tags": [
+          "plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginConnection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "description": "Idempotently add a personal fixed provider connection. No business calls. Reconnect clears old credentials; authorization remains separate.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider_id"
+                ],
+                "properties": {
+                  "provider_id": {
+                    "type": "string",
+                    "enum": [
+                      "ifind",
+                      "jin10",
+                      "massive",
+                      "alphavantage",
+                      "twelvedata",
+                      "coingecko"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/connections/{id}/credential": {
+      "post": {
+        "operationId": "setFinancialProviderCredential",
+        "tags": [
+          "plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginConnection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "description": "iFinD and Jin10 only. Encrypts credentials bound to owner, connection, revision and endpoint; invalidates old proposals and verifies catalog. Returns saved connection even on verification failure, never secret. iFinD accepts exact Authorization value; Jin10 accepts raw MCP Token. No auto retry. Third-party 401 never becomes Q-session 401. Requires encryption configuration.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "secret"
+                ],
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192,
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4992,6 +5159,22 @@
               "q.bank-demo.mox",
               "q.bank-demo.livi"
             ]
+          },
+          "financial_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ifind",
+              "jin10",
+              "massive",
+              "alphavantage",
+              "twelvedata",
+              "coingecko",
+              null
+            ],
+            "description": "Optional server-owned financial profile; remains remote_mcp. External Card metadata never selects this field."
           }
         },
         "required": [
@@ -7860,6 +8043,84 @@
           }
         ],
         "description": "Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
+      },
+      "FinancialProviderCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "available",
+          "credentials_configured",
+          "oauth_configured",
+          "providers"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "credentials_configured": {
+            "type": "boolean",
+            "description": "API-key storage requires encryption independently of OAuth hosting."
+          },
+          "oauth_configured": {
+            "type": "boolean"
+          },
+          "providers": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "description",
+                "homepage_url",
+                "auth_mode",
+                "connection"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "ifind",
+                    "jin10",
+                    "massive",
+                    "alphavantage",
+                    "twelvedata",
+                    "coingecko"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "homepage_url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "auth_mode": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "api_key",
+                    "oauth"
+                  ]
+                },
+                "connection": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PluginConnection"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -41,6 +41,7 @@ export type PluginConnection = {
   id: string; card_url: string; name: string; title: string; description: string; version: string;
   endpoint_url: string; revision: number; status: string; auth_status: string; last_error_code: string | null;
   owner_name?: string | null;
+  financial_provider_id?: 'ifind' | 'jin10' | 'massive' | 'alphavantage' | 'twelvedata' | 'coingecko' | null;
   connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null;
   created_at: string; updated_at: string; pending_update: boolean; pending_update_details?: unknown;
 };
@@ -96,6 +97,7 @@ export function decodePluginStatus(value: unknown) {
 export function decodePluginConnection(value: unknown): PluginConnection {
   if (!record(value) || !isUuid(value.id) || !['card_url', 'name', 'title', 'description', 'version', 'endpoint_url', 'status', 'auth_status', 'created_at', 'updated_at'].every(key => str(value[key], 16000)) || !Number.isSafeInteger(value.revision) || typeof value.pending_update !== 'boolean' || !nullable(value.last_error_code)) return fail();
   const identity = decodePluginIdentity(value);
+  if (value.financial_provider_id != null && (identity.connection_kind !== 'remote_mcp' || typeof value.financial_provider_id !== 'string' || !['ifind', 'jin10', 'massive', 'alphavantage', 'twelvedata', 'coingecko'].includes(value.financial_provider_id))) return fail();
   if (identity.connection_kind === 'bank_demo' && value.auth_status !== 'anonymous') return fail();
   return { ...value, ...identity, owner_name: normalizeOwnerName(value.owner_name) } as PluginConnection;
 }
