@@ -1208,3 +1208,24 @@ test('repeated failed app explanations migrate recovery state without retaining 
   assert.equal(view.current.canResumeAppResult(id), true);
   assert.equal(Object.hasOwn(view.current.appActions, id), true);
 });
+
+
+test('company search and research use discovered opt-in, preserve evidence and do not request plugin APIs', async t => {
+  const command = { name: 'company_search', arguments: { query: 'Toyota' } };
+  const old = harness({ statusFetch: appConfigured }); t.after(old.close); await old.flush(); old.grantConsent();
+  old.current.send('Research Toyota annual financials'); await old.flush();
+  assert.equal(old.streams[0].request.company_research_version, undefined);
+  const view = harness({ historyFetch: cloudHistory, statusFetch: () => json({ ...configured, app_tools_version: 1, company_research_version: 1 }), appExecute: async () => ({ text: 'Toyota · sec:0001094517 · public source evidence', actions: [] }) });
+  t.after(view.close); await view.flush(); view.grantConsent();
+  assert.equal(view.current.send('Research Toyota annual financials'), true); await view.flush();
+  assert.equal(view.streams[0].request.company_research_version, 1);
+  view.finishAppStream(command); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+  assert.equal(view.streams[1].request.company_research_version, 1);
+  assert.equal(view.streams[1].request.app_context[0].name, 'company_search');
+  view.finishAppStream({ name: 'company_research', arguments: { issuerId: 'sec:0001094517' } }, 1); await view.flush();
+  assert.equal(view.appCalls.length, 2);
+  assert.equal(view.streams[2].request.app_context.length, 2);
+  assert.ok(view.historyPosts.some(post => post.body.messages.at(-1).content.includes('Toyota')));
+  assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
+});

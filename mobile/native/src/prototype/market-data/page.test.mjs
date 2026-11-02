@@ -66,7 +66,7 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { View: 'View', Pressable: 'Pressable', Linking: { openURL: async url => openedUrls.push(url) } },
     'lucide-react-native': { ExternalLink: 'ExternalLink', MessageSquare: 'MessageSquare' },
-    '../design': design, './core': core,
+    '../design': design, './core': core, '../company-research/page': { CompanyResearchPanel: 'CompanyResearchPanel' },
     './use-market-data': { useMarketData(selected) {
       return { report: core.marketQueryKey(selected) === 'news:fed' ? result : null, phase: 'ready', stale: false, fromCache: false,
         coolingDown: false, nextAllowedAt: null, run: noop, cancel: noop, ...market };
