@@ -434,3 +434,28 @@ test('the 128KiB wire budget preserves current Unicode prompts and public result
   await expectCode(streamChat(options(fake.transport, { request: oversize })), 'REQUEST_TOO_LARGE');
   assert.equal(fake.stats.calls, 0);
 });
+
+
+test('company tools require independent discovered capability and request opt-in', async () => {
+  assert.deepEqual(decodeAiStatus({ configured: true, models: [], app_tools_version: 1, company_research_version: 1 }), { configured: true, models: [], app_tools_version: 1, company_research_version: 1 });
+  for (const value of [0, 2, null, true]) assert.throws(() => decodeAiStatus({ configured: true, models: [], app_tools_version: 1, company_research_version: value }));
+  assert.throws(() => decodeAiStatus({ configured: true, models: [], company_research_version: 1 }));
+  for (const command of [{ name: 'company_search', arguments: { query: 'Toyota' } }, { name: 'company_research', arguments: { issuerId: 'sec:0001094517' } }]) {
+    const events = [];
+    const fake = fixture([frame('app_tool', command), done({ finish_reason: 'tool_calls' })]);
+    await streamChat(options(fake.transport, { request: { ...request, app_tools_version: 1, company_research_version: 1 }, onEvent: e => events.push(e) }));
+    assert.equal(events[0].name, command.name);
+    assert.equal(JSON.parse(fake.stats.init.body).company_research_version, 1);
+    await expectCode(streamChat(options(fixture([frame('app_tool', command)]).transport, { request: { ...request, app_tools_version: 1 } })), 'INVALID_RESPONSE');
+    const context = { ...command, result: 'public facts' };
+    await expectCode(streamChat(options(fixture([answer(), done()]).transport, { request: { ...request, app_tools_version: 1, app_context: [context] } })), 'VALIDATION_ERROR');
+    const resumed = fixture([answer(), done()]);
+    await streamChat(options(resumed.transport, { request: { ...request, app_tools_version: 1, company_research_version: 1, app_context: [context], app_final_only: true } }));
+    assert.equal(JSON.parse(resumed.stats.init.body).app_context[0].name, command.name);
+  }
+  for (const fields of [{ company_research_version: 1 }, { app_tools_version: 1, company_research_version: 2 }]) {
+    const fake = fixture([answer(), done()]);
+    await expectCode(streamChat(options(fake.transport, { request: { ...request, ...fields } })), 'VALIDATION_ERROR');
+    assert.equal(fake.stats.calls, 0);
+  }
+});

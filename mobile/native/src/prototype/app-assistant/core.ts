@@ -12,6 +12,8 @@ export type AppCommand =
   | { name: 'insurance_search'; arguments: { query: string; group?: string } }
   | { name: 'insurance_compare'; arguments: { ids: string[] } }
   | { name: 'market_query'; arguments: MarketQuery }
+  | { name: 'company_search'; arguments: { query: string } }
+  | { name: 'company_research'; arguments: { issuerId: string } }
   | { name: 'app_open'; arguments: { module: ModuleId; query?: string; insuranceIds?: string[]; marketQuery?: MarketQuery } };
 export type AppNavigationAction = {
   module: ModuleId; label: string; query?: string; insuranceIds?: string[];
@@ -92,6 +94,15 @@ export function validateAppCommand(value: unknown): AppCommand {
     case 'insurance_compare':
       keys(args, ['ids']);
       return { name: command.name, arguments: { ids: ids(args.ids, 2) } };
+    case 'company_search':
+      keys(args, ['query']);
+      return { name: command.name, arguments: { query: boundedText(args.query, 120) } };
+    case 'company_research': {
+      keys(args, ['issuerId']);
+      const issuerId = boundedText(args.issuerId, 40);
+      if (!/^(?:sec:(?!0{10}$)[0-9]{10}|wikidata:Q[1-9][0-9]{0,15})$/.test(issuerId)) return invalid();
+      return { name: command.name, arguments: { issuerId } };
+    }
     case 'market_query':
       return { name: command.name, arguments: market(args) };
     case 'app_open': {
@@ -202,6 +213,7 @@ export function executeLocalAppCommand(input: AppCommand, locale: AppLocale): Ap
       actions: [createAppNavigationAction('market-data', locale, { marketQuery: command.arguments })], marketQuery: command.arguments,
       data: { kind: 'market_query', pending: true, query: { ...command.arguments } } };
   }
+  if (command.name === 'company_search' || command.name === 'company_research') return { text: zh ? '尚未读取公开公司资料。' : 'Public company information has not been retrieved yet.', actions: [createAppNavigationAction('market-data', locale)], data: { pending: true } };
   const item = moduleDefinition(command.arguments.module);
   const destination = createAppNavigationAction(item.id, locale, command.arguments);
   return { text: [zh ? `可以打开${appCopy(item.title, locale)}，继续在页面操作。` : `You can open ${appCopy(item.title, locale)} and continue on that page.`, appCopy(item.summary, locale), appCopy(item.limits, locale),

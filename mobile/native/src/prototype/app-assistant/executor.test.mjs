@@ -10,6 +10,8 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 const core = await import('./core.ts');
 const marketCore = await import('../market-data/core.ts');
 const client = await import('../market-data/client.ts');
+const companyClient = await import('../company-research/client.ts');
+const companyCore = await import('../company-research/core.ts');
 test.after(() => resolver.deregister());
 const transpile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 function runtime() {
@@ -22,6 +24,8 @@ function runtime() {
   const executor = {};
   new Function('require', 'exports', transpile('./executor.ts'))(name => {
     if (name === './core') return core;
+    if (name === '../company-research/client') return companyClient;
+    if (name === '../company-research/core') return companyCore;
     if (name === '../market-data/core') return marketCore;
     if (name === '../market-data/client') return client;
     if (name === '../market-data/use-market-data') return session;
@@ -100,4 +104,18 @@ test('bounded bilingual GDELT results retain original sample totals and themes w
     assert.ok(JSON.stringify({ text: result.text }).length <= api.APP_RESULT_LIMIT);
     assert.ok(Array.from(api.appResultContext(result)).length <= api.APP_RESULT_LIMIT);
   }
+});
+
+test('global company executor preserves source identities and bounded public evidence', async () => {
+  const api = runtime(); const requested = [];
+  const transport = async (url, init) => {
+    requested.push(url); assert.equal(init.credentials, 'omit'); assert.equal(init.headers.Authorization, undefined);
+    const data = url.includes('company_tickers_exchange') ? { fields: ['cik','name','ticker','exchange'], data: [[1046179,'Taiwan Semiconductor','TSM','NYSE']] }
+      : url.includes('/sparql?') ? { results: { bindings: [] } } : { search: [] };
+    return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+  };
+  const result = await api.executeAppCommand({ name: 'company_search', arguments: { query: 'TSM' } }, 'en', { signal: new AbortController().signal, transport });
+  assert.match(result.text, /sec:0001046179/); assert.match(result.text, /NYSE:TSM/);
+  assert.equal(result.actions[0].module, 'market-data'); assert.ok(api.appResultContext(result).length <= 8000);
+  assert.equal(requested.length, 3); assert.ok(requested.every(url => !url.includes('q.kaicloudpay.com')));
 });

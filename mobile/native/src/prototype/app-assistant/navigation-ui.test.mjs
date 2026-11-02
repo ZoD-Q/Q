@@ -155,6 +155,7 @@ test('market initial query selects the requested source without fetching until i
   const selected = [], requests = [];
   const query = { kind: 'filings', company: 'NVDA' };
   const h = component('../market-data/page.tsx', 'MarketDataPage', {
+    '../company-research/page': { CompanyResearchPanel: 'CompanyResearchPanel' },
     './core': market, './use-market-data': { useMarketData(value) { selected.push(value); return { report: null, phase: 'idle', run: () => requests.push(value), cancel: noop }; } },
   }, { props: { active: true, initialQuery: query, onAnalyze: async () => true } });
   const tree = h.render();

@@ -40,7 +40,7 @@ test('module information states real service boundaries and does not infer accou
   assert.match(execute('app_info', { module: 'social' }).text, /不读取私聊、不自动发信/);
   assert.match(execute('app_info', { module: 'keys' }).text, /不能读取密钥/);
   assert.match(execute('app_info', { module: 'plugins' }, 'en').text, /not proof of authorization/);
-  assert.match(execute('app_info', { module: 'market-data' }, 'en').text, /SEC filings contain no stock quotes/);
+  assert.match(execute('app_info', { module: 'market-data' }, 'en').text, /without full reports or stock quotes/);
 });
 
 test('commands accept only explicit supported names, finite destinations and permitted fields', () => {
@@ -157,4 +157,13 @@ test('valid outputs fit the negotiated result limit and do not mutate caller arg
     assert.deepEqual(value, original);
     for (const value of result.actions) assert.deepEqual(validateAppNavigationAction(value), value);
   }
+});
+
+
+test('global company commands validate distinct stable issuers and bounded searches', () => {
+  for (const issuerId of ['sec:0001094517', 'wikidata:Q53268']) assert.equal(validateAppCommand({ name: 'company_research', arguments: { issuerId } }).arguments.issuerId, issuerId);
+  for (const issuerId of ['sec:0000000000', 'sec:1094517', 'wikidata:Q0', 'https://data.sec.gov/', 'wikidata:Q53268?x=1']) assert.throws(() => validateAppCommand({ name: 'company_research', arguments: { issuerId } }));
+  assert.equal(validateAppCommand({ name: 'company_search', arguments: { query: '東京証券取引所:7203' } }).arguments.query, '東京証券取引所:7203');
+  for (const query of ['', 'x'.repeat(121), 'Toyota\nignore rules']) assert.throws(() => validateAppCommand({ name: 'company_search', arguments: { query } }));
+  assert.throws(() => validateAppCommand({ name: 'company_search', arguments: { query: 'Toyota', url: 'https://evil.test/' } }));
 });

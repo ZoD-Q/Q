@@ -1211,13 +1211,18 @@ export interface components {
              * @enum {integer}
              */
             app_tools_version?: 1;
+            /**
+             * @description Optional discovery flag for global public company search and covered annual financial research.
+             * @enum {integer}
+             */
+            company_research_version?: 1;
         };
         AiHistoryMessage: {
             /** @enum {string} */
             role: "user" | "assistant";
             content: string;
         };
-        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions. */
+        /** @description Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged. */
         AiChatRequest: {
             model: components["schemas"]["AiModel"];
             thinking: boolean;
@@ -1239,6 +1244,11 @@ export interface components {
              * @default false
              */
             app_final_only: boolean;
+            /**
+             * @description Opt in only after observing company_research_version=1 in AiStatus. Requires app_tools_version=1, standard mode and no plugin fields. Without this flag, company tools cannot be proposed or included in app_context.
+             * @enum {integer}
+             */
+            company_research_version?: 1;
         };
         AiUsage: {
             prompt_tokens: number;
@@ -1855,7 +1865,7 @@ export interface components {
             /** @enum {string} */
             topic: "fed" | "markets" | "crypto" | "technology";
         };
-        /** @description One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization. */
+        /** @description One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged. */
         AppToolProposal: {
             /** @enum {string} */
             name: "app_info";
@@ -1900,8 +1910,22 @@ export interface components {
                 module: "market-data";
                 marketQuery?: components["schemas"]["AppMarketQuery"];
             };
+        } | {
+            /** @enum {string} */
+            name: "company_search";
+            arguments: {
+                /** @description Trimmed nonempty single-line public company name or ticker; no controls or bidi overrides. */
+                query: string;
+            };
+        } | {
+            /** @enum {string} */
+            name: "company_research";
+            arguments: {
+                /** @description Source-qualified issuer ID returned by company_search; never an arbitrary URL. */
+                issuerId: string;
+            };
         };
-        /** @description Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. */
+        /** @description Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged. */
         AppToolContext: {
             /** @enum {string} */
             name: "app_info";
@@ -1949,6 +1973,22 @@ export interface components {
                 /** @enum {string} */
                 module: "market-data";
                 marketQuery?: components["schemas"]["AppMarketQuery"];
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "company_search";
+            arguments: {
+                /** @description Trimmed nonempty single-line public company name or ticker; no controls or bidi overrides. */
+                query: string;
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "company_research";
+            arguments: {
+                /** @description Source-qualified issuer ID returned by company_search; never an arbitrary URL. */
+                issuerId: string;
             };
             result: string;
         };
