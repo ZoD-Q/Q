@@ -3,6 +3,7 @@ import { Linking, Pressable, View } from 'react-native';
 import { ExternalLink, MessageSquare, type LucideIcon } from 'lucide-react-native';
 import { Page, Row, Sheet, Type, useDesign } from '../design';
 import { buildResearchDraft, marketErrorText, marketLimitationText, marketQueryKey, type MarketQuery, type MarketReport } from './core';
+import { CompanyResearchPanel } from '../company-research/page';
 import { useMarketData } from './use-market-data';
 
 type Outbound = { title: string; url: string };
@@ -97,6 +98,7 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
 }) {
   const { text, colors, locale } = useDesign();
   const [query, setQuery] = useState<MarketQuery>(initialQuery ?? { kind: 'crypto', asset: 'BTC' });
+  const [companies, setCompanies] = useState(false);
   const [outbound, setOutbound] = useState<Outbound | null>(null);
   const [sourceDetails, setSourceDetails] = useState(false);
   const [linkError, setLinkError] = useState(false);
@@ -113,12 +115,12 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
     if (!active) { handoff.current?.abort(); handoff.current = null; }
     return () => { handoff.current?.abort(); handoff.current = null; };
   }, [active]);
-  const market = useMarketData(query, active);
+  const market = useMarketData(query, active && !companies);
   const loading = market.phase === 'loading';
   const oldResult = Boolean(market.report && (market.stale || market.phase === 'error' || market.phase === 'cancelled'));
   const currentProvider = query.kind === 'crypto' ? 'Chainlink · Ethereum' : query.kind === 'filings' ? 'SEC EDGAR' : query.topic === 'fed' ? text('美联储', 'Federal Reserve') : 'GDELT';
   const providerUrl = query.kind === 'crypto' ? 'https://docs.chain.link/data-feeds/using-data-feeds' : query.kind === 'filings' ? 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' : query.topic === 'fed' ? 'https://www.federalreserve.gov/feeds/feeds.htm' : 'https://www.gdeltproject.org/';
-  const choose = (next: MarketQuery) => { if (marketQueryKey(next) === marketQueryKey(query)) return; market.cancel(); setHandoffError(false); setQuery(next); };
+  const choose = (next: MarketQuery) => { setCompanies(false); if (marketQueryKey(next) === marketQueryKey(query)) return; market.cancel(); setHandoffError(false); setQuery(next); };
   const preview = (link: Outbound) => { setLinkError(false); setSourceDetails(false); setOutbound(link); };
   const openLink = async () => {
     if (!outbound || !publicHost(outbound.url)) { setLinkError(true); return; }
@@ -142,10 +144,11 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
   };
   return <Page title={text('市场资料', 'Market research')} description={text('按需查看公开行情、公司公告和新闻标题，核对来源后整理分析草稿。', 'Look up public quotes, company filings and news headlines, then prepare a research draft with its sources.')} action={<Button label={text('数据来源', 'Data sources')} onPress={() => setSourceDetails(true)} />}>
     <Group>
-      <Button label={text('加密货币行情', 'Crypto quotes')} selected={query.kind === 'crypto'} onPress={() => choose({ kind: 'crypto', asset: 'BTC' })} />
-      <Button label={text('美国公司公告', 'US company filings')} selected={query.kind === 'filings'} onPress={() => choose({ kind: 'filings', company: 'AAPL' })} />
-      <Button label={text('新闻热点', 'News themes')} selected={query.kind === 'news'} onPress={() => choose({ kind: 'news', topic: 'fed' })} />
+      <Button label={text('加密货币行情', 'Crypto quotes')} selected={!companies && query.kind === 'crypto'} onPress={() => choose({ kind: 'crypto', asset: 'BTC' })} />
+      <Button label={text('全球公司研究', 'Global companies')} selected={companies} onPress={() => { market.cancel(); closeHandoff(); setCompanies(true); }} />
+      <Button label={text('新闻热点', 'News themes')} selected={!companies && query.kind === 'news'} onPress={() => choose({ kind: 'news', topic: 'fed' })} />
     </Group>
+    {companies ? <CompanyResearchPanel active={active} onAnalyze={onAnalyze} conversations={conversations} historyBusy={historyBusy} historyError={historyError} hasMoreHistory={hasMoreHistory} onLoadHistory={onLoadHistory} signedIn={signedIn} /> : <>
     <View style={{ gap: 12 }}>
       <Type size={15} weight="600">{query.kind === 'crypto' ? text('选择资产', 'Choose an asset') : query.kind === 'filings' ? text('选择公司', 'Choose a company') : text('选择主题', 'Choose a topic')}</Type>
       <Group>
@@ -193,6 +196,7 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
         <Button primary label={text('用于对话', 'Use in chat')} disabled={!active || loading || market.report.records.length === 0} onPress={openHandoff} />
       </View>
     </View> : null}
+    </>}
     <Sheet visible={active && Boolean(handoffReport)} title={text('选择对话', 'Choose a chat')} onClose={closeHandoff}>
       <Type muted>{text('只带入这次查询的公开资料。不会自动发送，也不会覆盖已有草稿。', 'Use only this public result. Nothing is sent automatically and existing drafts are preserved.')}</Type>
       <Button primary icon={MessageSquare} label={handoffBusy ? text('正在准备草稿…', 'Preparing draft…') : text('新建小Q对话', 'New chat with Q')} disabled={handoffBusy || historyBusy} onPress={() => void sendToChat()} />
@@ -208,7 +212,8 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
     <Sheet visible={active && sourceDetails} title={text('来源与可用范围', 'Sources and availability')} onClose={() => setSourceDetails(false)}>
       <Type size={14} muted>{text('公开网址不等于业务已连接。来源只有在查询成功后才显示获取时间；本页不读取账户、凭据或个人财务资料。', 'A public URL does not establish a connection. A fetch time appears only after a successful query. This page does not read accounts, credentials or personal financial records.')}</Type>
       <Row title="Chainlink · Ethereum" subtitle={text('公开链上只读参考价；无需钱包或交易，来源更新时间与获取时间分开显示。', 'Public on-chain reference prices, read-only without a wallet or transaction. Source update and retrieval times are shown separately.')} onPress={() => preview({ title: 'Chainlink Data Feeds', url: 'https://docs.chain.link/data-feeds/using-data-feeds' })} />
-      <Row title="SEC EDGAR" subtitle={text('按需查询公开申报元数据；未查询不代表已连接。', 'On-demand public filing metadata. Availability is not a completed connection.')} onPress={() => preview({ title: 'SEC EDGAR', url: 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' })} />
+      <Row title="Wikidata" subtitle={text('全球公司候选与交易所记录；目录不完整，当前上市状态未经独立核验。', 'Global issuer candidates and exchange records; incomplete directory and unverified current listing status.')} onPress={() => preview({ title: 'Wikidata', url: 'https://www.wikidata.org/' })} />
+      <Row title="SEC EDGAR" subtitle={text('按需查询 EDGAR 主体目录、申报及标准年度财务数据；不覆盖全球全部财报。', 'On-demand EDGAR issuer directory, filings and standard annual financial facts; global reports are not fully covered.')} onPress={() => preview({ title: 'SEC EDGAR', url: 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' })} />
       <Row title={text('美联储 / GDELT', 'Federal Reserve / GDELT')} subtitle={text('公开新闻源；GDELT 可能限流，未抓取文章全文。', 'Public news sources; GDELT may rate-limit requests. Article bodies are not fetched.')} last />
       <Type size={16} weight="600">{text('需官方权限，未连接', 'Official access required · Not connected')}</Type>
       {externalProviders.map(provider => <Row key={provider.name[1]} title={text(provider.name[0], provider.name[1])} subtitle={`${text('需官方权限，未连接', 'Official access required · Not connected')}\n${publicHost(provider.url)}`} onPress={() => preview({ title: text(provider.name[0], provider.name[1]), url: provider.url })} last />)}

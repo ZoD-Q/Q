@@ -1,3 +1,5 @@
+import { searchCompanies, researchCompany } from '../company-research/client';
+import { buildCompanyResearchText } from '../company-research/core';
 import { requestMarketReport } from '../market-data/client';
 import { buildResearchDraft, marketErrorText } from '../market-data/core';
 import { MarketDataSession, publicMemory } from '../market-data/use-market-data';
@@ -25,6 +27,11 @@ export function appResultContext(result: AppReadResult): string {
 export async function executeAppCommand(value: AppCommand, locale: 'zh' | 'en', options: { signal: AbortSignal; transport: typeof fetch }): Promise<AppReadResult> {
   const command = validateAppCommand(value);
   if (options.signal.aborted) throw new Error('CANCELLED');
+  if (command.name === 'company_search' || command.name === 'company_research') {
+    const report = command.name === 'company_search' ? await searchCompanies(command.arguments.query, options) : await researchCompany(command.arguments.issuerId, options);
+    if (options.signal.aborted) throw new Error('CANCELLED');
+    return { text: buildCompanyResearchText(report, locale), actions: [createAppNavigationAction('market-data', locale)] };
+  }
   const local = executeLocalAppCommand(command, locale);
   if (command.name !== 'market_query') return local;
   const session = new MarketDataSession(command.arguments, {

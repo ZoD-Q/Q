@@ -15,7 +15,7 @@
 | 能力 | 数据源 | 边界 |
 | --- | --- | --- |
 | BTC / ETH / SOL 美元参考价 | Ethereum 上的 Chainlink Data Feeds，经 Alchemy 公共 RPC 只读获取 | 正式与开发构建使用同一路径；仅价格和链上更新时间，不提供24小时变化、成交量或市值，不是交易所成交报价。无需钱包或供应商密钥 |
-| 美国公司公告 | SEC submissions，AAPL / MSFT / NVDA | 最近公开申报文件，不是美股报价。公告日、报告期和受理时间分开显示 |
+| 全球公司研究 | SEC 目录、Wikidata 候选、SEC submissions/companyfacts | 不限三家公司；覆盖缺口、身份与年度财务口径见[全球公司研究](company-research.md)。旧三家公司元数据查询仅保留兼容 |
 | 宏观新闻 | 美联储货币政策 RSS | 官方公告标题、短摘要和原文链接，不代表所有财经新闻 |
 | 全球财经、加密、科技新闻 | GDELT DOC 2 公开 JSON | 仅元数据，索引时间不等于发布时间；本机探测曾返回 429，遇限流保持错误，不换源伪装成功 |
 
@@ -24,6 +24,8 @@
 金十已有官方 MCP 文档；同花顺 iFinD 有官方 HTTP API；Alpaca 和 Massive 可提供美股数据，其中 Massive 另有官方 MCP。这些服务在本页都标为“需官方权限，未连接”，只提供公开说明入口，没有密钥输入、自动授权或后台凭据查找。没有调用这些服务的认证接口。
 
 ## 网络与数据处理
+
+以下512KiB和10秒限制适用于原行情/新闻/兼容申报工具；新增公司搜索和财务读取的独立字节、时间及覆盖边界见[全球公司研究](company-research.md)。
 
 - 请求地址由工具类型和固定选项生成，不接受任意请求 URL。新闻和公告使用 HTTPS GET；链上参考价使用固定 JSON-RPC POST 批量读取链 ID、feed 小数位和最新轮次。POST 在这里仅查询，不签名、不广播交易，不接受任意方法、合约或 RPC 地址。所有公开源均不发送 Q 会话、Cookie、Authorization 或个人数据。
 - 使用现有 `expo/fetch`，显式 `credentials: omit` 与 `redirect: error`。Expo 58 的 iOS/Android 原生实现会拒绝跟随；收到重定向或不匹配地址仍拒绝。

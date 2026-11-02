@@ -4511,6 +4511,13 @@
               1
             ],
             "description": "Support for version-1 public application tools. Missing on older servers; the client must discover this version before opting in."
+          },
+          "company_research_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ],
+            "description": "Optional discovery flag for global public company search and covered annual financial research."
           }
         }
       },
@@ -4595,9 +4602,16 @@
             "type": "boolean",
             "default": false,
             "description": "Only with application version 1 and nonempty app_context. Disable further tool proposals and explain already obtained public results; used for explicit resume without re-querying."
+          },
+          "company_research_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ],
+            "description": "Opt in only after observing company_research_version=1 in AiStatus. Requires app_tools_version=1, standard mode and no plugin fields. Without this flag, company tools cannot be proposed or included in app_context."
           }
         },
-        "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions."
+        "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
       },
       "AiUsage": {
         "type": "object",
@@ -7331,9 +7345,72 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_search"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "Trimmed nonempty single-line public company name or ticker; no controls or bidi overrides."
+                  }
+                }
+              }
+            },
+            "description": "Only when company_research_version=1 was negotiated."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_research"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issuerId"
+                ],
+                "properties": {
+                  "issuerId": {
+                    "type": "string",
+                    "pattern": "^(?:sec:(?!0{10}$)[0-9]{10}|wikidata:Q[1-9][0-9]{0,15})$",
+                    "description": "Source-qualified issuer ID returned by company_search; never an arbitrary URL."
+                  }
+                }
+              }
+            },
+            "description": "Only when company_research_version=1 was negotiated."
           }
         ],
-        "description": "One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization."
+        "description": "One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
       },
       "AppToolContext": {
         "oneOf": [
@@ -7705,9 +7782,84 @@
                 "maxLength": 10000
               }
             }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_search"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "Trimmed nonempty single-line public company name or ticker; no controls or bidi overrides."
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            },
+            "description": "Only when company_research_version=1 was negotiated."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_research"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issuerId"
+                ],
+                "properties": {
+                  "issuerId": {
+                    "type": "string",
+                    "pattern": "^(?:sec:(?!0{10}$)[0-9]{10}|wikidata:Q[1-9][0-9]{0,15})$",
+                    "description": "Source-qualified issuer ID returned by company_search; never an arbitrary URL."
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            },
+            "description": "Only when company_research_version=1 was negotiated."
           }
         ],
-        "description": "Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results."
+        "description": "Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
       }
     }
   }

@@ -125,7 +125,7 @@ Manual GET of a completed job may refresh its expiring signed media URL under th
 
 ## DeepSeek text conversations
 
-`GET /v1/ai/status` is public and returns `{configured, models:[{id,name}]}` with optional capability flags `automatic_readonly_tools` and `app_tools_version:1`. `configured` means a server key exists, not that a paid provider request has succeeded. Allowed IDs are `deepseek-flash` and `deepseek-v4-pro`; the UI defaults to Flash. No key fragments, upstream headers or environment diagnostics are exposed.
+`GET /v1/ai/status` is public and returns `{configured, models:[{id,name}]}` with optional capability flags `automatic_readonly_tools` `app_tools_version:1` and `company_research_version:1`. `configured` means a server key exists, not that a paid provider request has succeeded. Allowed IDs are `deepseek-flash` and `deepseek-v4-pro`; the UI defaults to Flash. No key fragments, upstream headers or environment diagnostics are exposed.
 
 `POST /v1/ai/chat` requires the existing Q Bearer session. Body is `{model,thinking,messages:[{role:"user"|"assistant",content}]}`. Unknown fields, client system/tool roles, empty messages, unsupported models, over 40 messages, over 12000 Unicode characters per message, over 24000 total characters or a non-user final message are rejected. The route body limit is 128 KiB. The server supplies the system prompt, provider address, key and output budget; clients cannot override them.
 
@@ -149,6 +149,14 @@ The app uses the shared Q session store: native SecureStore, web memory only, se
 ## First-party application assistant (version 1)
 
 Only after observing `app_tools_version:1` may a client opt into application tools with `{app_tools_version:1, thinking:false}`. This mode is mutually exclusive with plugin connection, invocation and automatic-read flags. Older requests retain their original behavior; older servers receive none of these new fields. Thinking mode can explain supplied material but does not use these application tools.
+
+After observing the independent optional `company_research_version:1` capability, a new client may also send that flag alongside `app_tools_version:1`. The base application version stays at 1. Without the company flag, the server never advertises or emits company tools and rejects company contexts and unsolicited provider proposals. Null/unknown versions and company opt-in without application mode are invalid. The shared three-result/24,000-character context budget remains unchanged.
+
+- `company_search {query}` searches public global company/listing candidates: trimmed nonempty single-line text, at most 120 Unicode characters, no controls/bidi overrides.
+- `company_research {issuerId}` reads covered annual public financial facts. IDs are `sec:` plus exactly ten digits (not all zero), or `wikidata:Q` plus 1–16 digits with no leading zero. IDs come from search results; arbitrary URLs are forbidden.
+
+Global coverage is incomplete. Candidates retain source identity, exchange/listing qualifiers, retrieval timestamps and explicit missing/error states. Name/ticker matches do not authorize issuer merging or establish current listing. Financial facts are distinct from full filing text or risk discussion; preserve period, currency/unit, taxonomy and accession, leave missing values unavailable, and calculate only comparable periods. The server treats results as untrusted public client context, never authoritative account data or permission to trade. This extension requires updated client and server; source implementation alone does not mean deployment.
+
 
 The server supplies fixed function schemas for `app_info`, `insurance_search`, `insurance_compare`, `market_query` and `app_open` (provider function names use `q_` prefixes). A successful proposal emits SSE `app_tool` with `{name,arguments}`, followed by `done.finish_reason=tool_calls`; at most one proposal per stream. The client validates it again. Insurance reads use the installed public knowledge catalog; market reads use only fixed supported assets, companies and topics. Navigation produces a card requiring a user click, with validated module/filter parameters, never an arbitrary URL. These tools cannot access bank accounts, private chats, payments, credentials or paid video jobs. Existing plugin and business authorization remain separate.
 
