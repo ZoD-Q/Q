@@ -49,7 +49,7 @@
     "export:web": "expo export --platform web",
     "test:utils": "node --test src/utils/*.test.mjs scripts/store-config.test.mjs",
     "test:video": "node --test src/prototype/video/pricing.test.mjs",
-    "test:plugins": "node --test src/prototype/plugin-workbench/materials.test.mjs src/prototype/plugin-host/*.test.mjs src/prototype/banking/*.test.mjs",
+    "test:plugins": "node --test src/prototype/plugin-workbench/materials.test.mjs src/prototype/plugin-host/*.test.mjs src/prototype/banking/*.test.mjs src/prototype/financial-plugins/*.test.mjs",
     "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs",
     "test:chat": "node --test src/prototype/ai-chat/*.test.mjs src/prototype/finance-agent/*.test.mjs src/prototype/finance-ads/*.test.mjs src/prototype/market-data/*.test.mjs src/prototype/company-research/*.test.mjs src/prototype/app-assistant/*.test.mjs src/services/session-core.test.mjs",
     "test:account": "node --test src/prototype/account/*.test.mjs",

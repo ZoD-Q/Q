@@ -5,7 +5,7 @@ import { workbenchRequest, WorkbenchError } from '../api-workbench/core';
 
 /** Same Q identity as chat, but plugin authorization errors never clear it. No retries. */
 export async function pluginRequest<T>(token: string, path: string, decode: (value: unknown) => T, options: {
-  method?: 'GET' | 'POST' | 'DELETE'; body?: unknown; signal?: AbortSignal;
+  method?: 'GET' | 'POST' | 'DELETE'; body?: unknown; signal?: AbortSignal; timeoutMs?: number;
 } = {}): Promise<T> {
   try {
     return await workbenchRequest({ baseUrl: API_URL, path, decode, token, transport: expoFetch, ...options });

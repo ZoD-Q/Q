@@ -186,6 +186,7 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test payments -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test financial_plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --lib trusted_readonly_rechecks -- --ignored
 
 deploy-check:

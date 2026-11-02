@@ -1024,6 +1024,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plugins/financial/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFinancialProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/financial/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Idempotently add a personal fixed provider connection. No business calls. Reconnect clears old credentials; authorization remains separate. */
+        post: operations["connectFinancialProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description iFinD and Jin10 only. Encrypts credentials bound to owner, connection, revision and endpoint; invalidates old proposals and verifies catalog. Returns saved connection even on verification failure, never secret. iFinD accepts exact Authorization value; Jin10 accepts raw MCP Token. No auto retry. Third-party 401 never becomes Q-session 401. Requires encryption configuration. */
+        post: operations["setFinancialProviderCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/payments/capabilities": {
         parameters: {
             query?: never;
@@ -1588,6 +1638,11 @@ export interface components {
             connection_kind: "remote_mcp" | "bank_demo";
             /** @enum {string|null} */
             builtin_service_id: null | "q.bank-demo.hsbc" | "q.bank-demo.hangseng" | "q.bank-demo.bochk" | "q.bank-demo.scb" | "q.bank-demo.bea" | "q.bank-demo.dbs" | "q.bank-demo.citi" | "q.bank-demo.icbc" | "q.bank-demo.ccb" | "q.bank-demo.ncb" | "q.bank-demo.citic" | "q.bank-demo.cmbwinglung" | "q.bank-demo.dahsing" | "q.bank-demo.fubon" | "q.bank-demo.chiyu" | "q.bank-demo.shacombank" | "q.bank-demo.bocom" | "q.bank-demo.za" | "q.bank-demo.mox" | "q.bank-demo.livi";
+            /**
+             * @description Optional server-owned financial profile; remains remote_mcp. External Card metadata never selects this field.
+             * @enum {string|null}
+             */
+            financial_provider_id?: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | null;
         };
         PluginInvocationRequest: {
             /** Format: uuid */
@@ -2216,6 +2271,23 @@ export interface components {
                 issuerId: string;
             };
             result: string;
+        };
+        FinancialProviderCatalog: {
+            available: boolean;
+            /** @description API-key storage requires encryption independently of OAuth hosting. */
+            credentials_configured: boolean;
+            oauth_configured: boolean;
+            providers: {
+                /** @enum {string} */
+                id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko";
+                name: string;
+                description: string;
+                /** Format: uri */
+                homepage_url: string;
+                /** @enum {string} */
+                auth_mode: "none" | "api_key" | "oauth";
+                connection: components["schemas"]["PluginConnection"] | null;
+            }[];
         };
         PaymentQuoteRequest: {
             /** @enum {string} */
@@ -4761,6 +4833,108 @@ export interface operations {
                 };
             };
             /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listFinancialProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinancialProviderCatalog"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    connectFinancialProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    provider_id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko";
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginConnection"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    setFinancialProviderCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    secret: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginConnection"];
+                };
+            };
+            /** @description Structured error. Plugin authorization failures use 409 PLUGIN_AUTH_REQUIRED and never invalidate the Q session. */
             default: {
                 headers: {
                     [name: string]: unknown;
