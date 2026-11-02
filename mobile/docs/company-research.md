@@ -44,9 +44,9 @@
 
 ## 验收
 
-本地最终检查：移动端 typecheck、lint、export:web 和全部7组功能测试通过，共529项、0失败/跳过；API共享类型再生完成。Rust fmt、clippy默认及all-features通过；cargo test为75项单元及3项其他测试通过。独立PostgreSQL17测试库运行all-features的postgres、ai_history、social、plugins、ai_plugins，共43项通过；没有访问业务数据库。备份恢复路径未改动，本轮没有重新运行social_backup。
+本地最终检查：移动端 typecheck、lint、export:web 和全部7组功能测试通过，共529项、0失败/跳过；API共享类型再生完成。Rust fmt、clippy默认及all-features通过；cargo test为75项单元及3项其他测试通过。独立PostgreSQL17测试库运行all-features的postgres、ai_history、social、plugins、ai_plugins，共43项通过；补充ai-test-fixtures下ai_chat 5项通过，共48项隔离数据库测试。没有访问业务数据库。备份恢复路径未改动，本轮没有重新运行social_backup。
 
-独立只读review已完成，修复日期区间状态、精确代码排序后无遗留P1/P2。离线测试覆盖错误与空结果区分、名称/CIK不匹配、年度与币种/申报可比性、429冷却、取消与迟到结果、旧服务协商及草稿交接。差异检查通过，PR/MR最终远端结果以各自最新提交检查为准。
+独立只读review已完成，修复日期区间状态、精确代码排序后无遗留P1/P2。离线测试覆盖错误与空结果区分、名称/CIK不匹配、年度与币种/申报可比性、429冷却、取消与迟到结果、旧服务协商及草稿交接。差异检查通过，首轮GitHub检查发现ai_chat集成断言仍使用旧状态字段，已按新合同补充company_research_version并重跑通过；PR/MR最终远端结果以各自最新提交检查为准。
 
 iPhone17/iOS26.5/Expo Go实际读取Tencent：区分Tencent Music与香港Tencent记录；Tencent无唯一SEC映射时显示财报未接入。TSM搜索显示SEC和Wikidata独立主体及NYSE/台湾上市记录；精确证券代码优先。读取SEC台积电返回15项IFRS年度事实，2024/2023与TWD/USD分别标示，营收同比33.89%、净利率39.99%以同币种同申报计算，2025-04-17的20-F来源可核对；没有声称已取得最新财年。原生Wikidata和SEC均实际成功，Node探测中Wikidata也出现网络失败，来源可用性不承诺。
 
