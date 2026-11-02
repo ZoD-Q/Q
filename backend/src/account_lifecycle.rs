@@ -1,5 +1,5 @@
 //! Revocable account access, explicit deletion and restricted operator primitives.
-//! Deletion retains immutable simulated-ledger records and minimal recovery tombstones.
+//! Deletion retains immutable ledger records and refuses unresolved real-HKD obligations.
 use axum::{Json, extract::State, http::StatusCode};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
@@ -216,6 +216,7 @@ async fn erase(
             "This deletion request identifier is already in use.",
         ));
     }
+    crate::ledger::real_hkd::guard_deletion(&mut tx, user_id).await?;
     let replacement_handle = unused_deleted_handle(&mut tx).await?;
     purge_private_data(&mut tx, user_id)
         .await

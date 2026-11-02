@@ -66,7 +66,14 @@ function PageContent({ pageId }: { pageId: string }) {
   const all = pageId === 'incidents' ? selectIssues(state) : state.entities.filter((item) => item.pageId === pageId);
   const statuses = [...new Set(all.map((item) => item.status))];
   const filtered = all.filter((item) => (status === 'all' || item.status === status) && `${item.id} ${text(item.name)} ${text(item.summary)} ${item.owner}`.toLowerCase().includes(query.toLowerCase()));
-  const set = (key: string, value: string) => { const next = new URLSearchParams(params); if (value && value !== 'all' && value !== 'normal') next.set(key, value); else next.delete(key); next.delete('item'); setParams(next, { replace: true }); };
+  const set = (key: string, value: string) => {
+    // BrowserRouter updates history before its deferred render. Consecutive controls
+    // must merge that latest URL rather than restore this render's stale parameters.
+    const next = new URLSearchParams(window.location.search);
+    if (value && value !== 'all' && value !== 'normal') next.set(key, value); else next.delete(key);
+    next.delete('item');
+    setParams(next, { replace: true });
+  };
   if (pageId === 'dashboard') return <Dashboard/>;
   if (pageId === 'audit' || pageId === 'activity') return <ActivityLog/>;
   return <section className="panel page-panel">

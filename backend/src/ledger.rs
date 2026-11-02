@@ -1,5 +1,6 @@
 //! Sole owner of wallets, immutable journal records, and simulated QDC transfers.
 pub mod bank_demo;
+pub mod real_hkd;
 use axum::{Json, extract::State};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

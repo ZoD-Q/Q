@@ -3,6 +3,10 @@
 Local API: http://127.0.0.1:8787. JSON UTF-8, snake_case fields. ISO 8601 UTC timestamps, UUID IDs. Error responses: `{ "error": { "code": "...", "message": "..." } }`.
 Authenticated endpoints require `Authorization: Bearer <opaque token>`; sessions expire and can be revoked. No token in URLs or logs. Only identity owns sessions; profiles owns preferences; ledger owns wallet writes. Financial amounts are integer minor units: 100 = 1.00 Q for QDC or HK$1.00 for the separate bank simulation ledger; both are always demo.
 
+## Payment wallet (default disabled)
+
+See [payment contract](payments.md) for `/v1/payments` capabilities, independent HKD wallet, CNY quotes, orders, recovery, signed notification hints and maker/checker approval. These funds never mix with QDC or bank simulations. Missing merchant/rate/policy configuration disables new funding. Source implementation and isolated tests do not mean deployment, provider activation or real settlement.
+
 ## Built-in bank plugins and HKD wallet
 
 See [banking contract](banking.md). `GET /v1/banking/wallet`, `POST /v1/banking/connect`, and paginated `GET /v1/banking/transactions` / `entries` reuse Q identity and return `no-store`. The first explicit addition issues HKD 100,000 to each new simulated account; retries never refill balances. Existing QDC routes are unchanged.

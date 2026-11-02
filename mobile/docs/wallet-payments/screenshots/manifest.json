@@ -1,0 +1,775 @@
+{
+  "schema_version": 1,
+  "archived_at": "2026-11-02T16:44:03.127503+00:00",
+  "scope": "4 official KAI Web observations, 28 Q component synthetic QA captures and 4 Q production-wallet component captures against isolated local API; no native KAI screenshots or live payment evidence; 3 native Q component fixture captures",
+  "metadata_policy": "Use last matching name in source captures.jsonl; missing metadata stays null. AX text checked locally when expected is supplied, never exported. Image bytes copied without modification.",
+  "encoding_note": "Source filenames have .png extension but contain JPEG/JFIF bytes; archives use .jpg without transcoding and retain source_original_filename.",
+  "files": [
+    {
+      "file": "kai-web/01-login.jpg",
+      "source_original_filename": "01-login.png",
+      "sha256": "1c2a21dafa2a25df387674d2b61b1f4afa780e38336867464531a35d092065b7",
+      "bytes": 311900,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "official_web_observation",
+      "capture_metadata": null,
+      "metadata_status": "no_matching_record_time_and_expected_not_invented",
+      "expected_ax_match": null
+    },
+    {
+      "file": "kai-web/02-session-expired.jpg",
+      "source_original_filename": "02-session-expired.png",
+      "sha256": "a5fecf9b375b8962fa723a03eff6d13d9db0861477259602cbe9efb0632c6b47",
+      "bytes": 328536,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "official_web_observation",
+      "capture_metadata": null,
+      "metadata_status": "no_matching_record_time_and_expected_not_invented",
+      "expected_ax_match": null
+    },
+    {
+      "file": "kai-web/03-demo-funds-account.jpg",
+      "source_original_filename": "03-demo-funds-account.png",
+      "sha256": "cf3b41bf425af37dd34a6ba038e8377feaf01aa3c17d244af52425940ca126fd",
+      "bytes": 289882,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "official_web_observation",
+      "capture_metadata": {
+        "name": "03-demo-funds-account",
+        "description": "资产→资金→资金账户；展示余额分项，充值与提现均尚未开放",
+        "scope": "KAI official WEB DEMO, not native iOS or real payment",
+        "capturedAt": "2026-11-02T15:04:45.974Z"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": null
+    },
+    {
+      "file": "kai-web/04-demo-ledger-empty.jpg",
+      "source_original_filename": "04-demo-ledger-empty.png",
+      "sha256": "b17499c6795d344f965f5ffdf699358542a31bfc39c8d33d360210cc9698607a",
+      "bytes": 235378,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "official_web_observation",
+      "capture_metadata": {
+        "name": "04-demo-ledger-empty",
+        "description": "资金→资金流水；按交易/分录组织记录，空状态不补造交易",
+        "scope": "KAI official WEB DEMO, not native iOS or real payment",
+        "capturedAt": "2026-11-02T15:42:01.354Z"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": null
+    },
+    {
+      "file": "q-web/01-amount-wechat.jpg",
+      "source_original_filename": "01-amount-wechat.png",
+      "sha256": "76a526a4e7814ab42196cd84d284c8220e64d97aeff60c60119ef1626065f259",
+      "bytes": 152677,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "01-amount-wechat",
+        "description": "希望到账HKD金额与微信方式；窄屏金额输入与方式选择",
+        "scope": "Q actual components, local synthetic controller transport; no supplier call or real funds",
+        "capturedAt": "2026-11-02T16:09:18.896Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": null
+    },
+    {
+      "file": "q-web/02-method-alipay.jpg",
+      "source_original_filename": "02-method-alipay.png",
+      "sha256": "7fe4db6076e408248e0ad43439ef39b71024ac7a69d99709ae26bb3ca0df5f77",
+      "bytes": 152719,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "02-method-alipay",
+        "description": "切换支付宝方式，未提交支付",
+        "scope": "Q actual components, local synthetic controller transport; no supplier call or real funds",
+        "capturedAt": "2026-11-02T16:09:19.972Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": null
+    },
+    {
+      "file": "q-web/03-quote-review.jpg",
+      "source_original_filename": "03-quote-review.png",
+      "sha256": "5a2d0c1a7ca022f3c76d107d72014d11cf116989275af17d03dcf5ca45266954",
+      "bytes": 157716,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "03-quote-review",
+        "description": "核对HKD到账、CNY应付、费用、汇率证据和报价有效期",
+        "expected": "核对充值",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:12:11.481Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/04-order-creating.jpg",
+      "source_original_filename": "04-order-creating.png",
+      "sha256": "73ce37ac00641b4947b8c83f09b7a3bf5636421f082cf65defccc4d15bd7f8e5",
+      "bytes": 169302,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "04-order-creating",
+        "description": "确认后保存原请求并进入建立订单状态（本地替身）",
+        "expected": "正在建立订单",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:12:12.608Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/05-awaiting-payment.jpg",
+      "source_original_filename": "05-awaiting-payment.png",
+      "sha256": "19c785a1a05978224fed42279fd6b32c32c8e1637f47745d98052b9b9b3f1fe5",
+      "bytes": 173109,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "05-awaiting-payment",
+        "description": "等待付款使用订单应付金额标签，明确需打开付款页。",
+        "expected": "订单应付",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:54.925Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/06-checkout-handoff.jpg",
+      "source_original_filename": "06-checkout-handoff.png",
+      "sha256": "98ab60dc8f8b41d0edace3c8cce827a6de0f18e34fd88c528473cc254ca4c807",
+      "bytes": 180040,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "06-checkout-handoff",
+        "description": "触发交接按钮；本地验收不会访问供应商或据此入账",
+        "expected": "交接按钮已触发",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:12:14.306Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/07-confirming.jpg",
+      "source_original_filename": "07-confirming.png",
+      "sha256": "e2b37e656e1ea81889517f04461af1871d0dc8968339b39242a003ab36740aa2",
+      "bytes": 177286,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "07-confirming",
+        "description": "付款核实中；不显示重新打开付款页",
+        "expected": "正在核实付款",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:12:15.174Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/08-credit-review.jpg",
+      "source_original_filename": "08-credit-review.png",
+      "sha256": "00d60ccb60ca4716ca3a3973a429be68782bc2d03c10b69db559ba5319e5d0c1",
+      "bytes": 183232,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "08-credit-review",
+        "description": "付款已确认，余额仍待审核入账",
+        "expected": "等待入账审核",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:12:16.197Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/09-crediting.jpg",
+      "source_original_filename": "09-crediting.png",
+      "sha256": "7311172ecab3b0cc7fe43e6266d5c863464c2d8e56a1631f1aee05def9d76f23",
+      "bytes": 167423,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "09-crediting",
+        "description": "入账处理状态，固定测试证据版本保持单调",
+        "expected": "正在入账",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:13:35.584Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/10-credited.jpg",
+      "source_original_filename": "10-credited.png",
+      "sha256": "fd5f9cbeff046902ce890f3375e2e45a1ab134b65f72ddf8b42c9a2f79afa908",
+      "bytes": 161531,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "10-credited",
+        "description": "确认入账后显示到账结果，不再提供付款入口。",
+        "expected": "已入账",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:55.483Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/11-orders-pending-empty.jpg",
+      "source_original_filename": "11-orders-pending-empty.png",
+      "sha256": "1d51bc924a7ad93f279fc771f0a7efb943b86c21d3a45d718a8b3737d5c65cb3",
+      "bytes": 130613,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "11-orders-pending-empty",
+        "description": "待处理订单空列表及刷新入口",
+        "expected": "暂无充值订单",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:13:36.702Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/12-orders-history.jpg",
+      "source_original_filename": "12-orders-history.png",
+      "sha256": "38f997fbb027bc86c2f9bda77d048cac5587d39ee631a30d9ecc303d775a1f4a",
+      "bytes": 136685,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "12-orders-history",
+        "description": "历史充值订单列表；本地固定订单而非真实交易记录",
+        "expected": "已入账",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:15:15.001Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/13-detach-confirm.jpg",
+      "source_original_filename": "13-detach-confirm.png",
+      "sha256": "ac46643f38709ef32b65a7e837466eed047aa2c9a767c76e60f49158314a0ce4",
+      "bytes": 184292,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "13-detach-confirm",
+        "description": "切换支付方式明确提示旧支付仍可能完成",
+        "expected": "确认解除关联",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:15:20.851Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/14-detached.jpg",
+      "source_original_filename": "14-detached.png",
+      "sha256": "7936c3a70a760d1e6c44859861e6b44ba2fc0744254987f8916b920a950ad4a5",
+      "bytes": 178840,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "14-detached",
+        "description": "解除收银台关联后保留原订单状态",
+        "expected": "已解除支付页面关联",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:15:21.743Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/15-amount-empty.jpg",
+      "source_original_filename": "15-amount-empty.png",
+      "sha256": "dcabd878bf7b432c41ab67837d89a98ca0770e925fed73c4022d0945be4f493a",
+      "bytes": 155353,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "15-amount-empty",
+        "description": "清空到账金额；报价按钮保持禁用",
+        "expected": "希望到账的金额",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:19:05.928Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/16-amount-invalid.jpg",
+      "source_original_filename": "16-amount-invalid.png",
+      "sha256": "127b7b05788d2a122a2ea8afee4c4998388c17ae16a6e540f28020413878e49d",
+      "bytes": 162576,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "16-amount-invalid",
+        "description": "最多两位小数的输入约束",
+        "expected": "请输入限额内的港币金额",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:19:06.787Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/17-quote-loading.jpg",
+      "source_original_filename": "17-quote-loading.png",
+      "sha256": "9901c8e558c6b73e44a38ec272d125216a459133e18f3c5a2c759c5e7df2ca78",
+      "bytes": 149745,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "17-quote-loading",
+        "description": "只读报价等待中，控件禁用避免重复操作",
+        "expected": "正在获取报价",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:19:08.846Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/18-quote-expired.jpg",
+      "source_original_filename": "18-quote-expired.png",
+      "sha256": "93373bce9a435da51dd896320269b569efc59bf6f861c4d3e421004c49725804",
+      "bytes": 157395,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "18-quote-expired",
+        "description": "过期报价禁止支付，需要重新获取。",
+        "expected": "报价已过期",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:40:59.852Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/19-quote-error.jpg",
+      "source_original_filename": "19-quote-error.png",
+      "sha256": "dfa12638c545bb67f62a60bd4900defe79b53500b44773924e95b48919b2e074",
+      "bytes": 161202,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "19-quote-error",
+        "description": "报价失败前未建新订单，保留重试入口。",
+        "expected": "尚未创建新的充值订单",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:12.191Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/20-order-failed.jpg",
+      "source_original_filename": "20-order-failed.png",
+      "sha256": "1f4a62632e54abbbdeb593b6dc2443b687ec528436596e5d62d9c40e3c3a4b20",
+      "bytes": 171020,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "20-order-failed",
+        "description": "订单失败显示原编号和查询入口，不自动重付。",
+        "expected": "失败",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:19.557Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/21-order-expired.jpg",
+      "source_original_filename": "21-order-expired.png",
+      "sha256": "ffb8dede88cdb053019208a4893720fc1dd93f087780796150c428e7851f89e6",
+      "bytes": 174544,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "21-order-expired",
+        "description": "订单到期后禁用收银台，保留原订单。",
+        "expected": "过期",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:28.016Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/22-review-required.jpg",
+      "source_original_filename": "22-review-required.png",
+      "sha256": "b655eb720539026370b2e9d01c7b4c17c72ac3fc8354940b489fdb600df436ff",
+      "bytes": 169357,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "22-review-required",
+        "description": "异常付款证据进入人工核实，不当作已入账。",
+        "expected": "核实",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:35.774Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/23-network-unknown.jpg",
+      "source_original_filename": "23-network-unknown.png",
+      "sha256": "f01bd3beae5b455d28c63549087ab8e8919f6d5e8255fc37ac74ef243080f496",
+      "bytes": 177139,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "23-network-unknown",
+        "description": "网络中断保留原订单和原请求，查询恢复。",
+        "expected": "网络",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:36.306Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/24-network-recovered.jpg",
+      "source_original_filename": "24-network-recovered.png",
+      "sha256": "1a912955b382a5696e6770e8ff551b78d1f69daca7b68a36499f6e231449e582",
+      "bytes": 170276,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "24-network-recovered",
+        "description": "网络恢复查询原订单，未新增请求。",
+        "expected": "核实",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:36.858Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/25-service-unavailable.jpg",
+      "source_original_filename": "25-service-unavailable.png",
+      "sha256": "20bc3993fc00b9ec837d741275b8c993b087feda915ee04c6605f8ceb304699d",
+      "bytes": 145641,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "25-service-unavailable",
+        "description": "配置未就绪时禁用充值，不发放模拟余额。",
+        "expected": "暂未开放",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:43.950Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/26-withdrawal-unconfigured.jpg",
+      "source_original_filename": "26-withdrawal-unconfigured.png",
+      "sha256": "dcd73dc6e8bf9acf38b481dfcc1706d679ecf14ffb95b496d27d9640e6f1e6f9",
+      "bytes": 161407,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "26-withdrawal-unconfigured",
+        "description": "提现仅咨询入口；未配置支持地址保持不可发送。",
+        "expected": "提现",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:44.491Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/27-dark-english.jpg",
+      "source_original_filename": "27-dark-english.png",
+      "sha256": "393620b49bccc0ab98f21ea3ed85ee694903d76a6cf80bc64aae1106b6850960",
+      "bytes": 155076,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "27-dark-english",
+        "description": "深色英文窄屏输入页。",
+        "expected": "Add money",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:51.874Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/28-warm-english.jpg",
+      "source_original_filename": "28-warm-english.png",
+      "sha256": "f880d79676bf2bc5bcb362434c41f1ce0c996881121cc810cacefe1ee9f17eda",
+      "bytes": 153450,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "Q_component_synthetic_QA",
+      "capture_metadata": {
+        "name": "28-warm-english",
+        "description": "暖色英文主题沿用语义颜色。",
+        "expected": "Add money",
+        "scope": "Q actual components / isolated synthetic transport / no supplier calls",
+        "capturedAt": "2026-11-02T16:41:52.424Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/29-wallet-isolated-api.jpg",
+      "source_original_filename": "29-wallet-isolated-api.png",
+      "sha256": "f601ac29e9090968b948d33324c37b0cb1452a7701e5b53cf8e267d5932f1117",
+      "bytes": 177536,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "q_components_isolated_api",
+      "capture_metadata": {
+        "name": "29-wallet-isolated-api",
+        "description": "正式钱包组件连接本机隔离Rust接口与测试账户：HKD余额0，配置缺失时充值不可用。非用户资产或供应商验收。",
+        "expected": "港币支付余额",
+        "scope": "Q production wallet component / isolated local Rust API + PostgreSQL test account / no supplier calls",
+        "capturedAt": "2026-11-02T16:43:56.501Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record_with_scope_correction",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/30-withdrawal-q-support.jpg",
+      "source_original_filename": "30-withdrawal-q-support.png",
+      "sha256": "298967013a7ba363781f5f5c759ca4ab0af93d47dac8dce4552ca0d5749938a4",
+      "bytes": 176425,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "q_components_isolated_api",
+      "capture_metadata": {
+        "name": "30-withdrawal-q-support",
+        "description": "正式钱包提现咨询使用Q已有支持地址；没有触发邮件发送或出款。",
+        "expected": "提现",
+        "scope": "Q production wallet component / isolated local Rust API + PostgreSQL test account / no supplier calls",
+        "capturedAt": "2026-11-02T16:43:57.093Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record_with_scope_correction",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/31-wallet-funding-unavailable.jpg",
+      "source_original_filename": "31-wallet-funding-unavailable.png",
+      "sha256": "64aa3e00292210917493cd86af7cfd28bc687a164cd991e453111a1bd8f6ab9e",
+      "bytes": 145783,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "q_components_isolated_api",
+      "capture_metadata": {
+        "name": "31-wallet-funding-unavailable",
+        "description": "本机接口缺少商户配置，正式入口保持不可用。",
+        "expected": "暂未开放",
+        "scope": "Q production wallet component / isolated local Rust API + PostgreSQL test account / no supplier calls",
+        "capturedAt": "2026-11-02T16:43:58.151Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record_with_scope_correction",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-web/32-wallet-read-error.jpg",
+      "source_original_filename": "32-wallet-read-error.png",
+      "sha256": "de2a9b3c48e053336f2e6c9f878bcb9a8a0fc7fbb06e55a04e1984c56f4dbb51",
+      "bytes": 177942,
+      "width": 2444,
+      "height": 1550,
+      "detected_format": "JPEG",
+      "media_type": "image/jpeg",
+      "evidence_kind": "q_components_isolated_api",
+      "capture_metadata": {
+        "name": "32-wallet-read-error",
+        "description": "停止本机隔离API后，余额未知显示—及余额专属重试提示。非真实账户或真实付款。",
+        "expected": "余额暂时无法读取",
+        "scope": "Q production wallet component / isolated local Rust API + PostgreSQL test account / no supplier calls",
+        "capturedAt": "2026-11-02T16:46:17.422Z",
+        "viewport": "Safari responsive 390x844"
+      },
+      "metadata_status": "last_matching_captures_jsonl_record_with_scope_correction",
+      "expected_ax_match": true
+    },
+    {
+      "file": "q-ios/amount-keyboard.jpg",
+      "sha256": "45abb38b5cecf54aa509b4de9b6a3b1d12f718a06ee084521530c61664c80588",
+      "bytes": 42853,
+      "evidence_kind": "q_native_components_synthetic_qa",
+      "capture_metadata": {
+        "runtime": "Expo Go 58.0.4 / iOS 27 simulator",
+        "scope": "Standalone Q components, in-memory journal and fixture transport, no supplier calls; debug harness not production safe-area acceptance"
+      }
+    },
+    {
+      "file": "q-ios/quote-review.jpg",
+      "sha256": "2d81e8ba9e26e3f03ebf976fa419cc376511ed4a57dee194f3e775969f2d1a43",
+      "bytes": 36548,
+      "evidence_kind": "q_native_components_synthetic_qa",
+      "capture_metadata": {
+        "runtime": "Expo Go 58.0.4 / iOS 27 simulator",
+        "scope": "Standalone Q components, in-memory journal and fixture transport, no supplier calls; debug harness not production safe-area acceptance"
+      }
+    },
+    {
+      "file": "q-ios/detach-sheet.jpg",
+      "sha256": "9c5c62c45c63c84c150f2e09c5f033a1544b0b4272de4eeef273c5d6efa65aae",
+      "bytes": 50781,
+      "evidence_kind": "q_native_components_synthetic_qa",
+      "capture_metadata": {
+        "runtime": "Expo Go 58.0.4 / iOS 27 simulator",
+        "scope": "Standalone Q components, in-memory journal and fixture transport, no supplier calls; debug harness not production safe-area acceptance"
+      }
+    }
+  ]
+}

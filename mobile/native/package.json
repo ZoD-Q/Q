@@ -53,7 +53,8 @@
     "test:api-workbench": "node --test src/prototype/api-workbench/core.test.mjs",
     "test:chat": "node --test src/prototype/ai-chat/*.test.mjs src/prototype/finance-agent/*.test.mjs src/prototype/finance-ads/*.test.mjs src/prototype/market-data/*.test.mjs src/prototype/company-research/*.test.mjs src/prototype/app-assistant/*.test.mjs src/services/session-core.test.mjs",
     "test:account": "node --test src/prototype/account/*.test.mjs",
-    "test:social": "node --test src/prototype/social/*.test.mjs"
+    "test:social": "node --test src/prototype/social/*.test.mjs",
+    "test:payments": "node --test src/prototype/payments/*.test.mjs"
   },
   "private": true
 }
