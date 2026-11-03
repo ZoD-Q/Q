@@ -3,13 +3,15 @@ import type { PaymentJournal } from './journal-core';
 import type { FundingState, PaymentChannel, PaymentIdentity, PaymentOrder, PendingPayment } from './types';
 import { amountMinor, decodeOrder, PaymentError, safeCheckout, trustedUnsubmittedProof } from './validation';
 
+const frozenFields = ['quote_id', 'account_id', 'channel', 'credit_currency', 'pay_currency', 'credit_amount_minor_hkd', 'base_amount_minor_cny', 'fee_minor_cny', 'pay_amount_minor_cny', 'fee_basis_points', 'rate_cny_per_100_hkd', 'rate_source', 'rate_source_url', 'rate_source_date', 'rate_at', 'rate_fetched_at', 'rate_evidence_sha256', 'expires_at', 'rounding_policy'] as const;
+
 export const initialFundingState = (): FundingState => ({ phase: 'loading', capabilities: null, quote: null, order: null, pending: null, busy: false, error: '', retryAt: null, serverOffset: 0, orders: { view: 'pending', items: [], cursor: null, busy: false, error: '' } });
 export function createFundingController(deps: {
   client: PaymentClient; journal: PaymentJournal; identity: PaymentIdentity;
   isCurrent(identity: PaymentIdentity): boolean; newId(): string;
   onCredited?(order: PaymentOrder): void | Promise<void>; now?: () => number;
 }) {
-  let state = initialFundingState(); let disposed = false; let active = false; let request: AbortController | null = null;
+  let state = initialFundingState(); let disposed = false; let active = false; let checkoutFresh = false; let request: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null; let polls = 0; let windowStart = 0; let historyVersion = 0;
   let activeBlock: PaymentOrder | null = null;
   let historyRequest: AbortController | null = null;
@@ -24,7 +26,6 @@ export function createFundingController(deps: {
   };
   const canStart = () => !state.pending && !activeBlock && (!state.order || state.order.safe_to_start_new);
   function fail(code: string): never { throw new PaymentError(code); }
-  const frozenFields = ['quote_id', 'account_id', 'channel', 'credit_currency', 'pay_currency', 'credit_amount_minor_hkd', 'base_amount_minor_cny', 'fee_minor_cny', 'pay_amount_minor_cny', 'fee_basis_points', 'rate_cny_per_100_hkd', 'rate_source', 'rate_source_url', 'rate_source_date', 'rate_at', 'rate_fetched_at', 'rate_evidence_sha256', 'expires_at', 'rounding_policy'] as const;
   const accept = async (value: PaymentOrder, expectedId?: string): Promise<PaymentOrder> => {
     check(); const order = decodeOrder(value);
     if (order.account_id !== deps.identity.ownerId || (expectedId && order.client_request_id !== expectedId)) fail('PAYMENT_RESPONSE_MISMATCH');
@@ -53,6 +54,7 @@ export function createFundingController(deps: {
       credited.add(order.payment_id); check();
       try { await deps.onCredited?.(order); } catch { /* Account refresh failure must not reverse confirmed credit. */ }
     }
+    checkoutFresh = active && current() && !request?.signal.aborted;
     return order;
   };
   const schedule = () => {
@@ -64,7 +66,7 @@ export function createFundingController(deps: {
   };
   const run = async (job: (signal: AbortSignal) => Promise<void>) => {
     if (!current() || state.busy || (state.retryAt !== null && now() < state.retryAt)) return;
-    request = new AbortController(); const local = request; emit({ busy: true, error: '', retryAt: null }); stopTimer();
+    checkoutFresh = false; request = new AbortController(); const local = request; emit({ busy: true, error: '', retryAt: null }); stopTimer();
     try { await job(local.signal); check(); }
     catch (error) {
       if (current() && !local.signal.aborted) {
@@ -157,11 +159,12 @@ export function createFundingController(deps: {
       finally { if (historyRequest === local) historyRequest = null; }
     },
     openCheckout: async (open: (url: string) => Promise<unknown>) => {
-      const order = state.order; if (!current() || !order || order.status !== 'awaiting_payment' || order.checkout_detached || order.terminal || !safeCheckout(order.checkout_url) || Date.parse(order.checkout_expires_at) <= now() + state.serverOffset) return;
+      const order = state.order; if (!current() || !active || state.busy || !checkoutFresh || !order || order.status !== 'awaiting_payment' || order.checkout_detached || order.terminal || !safeCheckout(order.checkout_url) || Date.parse(order.checkout_expires_at) <= now() + state.serverOffset) return;
       // Explicit user action only; browser return is never credit evidence.
       try { check(); await open(order.checkout_url); } catch { emit({ error: 'PAYMENT_CHECKOUT_UNAVAILABLE' }); }
     },
     setActive: (value: boolean) => {
+      if (!value || !active) checkoutFresh = false;
       if (value && !active) { polls = 0; windowStart = now(); } active = value;
       if (!value) { stopTimer(); request?.abort(); cancelHistory(); } else { schedule(); void refresh(); }
     },
@@ -169,3 +172,74 @@ export function createFundingController(deps: {
   };
 }
 export type FundingController = ReturnType<typeof createFundingController>;
+
+/** Independent selected-order reads never replace the primary funding/recovery state. */
+export function createPaymentDetailController(deps: {
+  client: PaymentClient; ownerId: string; isCurrent(): boolean; canDetach(): boolean;
+  onChanged?(): void | Promise<void>; onCredited?(order: PaymentOrder): void | Promise<void>;
+}) {
+  let state: { paymentId: string | null; order: PaymentOrder | null; busy: boolean; error: string; serverOffset: number } = { paymentId: null, order: null, busy: false, error: '', serverOffset: 0 };
+  let active = false; let disposed = false; let checkoutFresh = false; let request: AbortController | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null; let polls = 0; let retryAt = 0;
+  const listeners = new Set<() => void>(); const credited = new Set<string>();
+  const current = () => !disposed && deps.isCurrent();
+  const emit = (patch: Partial<typeof state>) => { if (current()) { state = { ...state, ...patch }; for (const listener of listeners) listener(); } };
+  const stop = () => { if (timer) clearTimeout(timer); timer = null; };
+  const cancel = () => {
+    checkoutFresh = false; stop(); request?.abort(); request = null;
+    // A synchronous disconnect fences publication, but a reconnect may reuse this
+    // reader. Always release its internal request state without notifying that identity.
+    if (current()) emit({ busy: false }); else state = { ...state, busy: false };
+  };
+  const schedule = () => {
+    stop();
+    if (!current() || !active || state.busy || !state.paymentId || state.order?.terminal || state.order?.status === 'review_required' || state.error === 'UNAUTHORIZED' || polls >= 20) return;
+    const delay = Math.max(5000, Math.min(60000, (state.order?.poll_after_seconds ?? 10) * 1000));
+    timer = setTimeout(() => { polls++; void refresh(); }, Math.max(delay, retryAt - Date.now()));
+  };
+  const accept = async (value: PaymentOrder, id: string) => {
+    const order = decodeOrder(value); const previous = state.order;
+    if (order.payment_id !== id || order.account_id !== deps.ownerId || (previous && (frozenFields.some(field => previous[field] !== order[field]) || previous.client_request_id !== order.client_request_id || order.evidence_version < previous.evidence_version || (previous.status === 'credited' && order.status !== 'credited')))) throw new PaymentError('PAYMENT_RESPONSE_MISMATCH');
+    emit({ order, error: '', serverOffset: Date.parse(order.server_time) - Date.now() }); checkoutFresh = true;
+    if (order.status === 'credited' && !credited.has(id)) { credited.add(id); try { await deps.onCredited?.(order); } catch { /* Balance refresh cannot reverse confirmed credit. */ } }
+  };
+  const run = async (job: (id: string, signal: AbortSignal) => Promise<PaymentOrder>, changed = false) => {
+    const id = state.paymentId;
+    if (!current() || !active || !id || state.busy || Date.now() < retryAt) return;
+    checkoutFresh = false; stop(); const local = new AbortController(); request = local; emit({ busy: true, error: '' });
+    try {
+      const order = await job(id, local.signal);
+      if (!current() || !active || local.signal.aborted || request !== local || state.paymentId !== id) return;
+      await accept(order, id);
+      if (changed && current() && !local.signal.aborted) await deps.onChanged?.();
+    } catch (error) {
+      if (current() && !local.signal.aborted && request === local) {
+        if (error instanceof PaymentError && error.status === 429) retryAt = Date.now() + 60_000;
+        emit({ error: error instanceof PaymentError ? error.code : 'NETWORK_ERROR' });
+      }
+    } finally { if (request === local) { request = null; emit({ busy: false }); schedule(); } }
+  };
+  function refresh() { return run((id, signal) => deps.client.get(id, signal)); }
+  return {
+    getSnapshot: () => state,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    select(id: string) { cancel(); polls = 0; retryAt = 0; emit({ paymentId: id, order: null, error: '', serverOffset: 0 }); void refresh(); },
+    refresh,
+    detach: () => run(async (id, signal) => {
+      if (!state.order?.can_detach_checkout || !deps.canDetach()) throw new PaymentError('PAYMENT_DETACH_UNAVAILABLE');
+      const result = await deps.client.detach(id, signal);
+      if (result.payment.payment_id !== id || !result.payment.checkout_detached) throw new PaymentError('PAYMENT_RESPONSE_MISMATCH');
+      return result.payment;
+    }, true),
+    async openCheckout(open: (url: string) => Promise<unknown>) {
+      if (!current() || !active || state.busy) return;
+      const selected = state.paymentId;
+      await refresh();
+      const order = state.order;
+      if (!current() || !active || state.busy || !checkoutFresh || !order || order.payment_id !== selected || order.status !== 'awaiting_payment' || order.checkout_detached || order.terminal || !safeCheckout(order.checkout_url) || Date.parse(order.checkout_expires_at) <= Date.now() + state.serverOffset) return;
+      try { await open(order.checkout_url); } catch { if (current() && active && state.paymentId === order.payment_id) emit({ error: 'PAYMENT_CHECKOUT_UNAVAILABLE' }); }
+    },
+    setActive(value: boolean) { if (!value) { active = false; cancel(); } else if (!active) { active = true; polls = 0; void refresh(); } },
+    dispose() { cancel(); disposed = true; active = false; listeners.clear(); },
+  };
+}

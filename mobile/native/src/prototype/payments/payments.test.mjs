@@ -148,8 +148,8 @@ test('generic missing endpoint never authorizes Q command replay', async () => {
 });
 test('only awaiting-payment can open checkout; returning from checkout does not credit', async () => {
   for (const status of ['creating', 'awaiting_payment', 'confirming', 'awaiting_credit_approval', 'crediting', 'review_required']) {
-    const f = fixture({ active: async () => order({ status, checkout_url: 'https://api.payqixiang.cn/checkout' }) });
-    await f.controller.load(); let opened = 0; await f.controller.openCheckout(async () => { opened++; });
+    const f = fixture({ active: async () => order({ status, checkout_url: 'https://api.payqixiang.cn/checkout' }), get: async () => order({ status, checkout_url: 'https://api.payqixiang.cn/checkout' }) });
+    await f.controller.load(); f.controller.setActive(true); await new Promise(resolve => setImmediate(resolve)); let opened = 0; await f.controller.openCheckout(async () => { opened++; });
     assert.equal(opened, status === 'awaiting_payment' ? 1 : 0); assert.equal(f.credited.length, 0); assert.equal(f.controller.getSnapshot().order.status, status); f.controller.dispose();
   }
 });
@@ -210,4 +210,20 @@ test('not-created proof with false slot flag and empty active lookup never permi
   await f.journal.save(pending()); await f.controller.load();
   assert.equal(await f.journal.read(), null); assert.equal(f.controller.getSnapshot().error, 'PAYMENT_OPERATION_PENDING');
   await f.controller.quote('100', 'wechat'); assert.equal(quotes, 0); f.controller.dispose();
+});
+
+test('primary checkout requires fresh evidence in the same activation and never uses a failed resume cache', async () => {
+  let fail = false; const opened = [];
+  const payable = order({ status: 'awaiting_payment', checkout_url: 'https://api.payqixiang.cn/pay/A' });
+  const f = fixture({ active: async () => payable, get: async () => { if (fail) throw new PaymentError('NETWORK_ERROR'); return payable; } });
+  try {
+    await f.controller.load(); await f.controller.openCheckout(async url => opened.push(url)); assert.deepEqual(opened, []);
+    f.controller.setActive(true); await new Promise(resolve => setImmediate(resolve));
+    await f.controller.openCheckout(async url => opened.push(url)); assert.equal(opened.length, 1);
+    f.controller.setActive(false); await f.controller.openCheckout(async url => opened.push(url)); assert.equal(opened.length, 1);
+    fail = true; f.controller.setActive(true); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.controller.getSnapshot().order.status, 'awaiting_payment'); assert.equal(f.controller.getSnapshot().error, 'NETWORK_ERROR');
+    await f.controller.openCheckout(async url => opened.push(url)); assert.equal(opened.length, 1, 'failed resume must not make cached checkout ready');
+    fail = false; await f.controller.refresh(); await f.controller.openCheckout(async url => opened.push(url)); assert.equal(opened.length, 2);
+  } finally { f.controller.dispose(); }
 });

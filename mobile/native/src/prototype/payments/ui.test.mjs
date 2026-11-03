@@ -49,3 +49,17 @@ test('quote read errors before any intent explain that no new order exists, with
     assert.ok(!strings.some(value => value.includes('尚未创建新的充值订单')));
   }
 });
+
+test('failed order reads never claim an empty history, and still offer explicit retry', () => {
+  for (const view of ['pending', 'history']) {
+    let retried = 0;
+    const render = error => nodes(module.exports.PaymentOrders({ state: { view, items: [], cursor: null, busy: false, error }, onView: noop, onRefresh: () => { retried++; }, onMore: noop, onSelect: noop, onBack: noop }));
+    const failed = render('PAYMENT_HISTORY_UNAVAILABLE');
+    assert.ok(!failed.some(node => node.props.children === '暂无充值订单'), 'an unavailable list is not evidence of no orders');
+    assert.ok(failed.some(node => typeof node.props.children === 'string' && node.props.children.includes('暂时无法读取充值订单')));
+    failed.find(node => node.props.label === '刷新订单').props.onPress();
+    assert.equal(retried, 1);
+    const empty = render('');
+    assert.ok(empty.some(node => node.props.children === '暂无充值订单'), 'a successful empty response may show the empty state');
+  }
+});
