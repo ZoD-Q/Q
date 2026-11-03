@@ -10,7 +10,7 @@ import { SUPPORT_EMAIL } from '../privacy';
 import { API_URL } from '../../services/api';
 import { getSessionRevision, subscribeSession } from '../../services/session-store';
 import { createPaymentClient, type PaymentClient } from './client';
-import { createFundingController } from './controller';
+import { createFundingController, createPaymentDetailController } from './controller';
 import { paymentJournal } from './journal';
 import type { PaymentJournal } from './journal-core';
 import type { PaymentChannel, PaymentWallet } from './types';
@@ -44,12 +44,13 @@ export function createPaymentWalletSession(deps: {
     } finally { if (walletRequest === request) walletRequest = null; }
   };
   const controller = createFundingController({ client, journal: deps.journal, identity: { ownerId: deps.ownerId, generation }, isCurrent: current, newId: deps.newId, onCredited: refreshWallet });
+  const details = createPaymentDetailController({ client, ownerId: deps.ownerId, isCurrent: current, canDetach: () => controller.getSnapshot().capabilities?.checkout_detach_supported === true, onChanged: () => visible ? controller.refresh() : undefined, onCredited: refreshWallet });
   const dispose = () => {
-    valid = false; visible = false; walletVersion++; walletRequest?.abort(); controller.dispose();
+    valid = false; visible = false; walletVersion++; walletRequest?.abort(); controller.dispose(); details.dispose();
     stopSubscription?.(); stopSubscription = null;
   };
   return {
-    controller, client, generation, isCurrent: current, refreshWallet,
+    controller, details, client, generation, isCurrent: current, refreshWallet,
     connect() {
       stopSubscription?.();
       if (generation === deps.store.getRevision()) valid = true;
@@ -57,15 +58,15 @@ export function createPaymentWalletSession(deps: {
       if (!current()) dispose();
     },
     disconnect() {
-      valid = false; visible = false; started = false; activationVersion++; walletVersion++; walletRequest?.abort(); controller.setActive(false);
+      valid = false; visible = false; started = false; activationVersion++; walletVersion++; walletRequest?.abort(); controller.setActive(false); details.setActive(false);
       stopSubscription?.(); stopSubscription = null;
       // React development effects reconnect synchronously. Real unmount still fences token
       // access immediately, and destroys the controller before another task can run.
-      queueMicrotask(() => { if (!valid) controller.dispose(); });
+      queueMicrotask(() => { if (!valid) { controller.dispose(); details.dispose(); } });
     },
     setActive(active: boolean) {
       visible = active && current();
-      if (!visible) { started = false; activationVersion++; walletVersion++; walletRequest?.abort(); controller.setActive(false); return; }
+      if (!visible) { started = false; activationVersion++; walletVersion++; walletRequest?.abort(); controller.setActive(false); details.setActive(false); return; }
       void refreshWallet();
       if (!started) {
         started = true; const version = activationVersion; const previous = startup;
@@ -91,7 +92,6 @@ function ScopedPaymentWallet({ token, ownerId, onShowDemo }: { token: string; ow
   const [foreground, setForeground] = useState(() => AppState.currentState === 'active');
   const [wallet, setWallet] = useState<WalletRead>({ wallet: null, busy: false, error: '' });
   const [page, setPage] = useState<'overview' | 'funding' | 'orders' | 'detail' | 'withdraw'>('overview');
-  const [detailId, setDetailId] = useState<string | null>(null);
   const [amount, setAmount] = useState(''); const [channel, setChannel] = useState<PaymentChannel>('wechat');
   const [runtime] = useState(() => createPaymentWalletSession({
     token, ownerId, store: { getRevision: getSessionRevision, subscribe: subscribeSession },
@@ -100,21 +100,24 @@ function ScopedPaymentWallet({ token, ownerId, onShowDemo }: { token: string; ow
   }));
   const controller = runtime.controller;
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const detail = useSyncExternalStore(runtime.details.subscribe, runtime.details.getSnapshot, runtime.details.getSnapshot);
   const identityCurrent = revision === runtime.generation && runtime.isCurrent();
+  const primaryActive = focused && foreground && identityCurrent && page !== 'detail';
   useEffect(() => { runtime.connect(); return () => runtime.disconnect(); }, [runtime]);
   useEffect(() => {
     const listener = AppState.addEventListener('change', value => setForeground(value === 'active'));
     return () => listener.remove();
   }, []);
-  useEffect(() => { runtime.setActive(focused && foreground && identityCurrent); return () => runtime.setActive(false); }, [runtime, focused, foreground, identityCurrent]);
+  useEffect(() => { runtime.setActive(primaryActive); }, [runtime, primaryActive]);
+  useEffect(() => { runtime.details.setActive(focused && foreground && identityCurrent && page === 'detail'); return () => runtime.details.setActive(false); }, [runtime, focused, foreground, identityCurrent, page]);
   const overview = () => { setPage('overview'); if (runtime.isCurrent()) void runtime.refreshWallet(); };
   const orders = () => { setPage('orders'); void controller.loadOrders('pending'); };
   const openCheckout = () => { void controller.openCheckout(Linking.openURL); };
   const refreshAll = () => { void controller.load(); void runtime.refreshWallet(); };
   if (!identityCurrent) return <Page title={text('钱包', 'Wallet')}><Type muted>{text('账号状态已变化，请重新登录后查看钱包。原充值记录会按账号保留。', 'Your session changed. Sign in again to view this wallet. Original funding records remain associated with their owner.')}</Type></Page>;
   if (page === 'withdraw') return <WithdrawContact email={SUPPORT_EMAIL || undefined} onBack={overview} />;
-  if (page === 'orders') return <PaymentOrders state={state.orders} onView={view => { void controller.loadOrders(view); }} onRefresh={() => { void controller.loadOrders(state.orders.view); }} onMore={() => { void controller.loadOrders(state.orders.view, true); }} onSelect={order => { if (!state.busy) { setDetailId(order.payment_id); setPage('detail'); void controller.select(order); } }} onBack={overview} />;
-  if (page === 'detail') return <PaymentDetail order={state.order?.payment_id === detailId ? state.order : null} busy={state.busy} error={state.error} serverOffset={state.serverOffset} onRefresh={() => { void controller.refresh(); }} onOpenCheckout={openCheckout} onDetach={() => { void controller.detach(); }} onBack={() => setPage('orders')} onOrders={orders} />;
+  if (page === 'orders') return <PaymentOrders state={state.orders} onView={view => { void controller.loadOrders(view); }} onRefresh={() => { void controller.loadOrders(state.orders.view); }} onMore={() => { void controller.loadOrders(state.orders.view, true); }} onSelect={order => { if (!state.busy) { runtime.details.select(order.payment_id); setPage('detail'); } }} onBack={overview} />;
+  if (page === 'detail') return <PaymentDetail order={detail.order} busy={detail.busy} error={detail.error} serverOffset={detail.serverOffset} onRefresh={() => { void runtime.details.refresh(); }} onOpenCheckout={() => { void runtime.details.openCheckout(Linking.openURL); }} onDetach={() => { void runtime.details.detach(); }} onBack={() => setPage('orders')} onOrders={orders} />;
   if (page === 'funding') return <FundingFlow
     state={state.phase === 'loading' && !state.busy && state.error ? { ...state, phase: 'unavailable' } : state}
     amount={amount} channel={channel} onAmountChange={setAmount} onChannelChange={setChannel}
