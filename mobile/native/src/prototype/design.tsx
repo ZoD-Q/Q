@@ -2,6 +2,7 @@ import { createContext, use, useState, type ReactNode } from "react";
 import Animated, { useReducedMotion } from "react-native-reanimated";
 import { selectionFeedback, usePressMotion } from "./motion";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Pressable,
@@ -513,15 +514,18 @@ export function Page({
   description,
   action,
   children,
+  avoidKeyboard = false,
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
+  avoidKeyboard?: boolean;
 }) {
   const { phone } = useDesign();
-  return (
+  const insets = useSafeAreaInsets();
+  const body = (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
@@ -564,6 +568,15 @@ export function Page({
       {children}
     </ScrollView>
   );
+  return avoidKeyboard && process.env.EXPO_OS === "android" ? (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior="height"
+      keyboardVerticalOffset={insets.top + (phone ? 60 : 70)}
+    >
+      {body}
+    </KeyboardAvoidingView>
+  ) : body;
 }
 export function Row({
   title,
@@ -673,12 +686,24 @@ export function Sheet({
       animationType={
         reduced || process.env.EXPO_OS === "web" ? "none" : "slide"
       }
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        if (process.env.EXPO_OS === "android" && Keyboard.isVisible()) {
+          Keyboard.dismiss();
+          return;
+        }
+        onClose();
+      }}
       onShow={onShow}
       onDismiss={onDismiss}
     >
       <KeyboardAvoidingView
-        behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined}
+        behavior={
+          process.env.EXPO_OS === "ios"
+            ? "padding"
+            : process.env.EXPO_OS === "android"
+              ? "height"
+              : undefined
+        }
         style={{
           flex: 1,
           backgroundColor: "#15253128",

@@ -356,8 +356,18 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={process.env.EXPO_OS === "ios" ? insets.top + (phone ? 60 : 70) : 0}
+      behavior={
+        process.env.EXPO_OS === "ios"
+          ? "padding"
+          : process.env.EXPO_OS === "android"
+            ? "height"
+            : undefined
+      }
+      keyboardVerticalOffset={
+        process.env.EXPO_OS === "ios" || process.env.EXPO_OS === "android"
+          ? insets.top + (phone ? 60 : 70)
+          : 0
+      }
     >
       <View style={{ flex: 1, minHeight: 0 }} onLayout={event => setAvailableHeight(event.nativeEvent.layout.height)}>
       {hasMessages ? (
