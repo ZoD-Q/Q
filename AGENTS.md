@@ -94,7 +94,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | `identity`（已实现） | 凭据、登录限流、会话签发与撤销；Argon2 密码、随机会话令牌只存摘要，默认七天过期 |
 | `profiles`（已实现） | 可编辑资料、主题与语言；不拥有身份权限或余额 |
 | `ledger`（已实现） | 账户、不可变分录、转账与幂等；唯一余额写入入口 |
-| `payments`（源码已实现，默认关闭） | Qixiang CNY 收款、查询复核、双人审批与恢复任务；通过 `ledger::real_hkd` 入独立 HKD 账本，不直接写余额；未部署或实账验收。见 [支付合同](backend/contracts/payments.md) |
+| `payments`（已部署，缺省配置仍关闭） | Qixiang CNY 收款、查询复核、双人审批与恢复任务；通过 `ledger::real_hkd` 入独立 HKD 账本。2026-11-03 部署并启用配置，报价和两渠道未支付收银台已验证；实际付款、审批、入账和清算未实账验收。见 [支付合同](backend/contracts/payments.md)与[部署记录](backend/deploy/PAYMENTS-2026-11-03.md) |
 
 目前 QDC 与银行插件 HKD 均为模拟资金、分表记账；100 个最小单位分别为 1.00 Q / HK$1.00，不可兑换真实资产。银行插件每个新模拟账户初始 HK$100,000，重复添加不重发；银行账本由 `ledger::bank_demo` 独占写入。见 [银行插件说明](mobile/docs/bank-plugins.md)。资金相关界面须清楚标为演示。保留账号、历史交易和本地数据库；界面重做、目录整理和修复依赖都不是清库理由。
 
@@ -197,12 +197,12 @@ Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标�
 | 初期用途 | 小Q后端内部联调环境；生产就绪状态须单独验收 |
 | 首批部署范围 | Rust API、PostgreSQL、HTTPS 反向代理、数据库与密钥备份、基础健康监控 |
 | API 域名 | `https://q.kaicloudpay.com`；公网 HTTPS、阿里云负载均衡私网回源，再由专属 Nginx 转发至回环网关；不公开 18787 或数据库端口 |
-| 当前部署状态 | 2026-10-19 源码 `4af1ed7` 的社交后端运行中，Rust API、独立 PostgreSQL 18.6、Nginx 均 healthy；社交迁移与备份恢复通过，公网 HTTPS 登录与 DeepSeek 流式调用已验证。见 [部署状态](backend/deploy/STATUS.md) 与 [社交部署记录](backend/deploy/SOCIAL-2026-10-19.md) |
+| 当前部署状态 | 2026-11-03 部署已审核 GitLab main `ac920275`（与 GitHub main `0766f9a` 代码树相同）的 CI 制品；2026-11-04 复核 API、原 PostgreSQL 18.6、网关 healthy，9 项迁移成功。支付报价和未支付收银台已验证，实际付款/审批/入账仍未实账验收；管理页仍为 demo。见 [部署状态](backend/deploy/STATUS.md)与[支付部署记录](backend/deploy/PAYMENTS-2026-11-03.md) |
 | 内部入口 | 服务器 `http://127.0.0.1:18787`，健康检查 `/health`；数据库与 API 无宿主映射端口 |
 | 部署与数据 | `/opt/q/current` 指向发布目录；配置 `/etc/q/deploy.env`（root 0600）；数据 `/var/lib/q/postgres`；备份 `/var/backups/q` |
 | 定时任务 | `q-backup.timer` 每日备份，`q-health.timer` 每五分钟检查；外部告警、定时异地复制待运维配置 |
 
-操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。当前发布程序为已审核源码的本机 Linux 交叉构建，服务器实际运行通过；不等同于新 CI 流水线通过。`64ff5b5` 的 18 项隔离回归和真实 DeepSeek 验收保留为历史快照，不能覆盖当前 `4af1ed7` 的社交部署。MCP 宿主接口、公开 origin 与 CIMD 元数据可用，`oauth_configured: true`；真实第三方 OAuth 和可灵业务仍需单独验收。TestFlight `0.1.0 (1)` 已于 2026-10-20 上传成功，Apple 状态为 `VALID / READY_FOR_BETA_TESTING`；测试者分配、外部 Beta 审核与真机安装未进行；构建冻结后新合入的功能不自动成为已部署能力。
+操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。当前发布程序来自 GitLab #11941 的 Linux 发布制品，经人工运维安装；部署成功不代表 GitLab 部署作业运行。`64ff5b5` 和 `4af1ed7` 的历史验收不覆盖当前版本。支付汇率为运维快照，当前到期时间为 2026-11-06 22:56:38 北京时间，未部署自动刷新，届时新报价关闭。MCP 宿主接口、公开 origin 与 CIMD 元数据可用，`oauth_configured: true`；真实第三方 OAuth 和可灵业务仍需单独验收。TestFlight `0.1.0 (1)` 已于 2026-10-20 上传成功，Apple 状态为 `VALID / READY_FOR_BETA_TESTING`；测试者分配、外部 Beta 审核与真机安装未进行；构建冻结后新合入的功能不自动成为已部署能力。
 
 - 登录使用用户指定的本地 SSH 私钥或已配置别名；私钥、密码、数据库凭据和供应商密钥不得写入本文件或提交。`ecs-user` 作为运维登录身份，业务进程使用独立受限身份。
 - 部署前先核对系统、资源、现有服务、端口和数据；保留已有业务和数据库，不重置主机、不覆盖未知目录。默认部署经过人工审核的 `main` 明确提交，记录版本、配置位置、服务状态与回退方法；开发分支的新能力不能自动算作已部署。
