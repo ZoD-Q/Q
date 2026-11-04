@@ -31,6 +31,7 @@ export type PageId =
   | "history"
   | "plugins"
   | "market-data"
+  | "data-service"
   | "plugin-workbench"
   | "installments"
   | "insurance"

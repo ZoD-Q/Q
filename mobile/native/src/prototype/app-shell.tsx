@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
 import {
   MessageCircle,
+  BarChart3,
   Clapperboard,
   ChevronRight,
   CreditCard,
@@ -36,6 +37,7 @@ import { pluginEntryIntentReducer } from "./plugin-host/core";
 import { useQAccount } from "./account/account-state";
 import { useSocial } from "./social";
 import { MarketDataPage } from './market-data/page';
+import { DataServicePage } from './data-service/page';
 import { validateAppNavigationAction, type AppNavigationAction } from './app-assistant/core';
 import { getSessionRevision } from '../services/session-store';
 
@@ -48,6 +50,7 @@ const serviceNavigation: {
   { id: "video", zh: "视频创作", en: "Video studio", icon: Clapperboard },
   { id: "plugins", zh: "插件", en: "Plugins", icon: Layers3 },
   { id: "market-data", zh: "金融数据", en: "Financial data", icon: TrendingUp },
+  { id: "data-service", zh: "数据服务", en: "Data service", icon: BarChart3 },
   { id: "plugin-workbench", zh: "插件工作台", en: "Plugin workbench", icon: Code2 },
   { id: "installments", zh: "分期", en: "Installments", icon: CreditCard },
   { id: "insurance", zh: "保险", en: "Insurance", icon: ShieldCheck },
@@ -583,6 +586,8 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
                 if (prepared && !signal?.aborted) navigate('chat');
                 return prepared;
               }} />
+          ) : page === 'data-service' ? (
+            <DataServicePage />
           ) : page === "video" ? (
             <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
           ) : page === "creators" ? (
@@ -596,7 +601,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "plugins" ? (
             <PluginHostPage active={active} chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
           ) : (
-            <ServicePage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} page={page} insuranceEntry={entry?.module === 'insurance' ? entry : undefined} onOpenWorkbench={() => navigate("plugin-workbench")} onBankTransfer={account => {
+            <ServicePage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} page={page} insuranceEntry={entry?.module === 'insurance' ? entry : undefined} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenDataService={() => navigate("data-service")} onBankTransfer={account => {
               if (!account.connection_id) return;
               chat.selectPlugin({ id: account.connection_id, title: text(account.bank_name, account.bank_name_en), endpoint_url: `urn:q:bank-demo:${account.bank_id}`, connection_kind: "bank_demo", builtin_service_id: `q.bank-demo.${account.bank_id}` });
               chat.setDraft(text(`从${account.bank_name}转500港币到陈小明的${account.bank_id === "bochk" ? "汇丰" : "中银"}账户`, `Transfer HKD 500 from ${account.bank_name_en} to Chen at ${account.bank_id === "bochk" ? "HSBC" : "BOCHK"}`));

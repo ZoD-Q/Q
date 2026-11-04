@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Linking, View } from 'react-native';
-import { ExternalLink, Landmark, ShieldCheck, WalletCards } from 'lucide-react-native';
+import { ExternalLink, Landmark, ShieldCheck, WalletCards, BarChart3 } from 'lucide-react-native';
 import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
 import { useQAccount } from '../account/account-state';
 import { useFinancialPreview } from '../services/preview-state';
@@ -10,7 +10,7 @@ import { FinanceAdPlacement, FinanceAdSettings } from '../finance-ads';
 const titles: Record<Category, Copy> = { installments: ['分期', 'Installments'], insurance: ['保险', 'Insurance'], finance: ['理财', 'Investments'] };
 const icons = { installments: WalletCards, insurance: ShieldCheck, finance: Landmark };
 
-export function FinancialCatalogPage({ category }: { category: Category }) {
+export function FinancialCatalogPage({ category, onOpenDataService }: { category: Category; onOpenDataService?: () => void }) {
   const { text, colors, phone } = useDesign();
   const account = useQAccount();
   const { savedListings, setSavedListings } = useFinancialPreview();
@@ -47,6 +47,14 @@ export function FinancialCatalogPage({ category }: { category: Category }) {
   return <Page title={label(titles[category])} action={<Action kind="ghost" label={text('广告设置', 'Ad settings')} onPress={() => setAdSettings(true)} />} description={text('了解真实机构与公开产品，比较后前往官方了解详情。小Q不受理申请或付款。', 'Explore real providers and public offerings, compare them and visit official sources. Q does not process applications or payments.')}>
     <FinanceAdPlacement category={category} />
     <FinanceAdSettings visible={adSettings} onClose={() => setAdSettings(false)} />
+    {category === 'finance' && onOpenDataService ? <View style={{ gap: 10, padding: 18, borderRadius: 18, backgroundColor: colors.accentBg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <BarChart3 size={20} color={colors.accent} strokeWidth={1.6} />
+        <Type size={16} weight="600">{text('金融数据服务 · 按次购买', 'Financial data service · pay per use')}</Type>
+      </View>
+      <Type size={13} muted>{text('市场快照、公司公告检索、新闻样本分析与 Pro 问答额度，付费即交付，交付失败自动全额退回，每笔订单可核对。', 'Market snapshots, filings lookups, news theme analysis and Pro Q&A credits. Delivered on payment, refunded automatically on failure, with every order auditable.')}</Type>
+      <Action label={text('进入数据服务', 'Open data service')} onPress={onOpenDataService} />
+    </View> : null}
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Tag accent>{text('官方公开信息', 'Official public information')}</Tag><Tag>{text('付款未开放', 'Payments unavailable')}</Tag></View>
     <Input label={text('搜索机构、产品或代码', 'Search provider, product or code')} value={query} onChangeText={setQuery} placeholder={text('输入关键词', 'Enter a keyword')} />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

@@ -8,10 +8,12 @@ export function ServicePage({
   page,
   onOpenWorkbench,
   onBankTransfer,
+  onOpenDataService,
   insuranceEntry,
 }: {
   onOpenWorkbench: () => void;
   onBankTransfer: (account: BankAccount) => void;
+  onOpenDataService: () => void;
   insuranceEntry?: InsuranceEntry;
   page:
     | "plugins"
@@ -30,7 +32,7 @@ export function ServicePage({
       return <KeysPage />;
     case "finance":
     case "installments":
-      return <FinancialCatalogPage key={page} category={page} />;
+      return <FinancialCatalogPage key={page} category={page} onOpenDataService={onOpenDataService} />;
     case "insurance":
       return <InsuranceDashboard initialEntry={insuranceEntry} />;
   }
