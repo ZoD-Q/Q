@@ -51,6 +51,18 @@ export const shelfItems: readonly ShelfItem[] = [
 ];
 export const shelfRiskGroups = { stable: ['R1', 'R2'], balanced: ['R3'], aggressive: ['R4', 'R5'] } as const;
 export type ShelfRiskGroup = keyof typeof shelfRiskGroups;
+// Four-pocket allocation view (money-market / stable / long-term / protection), aligned with the
+// mainstream "four pockets" framework. Protection mirrors the insurance catalogue — it is a
+// planning view only and never an application channel.
+export type Pocket = { id: string; title: Copy; hint: Copy };
+export const pockets: readonly Pocket[] = [
+  { id: 'liquid', title: ['活钱管理', 'Liquid cash'], hint: ['货币基金 · 随取随用', 'Money funds · liquid'] },
+  { id: 'stable', title: ['稳健理财', 'Stable'], hint: ['短债与存款 · 底仓', 'Short bonds & deposits'] },
+  { id: 'growth', title: ['长期投资', 'Long-term'], hint: ['均衡混合 · 波动中枢', 'Balanced funds · growth'] },
+  { id: 'protection', title: ['保险保障', 'Protection'], hint: ['第四笔钱 · 先核对再投保', 'The fourth pocket · verify first'] },
+];
+export const savingsGoal = { title: ['目标 · 旅行基金', 'Goal · travel fund'], progress: 0.68, monthly: 2000, note: ['演示目标 · 每月定投 ¥2,000', 'Demo goal · ¥2,000 monthly'] };
+export const marketMood = { temperature: 62, label: ['中性偏暖', 'Neutral-warm'], note: ['模拟指标 · 非投资建议 · 不代表任何官方指数', 'Simulated indicator · not investment advice'] };
 export function trustedExternalUrl(url: string, allowed: readonly string[]): boolean {
   try { const parsed = new URL(url); return parsed.protocol === 'https:' && !parsed.username && !parsed.password && allowed.includes(url); }
   catch { return false; }

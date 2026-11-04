@@ -8,6 +8,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 test.after(() => resolver.deregister());
 const catalog = await import('../prototype/wealth-center/catalog.ts');
 const core = await import('../prototype/wealth-center/core.ts');
+const insurance = await import('../prototype/insurance/catalog.ts');
 
 const rng = () => 0.5;
 
@@ -49,6 +50,20 @@ test('shelf and fund filters combine risk group and category exactly', () => {
   assert.equal(money.length, 3);
   assert.ok(core.filterFunds(catalog.marketFunds, 'all').length === catalog.marketFunds.length);
   assert.equal(core.filterFunds(catalog.marketFunds, 'qdii')[0].code, '000071');
+});
+
+test('four-pocket view mirrors the insurance catalogue with trusted application entries', () => {
+  assert.equal(catalog.pockets.length, 4);
+  assert.equal(catalog.pockets[3].id, 'protection');
+  assert.match(catalog.pockets[3].hint[0], /先核对|第四笔钱/);
+  assert.ok(catalog.savingsGoal.progress > 0 && catalog.savingsGoal.progress < 1);
+  assert.ok(catalog.marketMood.temperature > 0 && catalog.marketMood.temperature < 100);
+  assert.match(catalog.marketMood.note[0], /模拟|非投资建议/);
+  assert.equal(insurance.insuranceTypes.length, 43);
+  for (const group of insurance.groups) assert.equal(insurance.groupInsurers[group.id].length, 3);
+  const mirror = insurance.groupInsurers.health[0];
+  assert.equal(insurance.trustedOutboundUrl(mirror.url), true);
+  assert.equal(insurance.trustedOutboundUrl('https://insurer.example.com/'), false);
 });
 
 test('catalogue keeps demo ledger disclaimers and https official urls only', () => {

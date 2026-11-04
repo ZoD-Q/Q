@@ -5,17 +5,22 @@ import { ArrowUpRight, Sparkles } from 'lucide-react-native';
 import { Action, Choice, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
 import {
   DEMO_NOTE, DEPOSIT_MV, DISCLAIMER, EQUITY_UNITS, FUND_MV, HOLD_COST, HOLD_MV, HOLD_PNL, holdings, marketFunds, fundCats,
-  shelfItems, SIM_START_NAV, trustedExternalUrl, type Copy, type MarketFund, type ShelfItem, type ShelfRiskGroup, type WealthHolding,
+  shelfItems, SIM_START_NAV, trustedExternalUrl, pockets, savingsGoal, marketMood, type Copy, type MarketFund, type ShelfItem, type ShelfRiskGroup, type WealthHolding,
 } from './catalog';
 import {
   filterFunds, filterShelf, nextCandle, RISK_LABEL, seedCandles, sliceWindow, todayPct, todayPnl, windowBounds, type Candle,
 } from './core';
+import {
+  insuranceTypes, groups as insuranceGroups, groupInsurers, trustedOutboundUrl as trustedInsuranceOutbound,
+  regClasses, regSubLabels, formTags, sources as insuranceSources,
+} from '../insurance/catalog';
 
-type PageKey = 'overview' | 'perf' | 'holdings' | 'funds' | 'ai' | 'shelf' | 'settings';
+type PageKey = 'overview' | 'perf' | 'holdings' | 'funds' | 'protection' | 'ai' | 'shelf' | 'settings';
 const tabs: readonly { id: PageKey; title: Copy }[] = [
   { id: 'overview', title: ['总览', 'Overview'] }, { id: 'perf', title: ['收益风险', 'Risk & return'] },
   { id: 'holdings', title: ['持仓', 'Holdings'] }, { id: 'funds', title: ['基金', 'Funds'] },
-  { id: 'ai', title: ['AI 助手', 'Assistant'] }, { id: 'shelf', title: ['货架', 'Shelf'] }, { id: 'settings', title: ['设置', 'Settings'] },
+  { id: 'protection', title: ['保障', 'Protection'] }, { id: 'ai', title: ['AI 助手', 'Assistant'] },
+  { id: 'shelf', title: ['货架', 'Shelf'] }, { id: 'settings', title: ['设置', 'Settings'] },
 ];
 const shelfRisks: readonly { id: ShelfRiskGroup | 'all'; title: Copy }[] = [
   { id: 'all', title: ['全部风险', 'All risk'] }, { id: 'stable', title: ['稳健 R1–R2', 'Stable'] },
@@ -90,13 +95,16 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const [outbound, setOutbound] = useState<{ title: string; url: string } | null>(null);
   const [linkError, setLinkError] = useState(false);
   const [riskSheet, setRiskSheet] = useState(false);
+  const [expandedInsurance, setExpandedInsurance] = useState<string | null>(null);
   const [switches, setSwitches] = useState({ advisory: true, market: true, usage: false });
   const allowedUrls = useMemo(() => [
     ...holdings.map(item => item.official).filter((url): url is string => Boolean(url)),
     ...marketFunds.map(fund => `https://${fund.host}`),
+    ...insuranceSources.map(source => source.url),
+    ...Object.values(groupInsurers).flat().map(ref => ref.url),
   ], []);
   const openOutbound = async () => {
-    if (!outbound || !trustedExternalUrl(outbound.url, allowedUrls)) { setLinkError(true); return; }
+    if (!outbound || !(trustedExternalUrl(outbound.url, allowedUrls) || trustedInsuranceOutbound(outbound.url))) { setLinkError(true); return; }
     try { await Linking.openURL(outbound.url); setOutbound(null); }
     catch { setLinkError(true); }
   };
@@ -105,6 +113,8 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
     if (/风险/.test(question)) return text('当前组合以 R1–R2 资产为主（货币类约占一半），整体风险等级约 R2（中低）。近一年最大回撤 -0.8%，波动较低。', 'The portfolio is dominated by R1–R2 assets; overall risk is about R2 (low-medium) with a -0.8% max drawdown over the past year.');
     if (/收益|怎么样/.test(question)) return text(`近 30 日收益 +¥1,086.75；今日权益部分收益 ${pnl >= 0 ? '+' : ''}${money(pnl)}（实时模拟）。`, `Last 30 days +¥1,086.75; today's equity P&L is ${pnl >= 0 ? '+' : ''}${money(pnl)} (simulated, live).`);
     if (/到期/.test(question)) return text('3 个月定存（演示）¥35,000 将于 2027-02-14 到期，其余持仓为活期或开放式，无近期到期安排。', 'The demo 3-month deposit (¥35,000) matures on 2027-02-14; other holdings are liquid or open-ended.');
+    if (/四笔钱|分配|怎么分/.test(question)) return text('一般性框架：活钱管流动性（货币类）、稳健理财打底（短债/存款）、长期投资追求增长（均衡类）、保险保障兜底风险。你的当前分布可看总览页的四笔钱卡片；该框架仅为公开知识整理，不构成投资建议。', 'A common framework: liquid cash for liquidity, stable assets as the base, long-term funds for growth, and insurance as protection. See the four-pocket cards on the overview. Public knowledge only — not investment advice.');
+    if (/保障|保险/.test(question)) return text('保障是第四笔钱。建议先在「保障」页按方向核对目录（重疾/医疗/意外是常用自查起点），再前往承保公司官方渠道投保；小Q不代办投保、不收款，以下内容不构成投保建议。', 'Protection is the fourth pocket. Start by verifying the catalogue on the Protection tab (critical illness, medical and accident are common starting points), then apply on insurers\' official channels. Q places no applications; this is not insurance advice.');
     if (/配|稳/.test(question)) return text('一般性信息：货币类流动性好、收益较低；债券类波动略高。稳健组合通常以货币与短债为基础。具体配置需结合你的目标与风险承受能力，不构成投资建议。', 'General information only: money-market assets trade liquidity for yield, bond funds add some volatility. Stable portfolios usually build on cash and short-duration bonds. This is not investment advice.');
     if (/回撤/.test(question)) return text('最大回撤是区间内从最高点到其后最低点的最大跌幅，用于衡量下行风险。你的组合近一年最大回撤为 -0.8%（模拟数据）。', 'Max drawdown is the largest peak-to-trough decline in a period, measuring downside risk. Your portfolio shows -0.8% over the past year (simulated).');
     return text('（演示）正式版本将接入小Q对话能力，基于模拟账本与公开知识作答，不构成投资建议。', '(Demo) The full version will connect Q chat, answering from the demo ledger and public knowledge. Not investment advice.');
@@ -126,16 +136,37 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
       <Type size={11} muted>{text(`统计口径：市值按最新净值/本金估算。实时更新于 ${clock()}。`, `Market value follows the latest estimates. Live at ${clock()}.`)}</Type>
     </View>
     <View style={{ gap: 10, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
-      <Type weight="600">{text('资产分布', 'Asset mix')}</Type>
-      <View style={{ flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden' }}>
-        <View style={{ backgroundColor: colors.accent, flex: FUND_MV + pnl }} />
-        <View style={{ backgroundColor: colors.soft, flex: DEPOSIT_MV }} />
+      <Type weight="600">{text('四笔钱配置', 'Four-pocket allocation')}</Type>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {pockets.map((pocket, index) => {
+          const value = index === 0 ? FUND_MV * 0.667 + pnl * 0.6 : index === 1 ? DEPOSIT_MV + 20256.4 : index === 2 ? 15186.2 + pnl * 0.4 : null;
+          return <View key={pocket.id} style={{ flexGrow: 1, flexBasis: '46%', gap: 3, padding: 12, borderRadius: 12, backgroundColor: colors.soft }}>
+            <Type size={12} weight="600">{text(pocket.title[0], pocket.title[1])}</Type>
+            <Type selectable weight="500" size={14}>{value === null ? '🛡' : money(value)}</Type>
+            <Type size={10} muted>{text(pocket.hint[0], pocket.hint[1])}</Type>
+          </View>;
+        })}
       </View>
-      <Type size={12} muted selectable>{text(`基金 ${money(FUND_MV + pnl)} · 存款 ${money(DEPOSIT_MV)}`, `Funds ${money(FUND_MV + pnl)} · deposits ${money(DEPOSIT_MV)}`)}</Type>
+      <Type size={11} muted selectable>{text(`分布：基金 ${money(FUND_MV + pnl)} · 存款 ${money(DEPOSIT_MV)}。保障是第四笔钱——先核对目录，再官方投保。`, `Funds ${money(FUND_MV + pnl)} · deposits ${money(DEPOSIT_MV)}. Protection is the fourth pocket — verify the catalogue first, then apply on official channels.`)}</Type>
     </View>
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-      <Tag>{RISK_LABEL.R2}</Tag>
-      <Tag>{text('年化 3.12%（模拟，非承诺）', '3.12% annualized (demo)')}</Tag>
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <Type weight="600" size={13}>{text(savingsGoal.title[0], savingsGoal.title[1])}</Type>
+        <Type size={12} muted selectable>{Math.round(savingsGoal.progress * 100)}% · {text(savingsGoal.note[0], savingsGoal.note[1])}</Type>
+      </View>
+      <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.soft, overflow: 'hidden' }}>
+        <View style={{ width: `${Math.round(savingsGoal.progress * 100)}%`, height: '100%', backgroundColor: colors.accent }} />
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 }}>
+        <Tag accent>{text(`市场温度 ${marketMood.temperature}° · ${marketMood.label[0]}`, `Mood ${marketMood.temperature}° · ${marketMood.label[1]}`)}</Tag>
+        <Tag>{text(marketMood.note[0], marketMood.note[1])}</Tag>
+      </View>
+    </View>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <Tag accent>{RISK_LABEL.R2}</Tag>
+      <Tag>{text('风险匹配 ✓ 组合R2 = 自评R2', 'Risk match ✓ book R2 = self R2')}</Tag>
+      <Tag>{text('集中度合理 · 最高货币类 28.6%', 'Concentration ok · top money 28.6%')}</Tag>
+      <Tag>{text('到期提醒 · 定存 2027-02-14', 'Maturity · deposit 2027-02-14')}</Tag>
     </View>
     {onOpenDataService ? <Action label={text('按次购买金融数据服务', 'Pay-per-use data service')} onPress={onOpenDataService} /> : null}
     <Type size={12} muted>{text(DEMO_NOTE[0], DEMO_NOTE[1])}</Type>
@@ -214,6 +245,8 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
       {[[text('我的组合风险有多高？', 'How risky is my portfolio?'), text('当前组合以 R1–R2 资产为主（货币类约占一半），整体风险等级约 R2（中低）。近一年最大回撤 -0.8%，波动较低。', 'Dominated by R1–R2 assets; overall about R2 (low-medium), max drawdown -0.8% over the past year.')],
       [text('这个月收益怎么样？', 'How are returns this month?'), text(`近 30 日收益 +¥1,086.75；今日权益部分收益 ${pnl >= 0 ? '+' : ''}${money(pnl)}（实时模拟）。`, `Last 30 days +¥1,086.75; today ${pnl >= 0 ? '+' : ''}${money(pnl)} (simulated, live).`)],
       [text('哪笔快到期？', 'What matures soon?'), text('3 个月定存（演示）¥35,000 将于 2027-02-14 到期，其余持仓为活期或开放式，无近期到期安排。', 'The demo deposit (¥35,000) matures 2027-02-14; others are liquid or open-ended.')],
+      [text('四笔钱怎么分？', 'How to split the four pockets?'), text('一般性框架：活钱管流动性（货币类）、稳健理财打底（短债/存款）、长期投资追求增长（均衡类）、保险保障兜底风险。当前分布见总览页四笔钱卡片；公开知识整理，不构成投资建议。', 'A common framework: liquidity, stable base, long-term growth, insurance protection. See the overview cards. Public knowledge only — not investment advice.')],
+      [text('我的保障够吗？', 'Is my protection enough?'), text('保障是第四笔钱。先在「保障」页按方向核对目录（重疾/医疗/意外是常用自查起点），再前往承保公司官方渠道投保；小Q不代办投保，以下内容不构成投保建议。', 'Protection is the fourth pocket. Verify the catalogue on the Protection tab first, then apply on insurers\' official channels. Not insurance advice.')],
       [text('存款和基金怎么配更稳？', 'How to allocate more steadily?'), text('一般性信息：货币类流动性好、收益较低；债券类波动略高。稳健组合通常以货币与短债为基础。具体配置需结合你的目标与风险承受能力，不构成投资建议。', 'General information only. Not investment advice.')]].map(([question, answer], index) => <Choice key={index} label={question} selected={false} onPress={() => setAiLog(current => [...current, [question, answer] as [string, string]].slice(-8))} />)}
     </View>
     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -250,7 +283,29 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
     <Row title={text('数据授权 · 用量统计', 'Data · usage stats')} subtitle={text('按量付费订单与用量事件的统计汇总。', 'Aggregate stats for pay-per-use orders.')} onPress={() => setSwitches(current => ({ ...current, usage: !current.usage }))} last />
     <Type size={12} muted>{text('本页均为演示状态标注。真实数据授权与适当性评估以持牌机构流程为准。', 'All states here are demo annotations; real authorizations follow licensed processes.')}</Type>
   </>;
-  const views = { overview, perf, holdings: holdingsView, funds, ai, shelf, settings };
+  const protection = () => <>
+    <Type size={12} muted>{text('第四笔钱 · 保障规划视图：以下为保险目录镜像（43 类入口，双口径）。投保前逐条核对，投保申请在承保公司官方渠道完成；小Q不代办投保、不报价、不收款。', 'The fourth pocket: a planning mirror of the insurance catalogue (43 entries, dual taxonomy). Verify before applying — applications happen on insurers\' official channels. Q places no applications, quotes or payments.')}</Type>
+    {insuranceGroups.map(group => <View key={group.id} style={{ gap: 6 }}>
+      <Type weight="600" size={14}>{text(group.title[0], group.title[1])} · {insuranceTypes.filter(item => item.group === group.id).length}</Type>
+      {insuranceTypes.filter(item => item.group === group.id).map(item => {
+        const expanded = expandedInsurance === item.id;
+        return <View key={item.id} style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.line }}>
+          <Row title={text(item.title[0], item.title[1])} subtitle={text(item.coverage[0], item.coverage[1])} last onPress={() => setExpandedInsurance(expanded ? null : item.id)} />
+          {expanded ? <View style={{ gap: 6, padding: 12, paddingTop: 0 }}>
+            <Type size={12} muted selectable>{text('监管归属', 'Regulation')}：{text(regClasses[item.regClass][0], regClasses[item.regClass][1])} · {text(regSubLabels[item.regSub][0], regSubLabels[item.regSub][1])} · {text(formTags[item.formTag][0], formTags[item.formTag][1])}</Type>
+            <Type size={12} muted selectable>{text('重点核对', 'Check carefully')}：{item.caution}</Type>
+            <Type size={12} muted>{text('承保公司官方投保入口（列举 3 家，非排名非推荐）：', 'Official insurer entries (3 listed, not a ranking or recommendation):')}</Type>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {(groupInsurers[group.id] ?? []).map(insurer => <Choice key={insurer.url} label={`${text(insurer.name[0], insurer.name[1])} ↗`} selected={false} onPress={() => gotoOutbound(text(insurer.name[0], insurer.name[1]), insurer.url)} />)}
+            </View>
+            <Type size={11} muted>{text(`条目整理于 ${item.updatedAt} · 保障豁免、等待期、理赔材料以条款为准；详见「保险」页。`, `Reviewed ${item.updatedAt}. Exclusions, waiting periods and claim documents follow policy terms; see the Insurance page for details.`)}</Type>
+          </View> : null}
+        </View>;
+      })}
+    </View>)}
+    <Type size={12} muted>{text('本视图与「保险」页为同一目录的两面：理财侧看配置，保险侧看核对。任何修改不得让用户产生「可以在这里买保险」的预期。', 'This view and the Insurance page share one catalogue: allocation here, verification there. Users must never expect to buy insurance inside Q.')}</Type>
+  </>;
+  const views = { overview, perf, holdings: holdingsView, funds, protection, ai, shelf, settings };
   return <Page
     title={text('理财', 'Wealth')}
     action={<Action kind="ghost" label={text('模拟账本', 'Demo ledger')} onPress={() => setRiskSheet(true)} />}

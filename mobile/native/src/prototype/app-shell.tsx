@@ -576,7 +576,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         </View>
         <Reveal key={page} style={{ flex: 1 }}>
           {!active ? <View style={{ flex: 1 }} /> : page === "chat" ? (
-            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} onOpenAppAction={openAppAction} />
+            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} onOpenDataService={() => navigate('data-service')} onOpenAppAction={openAppAction} />
           ) : page === 'market-data' ? (
             <MarketDataPage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} active={active} signedIn={Boolean(chat.session)} initialQuery={entry?.module === 'market-data' ? entry.marketQuery : undefined}
               conversations={chat.items.filter(item => !item.localOnly && !item.plugin && !item.messages.some(message => message.localFinance || message.financeResult)).map(item => ({ id: item.id, title: item.title }))}
