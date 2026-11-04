@@ -26,7 +26,7 @@ export type MarketLimitation = 'public_data_not_advice' | 'onchain_reference_onl
   | 'latest_filings_only' | 'metadata_only' | 'index_time_not_publication' | 'sample_not_market_ranking'
   | 'missing_values' | 'source_time_unknown';
 export type MarketErrorCode = 'invalid_query' | 'cancelled' | 'timeout' | 'network'
-  | 'redirect' | 'http' | 'rate_limited' | 'too_large' | 'stream_unavailable' | 'invalid_data';
+  | 'redirect' | 'http' | 'rate_limited' | 'too_large' | 'stream_unavailable' | 'invalid_data' | 'browser_unsupported';
 export class MarketDataError extends Error {
   readonly code: MarketErrorCode;
   readonly status: number | undefined;
@@ -86,6 +86,19 @@ export function marketSource(query: MarketQuery): MarketSource {
   if (q.topic === 'fed') return { id: 'federal-reserve', name: 'Federal Reserve', url: 'https://www.federalreserve.gov/feeds/press_monetary.xml', developmentOnly: false };
   const params = new URLSearchParams({ query: NEWS_TOPICS[q.topic].query, mode: 'artlist', format: 'json', maxrecords: '20', timespan: '24h', sort: 'datedesc' });
   return { id: 'gdelt', name: 'GDELT DOC 2.0', url: `https://api.gdeltproject.org/api/v2/doc/doc?${params}`, developmentOnly: false };
+}
+
+/** These fixed sources do not permit direct cross-origin browser reads. */
+export function marketDirectReadAllowed(query: MarketQuery, platform: string | undefined): boolean {
+  const { id } = marketSource(query);
+  return platform !== 'web' || (id !== 'sec' && id !== 'federal-reserve');
+}
+export function marketOfficialPage(query: MarketQuery): string {
+  const valid = validateMarketQuery(query);
+  if (valid.kind === 'filings') return `https://www.sec.gov/edgar/browse/?CIK=${COMPANIES[valid.company].cik}&owner=exclude`;
+  if (valid.kind === 'news' && valid.topic === 'fed') return 'https://www.federalreserve.gov/newsevents/pressreleases.htm';
+  const source = marketSource(valid);
+  return source.referenceUrl ?? source.url;
 }
 
 const MAX_SOURCE_TEXT_CHARACTERS = 16_384;
@@ -316,6 +329,7 @@ const ERRORS: Record<MarketErrorCode, [string, string]> = {
   too_large: ['来源返回内容超出安全读取上限。', 'The source response exceeds the reading limit.'],
   stream_unavailable: ['当前环境不支持安全读取此公开来源。', 'This environment cannot safely read this public source.'],
   invalid_data: ['来源数据格式或身份校验未通过，未显示结果。', 'The source format or identity could not be verified. No result was shown.'],
+  browser_unsupported: ['此来源不支持浏览器直接读取；请使用小Q App或查看官方来源。', 'This source does not support direct browser reads. Use the Q app or view the official source.'],
 };
 export function marketErrorText(error: unknown, locale: 'zh' | 'en'): string {
   const code = error instanceof MarketDataError ? error.code : 'network';

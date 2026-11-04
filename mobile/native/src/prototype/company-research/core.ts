@@ -1,5 +1,5 @@
 export type SourceName = 'sec-directory' | 'wikidata-search' | 'wikidata-ticker' | 'wikidata-entity' | 'sec-submissions' | 'sec-facts';
-export type SourceStatus = { source: SourceName; status: 'available' | 'error'; url: string; error?: string };
+export type SourceStatus = { source: SourceName; status: 'available' | 'error' | 'not_read'; url: string; error?: string };
 export type CompanyListing = { exchange: string; ticker: string; status: 'unknown' | 'historical'; sourceUrl: string };
 export type CompanyCandidate = { issuerId: string; name: string; listings: CompanyListing[]; source: 'sec' | 'wikidata'; sourceUrl: string; cik: string | null };
 export type CompanySearchReport = { kind: 'company-search'; query: string; fetchedAt: string; candidates: CompanyCandidate[]; sources: SourceStatus[]; gaps: string[] };
@@ -18,6 +18,10 @@ export function cikOf(v: unknown): string | null {
   return typeof s === 'string' && /^[0-9]{1,10}$/.test(s) && Number(s) > 0 ? s.padStart(10, '0') : null;
 }
 export const SEC_DIRECTORY = 'https://www.sec.gov/files/company_tickers_exchange.json';
+export const SEC_PUBLIC_SEARCH = 'https://www.sec.gov/edgar/search/';
+export const BROWSER_SEC_GAP = 'SEC data was not requested in this browser because the source does not allow direct cross-origin reads. Use the Q app or the official SEC site.';
+export const companyDirectReadAllowed = (source: SourceName, platform: string | undefined): boolean => platform !== 'web' || !source.startsWith('sec-');
+export const companyOfficialFilingsPage = (cik: string | null): string => cik && /^[0-9]{10}$/.test(cik) ? `https://www.sec.gov/edgar/browse/?CIK=${cik}&owner=exclude` : SEC_PUBLIC_SEARCH;
 export const entityUrl = (id: string) => `https://www.wikidata.org/wiki/Special:EntityData/${id}.json`;
 export const submissionsUrl = (cik: string) => `https://data.sec.gov/submissions/CIK${cik}.json`;
 export const factsUrl = (cik: string) => `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`;
@@ -151,6 +155,7 @@ export function calculateFacts(facts: FinancialFact[]): CompanyResearchReport['c
   return [{ name: 'revenue_growth_percent', value: growth !== null && Number.isFinite(growth) ? growth : null, reason: growth !== null ? 'Same tag, currency, comparable annual duration and filing; (current/prior - 1) × 100.' : 'No comparable annual revenue pair in the same filing.' }, { name: 'net_margin_percent', value: margin !== null && Number.isFinite(margin) ? margin : null, reason: margin !== null ? 'Same annual period, currency, taxonomy and filing; net income/revenue × 100.' : 'No matched positive revenue and net income.' }];
 }
 const gapTranslations: Record<string, string> = {
+  [BROWSER_SEC_GAP]: '浏览器未请求 SEC 资料：该来源不允许网页跨域直接读取。可在小Q App查询，或前往 SEC 官网核对。',
   'Global candidate directory is incomplete; company type and current listing status are not independently verified.': '全球候选目录并不完整；公司类型和当前上市状态尚未独立核验。',
   'SEC coverage is limited to EDGAR issuers. Other markets may have directory entries but no financial reports connected.': 'SEC 仅覆盖 EDGAR 申报主体；其他市场可能只有公司目录，尚未接入财报。',
   'Anonymous requests expose the search term and network address to the selected public sources; browser CORS or source limits may prevent access.': '匿名查询会向选定公开来源发送搜索词和网络地址；浏览器跨域或来源限制可能导致访问失败。',

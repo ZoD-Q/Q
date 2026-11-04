@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { ExternalLink, MessageSquare, type LucideIcon } from 'lucide-react-native';
 import { Page, Row, Sheet, Type, useDesign } from '../design';
-import { buildResearchDraft, marketErrorText, marketLimitationText, marketQueryKey, type MarketQuery, type MarketReport } from './core';
+import { buildResearchDraft, marketErrorText, marketLimitationText, marketQueryKey, marketDirectReadAllowed, marketOfficialPage, type MarketQuery, type MarketReport } from './core';
 import { CompanyResearchPanel } from '../company-research/page';
 import { useMarketData } from './use-market-data';
 
@@ -115,7 +115,8 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
     if (!active) { handoff.current?.abort(); handoff.current = null; }
     return () => { handoff.current?.abort(); handoff.current = null; };
   }, [active]);
-  const market = useMarketData(query, active && !companies);
+  const directRead = marketDirectReadAllowed(query, process.env.EXPO_OS);
+  const market = useMarketData(query, active && !companies && directRead);
   const loading = market.phase === 'loading';
   const oldResult = Boolean(market.report && (market.stale || market.phase === 'error' || market.phase === 'cancelled'));
   const currentProvider = query.kind === 'crypto' ? 'Chainlink · Ethereum' : query.kind === 'filings' ? 'SEC EDGAR' : query.topic === 'fed' ? text('美联储', 'Federal Reserve') : 'GDELT';
@@ -162,13 +163,17 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
       {query.kind === 'news' && query.topic !== 'fed' ? <Type size={13} muted>{text('GDELT 仅提供标题与索引信息。限流或暂不可用时会显示错误，不替换为其他来源。', 'GDELT supplies headline and index metadata. Rate limits or unavailable data are shown explicitly; no other source is substituted.')}</Type> : null}
     </View>
     <View style={{ gap: 12 }}>
+      {!directRead ? <View style={{ gap: 8 }}>
+        <Type weight="600">{text('请在 App 或官方来源中查看', 'View in the app or at the official source')}</Type>
+        <Type size={14} muted>{text('此来源不允许浏览器跨域直接读取，本页不会发送这项请求。在小Q App的「金融数据」中可以查询，也可打开下方官方页面核对资料。', 'This source does not allow direct cross-origin browser reads, so this page will not send that request. Query it in Financial data in the Q app, or check the official page below.')}</Type>
+      </View> : null}
       <Group>
-        <Button primary label={loading ? text('正在查询…', 'Querying…') : market.report ? text('刷新资料', 'Refresh data') : market.phase === 'error' ? text('重试查询', 'Retry query') : text('查询公开资料', 'Query public data')} disabled={!active || loading || market.coolingDown} onPress={market.run} />
+        {directRead ? <Button primary label={loading ? text('正在查询…', 'Querying…') : market.report ? text('刷新资料', 'Refresh data') : market.phase === 'error' ? text('重试查询', 'Retry query') : text('查询公开资料', 'Query public data')} disabled={!active || loading || market.coolingDown} onPress={market.run} /> : <Button primary icon={ExternalLink} label={text('查看官方来源', 'View official source')} onPress={() => preview({ title: currentProvider, url: marketOfficialPage(query) })} />}
         {loading ? <Button label={text('取消查询', 'Cancel query')} onPress={market.cancel} /> : null}
         <Button icon={ExternalLink} label={text('来源说明', 'Source details')} onPress={() => preview({ title: currentProvider, url: providerUrl })} />
       </Group>
       <View accessibilityLiveRegion="polite" style={{ gap: 8 }}>
-        {market.phase === 'idle' ? <Type size={13} muted>{text('尚未查询；打开页面不会自动请求公开资料。', 'Not queried. Opening this page does not request public data.')}</Type> : null}
+        {directRead && market.phase === 'idle' ? <Type size={13} muted>{text('尚未查询；打开页面不会自动请求公开资料。', 'Not queried. Opening this page does not request public data.')}</Type> : null}
         {loading ? <Type size={13} muted>{text('正在读取所选来源；离页或应用进入后台会取消。', 'Reading the selected source. Leaving the page or backgrounding the app cancels the request.')}</Type> : null}
         {market.phase === 'cancelled' ? <Type size={13} muted>{text('查询已取消，迟到的响应不会显示。', 'Query cancelled. Late responses will not be displayed.')}</Type> : null}
         {market.phase === 'error' ? <Type size={14} color={colors.danger}>{marketErrorText(market.error, locale)}</Type> : null}

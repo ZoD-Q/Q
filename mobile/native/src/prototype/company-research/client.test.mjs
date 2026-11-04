@@ -6,12 +6,59 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const { searchCompanies, researchCompany, COMPANY_FACTS_LIMIT } = await import('./client.ts');
+const { BROWSER_SEC_GAP, buildCompanyResearchText } = await import('./core.ts');
 test.after(() => resolver.deregister());
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 const options = transport => ({ signal: new AbortController().signal, transport });
 const accession = '0000000123-25-000001';
 const submissions = { cik: 123, name: 'Example Inc.', tickers: ['EX'], exchanges: ['NYSE'], filings: { recent: { form: ['10-K'], accessionNumber: [accession], reportDate: ['2024-12-31'] } } };
 const facts = { cik: 123, facts: { 'us-gaap': { Revenues: { units: { USD: [{ val: 120, start: '2024-01-01', end: '2024-12-31', filed: '2025-02-01', form: '10-K', accn: accession }] } } } } };
+test('browser fetch transport keeps its receiver contract across identity and facts reads', async () => {
+  const calls = [];
+  async function browserFetch(url, init) {
+    // Window.fetch rejects an unrelated object as its receiver.
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+    calls.push(url);
+    assert.equal(init.credentials, 'omit');
+    return json(url.includes('/submissions/') ? submissions : facts);
+  }
+  const report = await researchCompany('sec:0000000123', options(browserFetch));
+  assert.equal(calls.length, 2);
+  assert.equal(report.company?.name, 'Example Inc.');
+  assert.equal(report.facts[0]?.value, 120);
+  assert.ok(report.sources.every(source => source.status === 'available'));
+});
+test('browser company search reads Wikidata and reports SEC as not requested rather than empty or failed', async () => {
+  const calls = [];
+  const report = await searchCompanies('Example Inc', { ...options(async (url, init) => {
+    calls.push(url);
+    assert.equal(new URL(url).hostname, 'www.wikidata.org');
+    assert.deepEqual(init.headers, { Accept: 'application/json' });
+    if (url.includes('api.php')) return json({ search: [{ id: 'Q1' }] });
+    return json({ entities: { Q1: { id: 'Q1', labels: { en: { value: 'Example Inc.' } }, claims: { P414: [{ mainsnak: { datavalue: { value: { id: 'Q2' } } }, qualifiers: { P249: [{ datavalue: { value: 'EX' } }] } }] } } } });
+  }), platform: 'web' });
+  assert.equal(calls.length, 2);
+  assert.equal(report.candidates[0]?.name, 'Example Inc.');
+  assert.equal(report.sources.find(source => source.source === 'sec-directory')?.status, 'not_read');
+  assert.ok(report.sources.filter(source => source.source.startsWith('wikidata')).every(source => source.status === 'available'));
+  assert.ok(report.gaps.includes(BROWSER_SEC_GAP));
+  assert.match(buildCompanyResearchText(report, 'en'), /SEC data was not requested/);
+});
+test('browser financial research never requests blocked SEC data or invents annual facts', async () => {
+  let calls = 0;
+  const report = await researchCompany('sec:0000000123', { ...options(async () => { calls++; throw new Error('must not request SEC in browser'); }), platform: 'web' });
+  assert.equal(calls, 0);
+  assert.equal(report.sources[0]?.status, 'not_read');
+  assert.equal(report.company, null);
+  assert.deepEqual(report.facts, []);
+  assert.ok(report.gaps.includes(BROWSER_SEC_GAP));
+});
+test('browser Wikidata network failures remain failures alongside the explicit SEC restriction', async () => {
+  const report = await searchCompanies('Example Inc', { ...options(async () => { throw new Error('PUBLIC_NETWORK_FAILURE'); }), platform: 'web' });
+  assert.equal(report.sources.find(source => source.source === 'sec-directory')?.status, 'not_read');
+  assert.equal(report.sources.find(source => source.source === 'wikidata-search')?.status, 'error');
+  assert.equal(report.sources.find(source => source.source === 'wikidata-search')?.error, 'network');
+});
 test('source failure is distinct from an empty search, fixed anonymous requests never retry', async () => {
   const calls = [];
   const report = await searchCompanies('Example Inc', options(async (url, init) => {

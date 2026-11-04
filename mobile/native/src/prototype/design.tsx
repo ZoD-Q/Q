@@ -1,4 +1,4 @@
-import { createContext, use, useState, type ReactNode } from "react";
+import { createContext, use, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentRef, type ReactNode } from "react";
 import Animated, { useReducedMotion } from "react-native-reanimated";
 import { selectionFeedback, usePressMotion } from "./motion";
 import {
@@ -66,8 +66,8 @@ export const themes: Record<ThemeId, Colors> = {
     line: "#E3E0D8",
     ink: "#282720",
     muted: "#6D6B63",
-    faint: "#8C8980",
-    accent: "#AD573D",
+    faint: "#6D6B63",
+    accent: "#A25139",
     accentBg: "#F3E6DD",
     onAccent: "#FFFFFF",
     green: "#566D4B",
@@ -82,8 +82,8 @@ export const themes: Record<ThemeId, Colors> = {
     line: "#E9EEF1",
     ink: "#202B33",
     muted: "#65737E",
-    faint: "#7C8892",
-    accent: "#087FA3",
+    faint: "#65737E",
+    accent: "#08789B",
     accentBg: "#EAF6FA",
     onAccent: "#FFFFFF",
     green: "#307968",
@@ -98,7 +98,7 @@ export const themes: Record<ThemeId, Colors> = {
     line: "#2E3A43",
     ink: "#EDF4F7",
     muted: "#A7B5BE",
-    faint: "#7F929F",
+    faint: "#8194A1",
     accent: "#72CBE5",
     accentBg: "#193944",
     onAccent: "#112B35",
@@ -126,6 +126,18 @@ type DesignState = {
   setProfileAvatar: (value: string) => void;
 };
 const Context = createContext<DesignState | null>(null);
+const subscribeHydration = () => () => {};
+const clientHydrated = () => true;
+const serverHydrated = () => false;
+const serverDimensions = { width: 0, height: 0, scale: 1, fontScale: 1 };
+
+/** Keep the first browser render identical to Expo's static HTML. */
+export function useLayoutDimensions() {
+  const dimensions = useWindowDimensions();
+  const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);
+  return process.env.EXPO_OS === "web" && !hydrated ? serverDimensions : dimensions;
+}
+
 export function DesignProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<ThemeId>("light");
   const [locale, setLocale] = useState<LocaleId>("zh");
@@ -133,7 +145,7 @@ export function DesignProvider({ children }: { children: ReactNode }) {
   const [profileBio, setProfileBio] = useState("");
   const [profileAvatar, setProfileAvatar] = useState("orbit");
   const [notice, setNotice] = useState("");
-  const { width } = useWindowDimensions();
+  const { width } = useLayoutDimensions();
   return (
     <Context
       value={{
@@ -665,6 +677,9 @@ export function Sheet({
   wide = false,
   footer,
   automaticallyAdjustKeyboardInsets = true,
+  contentKey,
+  initialScrollOffset,
+  onContentScroll,
 }: {
   visible: boolean;
   title: string;
@@ -675,14 +690,24 @@ export function Sheet({
   wide?: boolean;
   footer?: ReactNode;
   automaticallyAdjustKeyboardInsets?: boolean;
+  contentKey?: string;
+  initialScrollOffset?: number;
+  onContentScroll?: (offset: number) => void;
 }) {
   const { colors, phone, text } = useDesign();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
+  const contentScroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  useLayoutEffect(() => {
+    if (process.env.EXPO_OS === "web" && visible && initialScrollOffset !== undefined) {
+      contentScroll.current?.scrollTo({ y: initialScrollOffset, animated: false });
+    }
+  }, [contentKey, initialScrollOffset, visible]);
   return (
     <Modal
       transparent
       visible={visible}
+      supportedOrientations={['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right']}
       animationType={
         reduced || process.env.EXPO_OS === "web" ? "none" : "slide"
       }
@@ -765,6 +790,11 @@ export function Sheet({
             />
           </View>
           <ScrollView
+            ref={contentScroll}
+            key={contentKey}
+            contentOffset={initialScrollOffset === undefined ? undefined : { x: 0, y: initialScrollOffset }}
+            onScroll={onContentScroll ? event => onContentScroll(event.nativeEvent.contentOffset.y) : undefined}
+            scrollEventThrottle={onContentScroll ? 16 : undefined}
             automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ padding: 24, paddingTop: 16, gap: 20 }}

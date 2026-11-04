@@ -1,8 +1,8 @@
-import { CompanyResearchError, SEC_DIRECTORY, buildCompanyResearchText, calculateFacts, entityUrl, factsUrl, parseDirectory, parseEntity, parseFinancialFacts, parseSubmissions, record, submissionsUrl, validateCompanyQuery, validateIssuerId } from './core';
+import { CompanyResearchError, SEC_DIRECTORY, BROWSER_SEC_GAP, companyDirectReadAllowed, buildCompanyResearchText, calculateFacts, entityUrl, factsUrl, parseDirectory, parseEntity, parseFinancialFacts, parseSubmissions, record, submissionsUrl, validateCompanyQuery, validateIssuerId } from './core';
 import type { CompanyCandidate, CompanyResearchReport, CompanySearchReport, SourceName, SourceStatus } from './core';
 export { buildCompanyResearchText, validateCompanyQuery, validateIssuerId, CompanyResearchError };
 export type { CompanyCandidate, CompanyResearchReport, CompanySearchReport };
-export type CompanyRequestOptions = { signal: AbortSignal; transport: typeof fetch };
+export type CompanyRequestOptions = { signal: AbortSignal; transport: typeof fetch; platform?: string };
 export const COMPANY_TIMEOUT_MS = 12_000;
 export const COMPANY_FACTS_LIMIT = 12 * 1024 * 1024;
 const MAX_JSON = 2 * 1024 * 1024;
@@ -44,7 +44,11 @@ async function getJson(url: string, options: CompanyRequestOptions, maxBytes = M
   const timer = setTimeout(() => { timeout = true; cancel(); }, COMPANY_TIMEOUT_MS);
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    const pending = options.transport(url, { method: 'GET', credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: controller.signal, headers: { Accept: 'application/json', 'User-Agent': 'Q-Public-Research/0.1 (+https://q.kaicloudpay.com)' } }).then(response => {
+    // Browser fetch must not receive the options object as its `this` value.
+    const transport = options.transport;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if ((options.platform ?? process.env.EXPO_OS) !== 'web') headers['User-Agent'] = 'Q-Public-Research/0.1 (+https://q.kaicloudpay.com)';
+    const pending = transport(url, { method: 'GET', credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: controller.signal, headers }).then(response => {
       if (controller.signal.aborted) { void response.body?.cancel().catch(() => undefined); throw error(); } return response;
     });
     const response = await abortable(pending, controller.signal, error);
@@ -84,6 +88,8 @@ async function getJson(url: string, options: CompanyRequestOptions, maxBytes = M
   }
 }
 async function source<T>(statuses: SourceStatus[], name: SourceName, url: string, options: CompanyRequestOptions, parse: (data: unknown) => T, maxBytes?: number): Promise<T | null> {
+  if (options.signal.aborted) throw new CompanyResearchError('cancelled');
+  if (!companyDirectReadAllowed(name, options.platform ?? process.env.EXPO_OS)) { statuses.push({ source: name, status: 'not_read', url }); return null; }
   try { const value = parse(await getJson(url, options, maxBytes)); statuses.push({ source: name, status: 'available', url }); return value; }
   catch (e) { if (options.signal.aborted) throw new CompanyResearchError('cancelled'); statuses.push({ source: name, status: 'error', url, error: e instanceof CompanyResearchError ? e.code : 'invalid_data' }); return null; }
 }
@@ -102,6 +108,7 @@ function idsFromQuery(data: unknown): string[] {
 export async function searchCompanies(query: string, options: CompanyRequestOptions): Promise<CompanySearchReport> {
   if (!validateCompanyQuery(query)) throw new CompanyResearchError('invalid_query');
   const report: CompanySearchReport = { kind: 'company-search', query: query.trim(), fetchedAt: new Date().toISOString(), candidates: [], sources: [], gaps: [...publicGaps, 'Results are bounded to 12 SEC and 6 Wikidata candidates; no result does not establish that an issuer does not exist.'] };
+  if ((options.platform ?? process.env.EXPO_OS) === 'web') report.gaps.push(BROWSER_SEC_GAP);
   const q = query.trim();
   const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(q)}&language=${/[\u3400-\u9fff]/u.test(q) ? 'zh' : 'en'}&uselang=en&type=item&limit=6&format=json&origin=*`;
   const ticker = q.includes(':') ? q.slice(q.lastIndexOf(':') + 1) : q;
@@ -126,6 +133,7 @@ export async function searchCompanies(query: string, options: CompanyRequestOpti
 export async function researchCompany(issuerId: string, options: CompanyRequestOptions): Promise<CompanyResearchReport> {
   if (!validateIssuerId(issuerId)) throw new CompanyResearchError('invalid_issuer');
   const report: CompanyResearchReport = { kind: 'company-research', issuerId, fetchedAt: new Date().toISOString(), company: null, sources: [], facts: [], calculations: [], gaps: [...publicGaps, 'Financial overview uses standard whole-entity XBRL facts, not the full annual-report narrative or custom tags.', 'Only annual filings in the SEC recent submission window are used; older history and prior balance-sheet dates absent from this window are not fetched. Missing values are unavailable, never zero.'] };
+  if ((options.platform ?? process.env.EXPO_OS) === 'web') report.gaps.push(BROWSER_SEC_GAP);
   let cik: string | null = issuerId.startsWith('sec:') ? issuerId.slice(4) : null;
   let mapped: ReturnType<typeof parseEntity> | undefined;
   if (!cik) {

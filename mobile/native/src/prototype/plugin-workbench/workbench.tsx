@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { KeyboardAvoidingView, Linking, Pressable, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import {
   ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Code2, Copy,
@@ -9,6 +9,7 @@ import {
 import { Action, Choice, Divider, Input, Page, Sheet, Tabs, Tag, Type, useDesign } from "../design";
 import { usePluginWorkbench } from "./state";
 import { inspectEntry, type EntryKind, type Issue, type PluginDraft, type PluginEntryIntent } from "./materials";
+import { IntegrationGuidePage } from "./guide-reader";
 
 const entryChoices: { id: EntryKind; zh: string; en: string; placeholder: string; hintZh: string; hintEn: string }[] = [
   { id: "auto", zh: "自动识别", en: "Automatic", placeholder: "https://example.com/plugin", hintZh: "填写完整 HTTPS 链接或纯域名。实际类型将在「我的连接」中按服务响应识别。", hintEn: "Use a complete HTTPS link or a domain. My connections identifies the entry from the service response." },
@@ -17,7 +18,6 @@ const entryChoices: { id: EntryKind; zh: string; en: string; placeholder: string
   { id: "page", zh: "介绍页", en: "Intro page", placeholder: "https://your-domain.com/plugins/calendar", hintZh: "页面需用静态 rel=ai-catalog 或 HTTP Link 声明目录；普通网页链接还不够。", hintEn: "Declare a catalog with a static rel=ai-catalog link or HTTP Link header. A regular web page alone is not enough." },
   { id: "catalog", zh: "Catalog", en: "Catalog", placeholder: "https://your-domain.com/catalog.json", hintZh: "目录链接到独立 Server Card。多个服务由用户选择，不会自动全部添加。", hintEn: "A catalog links to individual Server Cards. Users choose among multiple services; they are not all added at once." },
 ];
-const DOC_URL = "https://gitlab.kai.com/KAI/oD/ZoD/Q/-/blob/main/backend/docs/plugin-integration.md";
 const noErrors = (issues: Issue[]) => !issues.some(issue => issue.level === "error");
 
 function SectionHeading({ title, detail, icon: Icon }: { title: string; detail?: string; icon?: LucideIcon }) {
@@ -293,11 +293,13 @@ function MaterialGenerator() {
 }
 
 export function PluginWorkbenchPage({ onBack, onConnect }: { onBack: () => void; onConnect: (intent: PluginEntryIntent) => void }) {
-  const { text, width, notify } = useDesign();
+  const { text, width } = useDesign();
   const state = usePluginWorkbench();
   const [publicInfo, setPublicInfo] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [fullGuideOpen, setFullGuideOpen] = useState(false);
   const wide = width >= 1240;
+  if (fullGuideOpen) return <IntegrationGuidePage onBack={() => setFullGuideOpen(false)} />;
   return <KeyboardAvoidingView behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
     <Page title={text("插件工作台", "Plugin workbench")} description={text("连接已有服务，或为自己的插件准备发布材料。", "Connect an existing service or prepare your own plugin’s publishing materials.")}
       action={<Action kind="ghost" icon={ArrowLeft} label={text("返回插件", "Back to plugins")} onPress={onBack} />}>
@@ -315,7 +317,7 @@ export function PluginWorkbenchPage({ onBack, onConnect }: { onBack: () => void;
           <Type size={14} muted>{text("用户确认添加并完成所需授权后，可以建立自己的连接。是否被公共目录收录，不是连接与调用的前提。", "A user can establish a personal connection after confirming the service and granting any required access. Public listing is not a prerequisite for connection or calls.")}</Type>
           <Type size={14} muted>{text("公共索引需要发布者自己的公开 Catalog 声明、来源验证和匿名抓取，并遵守 robots.txt 与 noindex。私有目录、账户信息、工具结果和 UI 数据不会因此进入公共库。", "Public indexing requires the publisher’s own public Catalog, verified origins, and anonymous crawling that respects robots.txt and noindex. Private catalogs, accounts, results, and UI data do not belong in the public index.")}</Type>
         </Disclosure>
-        <Action kind="ghost" label={text("查看完整接入规范", "Read the integration specification")} icon={Code2} onPress={() => { void Linking.openURL(DOC_URL).catch(() => notify(text("暂时无法打开规范链接。", "Unable to open the specification."))); }} style={{ alignSelf: "flex-start" }} />
+        <Action kind="ghost" label={text("查看完整接入规范", "Read the integration specification")} icon={Code2} onPress={() => setFullGuideOpen(true)} style={{ alignSelf: "flex-start" }} />
       </View>
     </Page>
   </KeyboardAvoidingView>;
