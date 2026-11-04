@@ -28,8 +28,6 @@ import {
   ChartNoAxesCombined,
   ShieldCheck,
   Landmark,
-  TrendingUp,
-  BarChart3,
   X,
 } from "lucide-react-native";
 import {
@@ -66,12 +64,11 @@ export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 export function QGlyph({ size = 48 }: { size?: number }) {
   return <QCompanion size={size} showBadge={false} />;
 }
-export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData, onOpenDataService, onOpenAppAction }: {
+export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData, onOpenAppAction }: {
   controller: ChatController;
   onOpenPlugins: () => void;
   onOpenFinancialService: (category: 'installments' | 'insurance' | 'finance') => void;
   onOpenMarketData: () => void;
-  onOpenDataService: () => void;
   onOpenAppAction?: (action: AppNavigationAction) => void;
 }) {
   const { conversation, draft, setDraft, model, setModel, think, setThink } = controller;
@@ -315,7 +312,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
         </Type>
         <View accessibilityLiveRegion="polite" testID="q-welcome-status">
           <Type size={14} muted style={{ textAlign: "center", lineHeight: 22 }}>
-            {text('了解保障、查询市场、管理理财——点下方金融任务直达对应能力。', 'Explore insurance, research markets and manage wealth — tap a finance task below to jump right in.')}
+            {text('了解保障、查询市场，找到小Q里的合适功能。', 'Explore insurance, research markets and find the right features in Q.')}
           </Type>
         </View>
       </View>
@@ -331,18 +328,13 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
       }}
     >
       {[
-        { label: text('金融知识', 'Financial knowledge'), icon: BookOpen, onPress: () => setKnowledgeOpen(true) },
-        { label: text('查行情 ¥0.05 起', 'Quotes from ¥0.05'), icon: ChartNoAxesCombined, onPress: onOpenMarketData },
-        { label: text('理财中心', 'Wealth center'), icon: TrendingUp, onPress: () => onOpenFinancialService('finance') },
-        { label: text('保险保障', 'Insurance'), icon: ShieldCheck, onPress: () => onOpenFinancialService('insurance') },
-        { label: text('分期测算', 'Installment math'), icon: Calculator, onPress: () => onOpenFinancialService('installments') },
-        { label: text('数据服务', 'Data service'), icon: BarChart3, onPress: onOpenDataService },
+        { label: text('金融知识', 'Financial knowledge'), icon: BookOpen },
       ].map((item) => (
         <Pressable
           key={item.label}
           accessibilityRole="button"
           accessibilityLabel={item.label}
-          onPress={item.onPress}
+          onPress={() => setKnowledgeOpen(true)}
           style={({ pressed }) => ({
             minHeight: touchSize,
             paddingHorizontal: 14,
