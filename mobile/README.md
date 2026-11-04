@@ -38,15 +38,17 @@ npm run dev
 
 ## TestFlight 发布准备
 
-当前准备版本 `0.1.0 (2)`，图标采用气泡 Q 的清透版本。Apple 团队为 Raimy Ni（`3996RYYTPW`），Bundle ID 为 `com.kaicloud.xiaoq`，App Store Connect 应用 ID 为 `6824424446`，登记名称“小Q - Q makes kai smile”。此前构建 1 于 2026-10-20 12:17（北京时间）上传成功，12:29 确认为 `VALID / READY_FOR_BETA_TESTING`。构建 2 已签名归档，但 Mac 锁定导致上传账号不可读取，尚未上传；100 人外部组已建立，公开链接关闭，未提交 Beta 审核或邀请测试者，真机安装仍待验收。[TestFlight](https://appstoreconnect.apple.com/apps/6824424446/testflight/ios)
+2026-11-04：`0.1.0 (5)` 已完成 App Store 签名并获 Apple 上传接收，分发日志明确允许外部测试；原公测组、Beta 审核与下载可用状态仍待账号验证，尚不宣称公测更新完成。Android 构建 5 为供用户本人安装审核的 arm64 测试 APK，真实键盘、登录和钱包报价回归已完成。来源、签名、截图和未覆盖项见[本次发布记录](docs/mobile-release-2026-11-04/README.md)。
 
-当前发布 API 地址为 `EXPO_PUBLIC_API_URL=https://q.kaicloudpay.com`，公网 HTTPS 登录与真实 DeepSeek 流式调用已验证；服务器当前运行 `4af1ed7` 社交版本，见 [部署状态](../backend/deploy/STATUS.md)。该变量只放公开 API 地址，不能包含凭据；服务端密钥不进入移动端环境。Release 不再回落到设备本机地址。
+Apple 团队为 Raimy Ni（`3996RYYTPW`），Bundle ID 为 `com.kaicloud.xiaoq`，App Store Connect 应用 ID 为 `6824424446`，登记名称“小Q - Q makes kai smile”。构建 1 的历史 `VALID / READY_FOR_BETA_TESTING` 及构建 2 的早期归档记录见[验收历史](docs/testing.md)。[TestFlight 管理入口](https://appstoreconnect.apple.com/apps/6824424446/testflight/ios)
+
+当前发布 API 地址为 `EXPO_PUBLIC_API_URL=https://q.kaicloudpay.com`，公网 HTTPS 登录与真实 DeepSeek 流式调用已验证；服务器已部署 `ac920275` 的已审核 API 制品，实际版本与业务验收边界见[部署状态](../backend/deploy/STATUS.md)。该变量只放公开 API 地址，不能包含凭据；服务端密钥不进入移动端环境。Release 不再回落到设备本机地址。
 
 `native/src/services/api-target.mjs` 为客户端与构建检查提供同一个默认地址。未设置或空 `EXPO_PUBLIC_API_URL` 时使用 `https://q.kaicloudpay.com`；显式设置的地址不会因连接失败而自动切换。发布构建及原生应用目标拒绝将非公网 HTTPS 地址装入正式应用。门禁同时识别 Xcode 构建环境，不能只靠是否记得设置 `Q_STORE_BUILD=1`；它检查配置格式，不替代 DNS、TLS 和真实接口验收。
 
 从 `mobile/native` 运行 `Q_STORE_BUILD=1 npx expo config --type public` 可检查默认正式配置；需要另一后端时显式设置经过验证的 `EXPO_PUBLIC_API_URL`。`npm run test:utils` 已包含此门禁的边界测试。Expo Go 和 iOS 资源导出通过，不等于签名 IPA 或 TestFlight 处理成功；上传后还需检查 Apple 构建状态并实际安装验收。
 
-本轮新增账号删除、注册规则确认和 AI 数据分享许可。依赖的新后端及 `https://q.kaicloudpay.com/privacy` 页面尚未部署，不能只上传新客户端就开放公测。发布顺序与数据恢复限制见[公测记录](../backend/deploy/PUBLIC-BETA.md)。
+2026-10-20 的账号删除、注册规则确认、AI 数据分享许可及后端/隐私页准备属于历史阶段，见[早期公测记录](../backend/deploy/PUBLIC-BETA.md)。当前状态以[部署记录](../backend/deploy/STATUS.md)及[本次发布记录](docs/mobile-release-2026-11-04/README.md)为准；客户端上传、服务器验收与外部公测分发分别记录。
 
 ## 页面与交互
 

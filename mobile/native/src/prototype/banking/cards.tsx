@@ -24,7 +24,7 @@ const framed: Record<string, { source: ImageSourcePropType; width: number; heigh
   citi: { source: require('../../../assets/bank-cards/citi-reference.jpg'), width: 721, height: 213, x: 35, y: 39, w: 218, h: 138 },
   bea: { source: require('../../../assets/bank-cards/bea-reference.jpg'), width: 2480, height: 640, x: 151, y: 74, w: 312, h: 493 },
   hangseng: { source: require('../../../assets/bank-cards/hangseng-reference.jpg'), width: 3840, height: 800, x: 2277, y: 275, w: 292, h: 457 },
-  scb: { source: require('../../../assets/bank-cards/scb-reference.png'), width: 1600, height: 490, x: 829, y: 193, w: 263, h: 164 },
+  scb: { source: require('../../../assets/bank-cards/scb-reference.jpg'), width: 1600, height: 490, x: 829, y: 193, w: 263, h: 164 },
   dbs: { source: require('../../../assets/bank-cards/dbs-reference.jpg'), width: 2808, height: 1260, x: 1907, y: 463, w: 183, h: 289 },
 };
 export function BankCardArt({ bankId, compact = false }: { bankId: string; compact?: boolean }) {
