@@ -11,14 +11,18 @@
       "bundleIdentifier": "com.kaicloud.xiaoq",
       "appleTeamId": "3996RYYTPW",
       "supportsTablet": true,
-      "buildNumber": "4",
+      "buildNumber": "5",
       "config": {
         "usesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.kaicloud.xiaoq",
-      "predictiveBackGestureEnabled": true
+      "versionCode": 5,
+      "predictiveBackGestureEnabled": true,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     "web": {
       "output": "static",
