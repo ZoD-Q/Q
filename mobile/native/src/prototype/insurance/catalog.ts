@@ -94,6 +94,56 @@ const seeds: Seed[] = [
 ];
 export const insuranceTypes = seeds.map(([id, group, zh, en, coverageZh, coverageEn, caution, regClass, regSub, formTag]) => ({ id, group, title: [zh, en] as Copy, coverage: [coverageZh, coverageEn] as Copy, caution, regClass, regSub, formTag, updatedAt: CATALOG_UPDATED_AT, sources: groupSources[group] ?? [] }));
 export type InsuranceType = (typeof insuranceTypes)[number];
+// Official application entries per group: enumeration of three insurers active in that direction.
+// Never a ranking, recommendation or evidence of partnership; applications happen on these official
+// channels only. Q does not place applications or collect premiums.
+export type InsurerRef = { name: Copy; host: string; url: string };
+export const groupInsurers: Record<string, readonly InsurerRef[]> = {
+  health: [
+    { name: ['平安保险', 'Ping An'], host: 'baoxian.pingan.com', url: 'https://baoxian.pingan.com/product/' },
+    { name: ['中国人寿', 'China Life'], host: 'www.chinalife.com.cn', url: 'https://www.chinalife.com.cn/' },
+    { name: ['泰康保险', 'Taikang'], host: 'www.taikang.com', url: 'https://www.taikang.com/' },
+  ],
+  accident: [
+    { name: ['平安保险', 'Ping An'], host: 'baoxian.pingan.com', url: 'https://baoxian.pingan.com/product/' },
+    { name: ['中国人保', 'PICC'], host: 'property.picc.com', url: 'https://property.picc.com/piccinternal/' },
+    { name: ['众安保险', 'ZhongAn'], host: 'www.zhongan.com', url: 'https://www.zhongan.com/' },
+  ],
+  life: [
+    { name: ['中国人寿', 'China Life'], host: 'www.chinalife.com.cn', url: 'https://www.chinalife.com.cn/' },
+    { name: ['新华保险', 'New China Life'], host: 'www.newchinalife.com', url: 'https://www.newchinalife.com/' },
+    { name: ['泰康保险', 'Taikang'], host: 'www.taikang.com', url: 'https://www.taikang.com/' },
+  ],
+  motor: [
+    { name: ['中国人保', 'PICC'], host: 'property.picc.com', url: 'https://property.picc.com/piccinternal/' },
+    { name: ['平安保险', 'Ping An'], host: 'baoxian.pingan.com', url: 'https://baoxian.pingan.com/product/' },
+    { name: ['太平洋保险', 'CPIC'], host: 'www.cpic.com.cn', url: 'https://www.cpic.com.cn/' },
+  ],
+  home: [
+    { name: ['中国人保', 'PICC'], host: 'property.picc.com', url: 'https://property.picc.com/piccinternal/' },
+    { name: ['太平洋保险', 'CPIC'], host: 'www.cpic.com.cn', url: 'https://www.cpic.com.cn/' },
+    { name: ['平安保险', 'Ping An'], host: 'baoxian.pingan.com', url: 'https://baoxian.pingan.com/product/' },
+  ],
+  business: [
+    { name: ['中国人保', 'PICC'], host: 'property.picc.com', url: 'https://property.picc.com/piccinternal/' },
+    { name: ['太平洋保险', 'CPIC'], host: 'www.cpic.com.cn', url: 'https://www.cpic.com.cn/' },
+    { name: ['平安保险', 'Ping An'], host: 'baoxian.pingan.com', url: 'https://baoxian.pingan.com/product/' },
+  ],
+  engineering: [
+    { name: ['中国人保', 'PICC'], host: 'property.picc.com', url: 'https://property.picc.com/piccinternal/' },
+    { name: ['太平洋保险', 'CPIC'], host: 'www.cpic.com.cn', url: 'https://www.cpic.com.cn/' },
+    { name: ['平安保险', 'Ping An'], host: 'baoxian.pingan.com', url: 'https://baoxian.pingan.com/product/' },
+  ],
+  agriculture: [
+    { name: ['中国人保', 'PICC'], host: 'property.picc.com', url: 'https://property.picc.com/piccinternal/' },
+    { name: ['太平洋保险', 'CPIC'], host: 'www.cpic.com.cn', url: 'https://www.cpic.com.cn/' },
+    { name: ['中华联合保险', 'China United'], host: 'www.chinaco.com.cn', url: 'https://www.chinaco.com.cn/' },
+  ],
+};
+export function trustedOutboundUrl(url: string): boolean {
+  if (!url.startsWith('https:')) return false;
+  return sources.some(source => source.url === url) || Object.values(groupInsurers).some(refs => refs.some(ref => ref.url === url));
+}
 export function findInsurance(query: string, group = 'all', regClass: RegClass | 'all' = 'all', formTag: FormTag | 'all' = 'all') {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return insuranceTypes.filter(item => (group === 'all' || item.group === group) && (regClass === 'all' || item.regClass === regClass) && (formTag === 'all' || item.formTag === formTag) && terms.every(term => [...item.title, ...item.coverage, item.caution, ...groups.find(g => g.id === item.group)!.title, ...regClasses[item.regClass], ...regSubLabels[item.regSub]].join(' ').toLowerCase().includes(term)));

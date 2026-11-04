@@ -3,6 +3,7 @@ import { PluginsPage } from "./plugins";
 import { WalletPage } from "./wallet";
 import { KeysPage } from "./keys";
 import { FinancialCatalogPage } from "../financial-catalog/page";
+import { WealthCenterPage } from "../wealth-center/page";
 import { InsuranceDashboard, type InsuranceEntry } from "../insurance/page";
 export function ServicePage({
   page,
@@ -31,6 +32,7 @@ export function ServicePage({
     case "keys":
       return <KeysPage />;
     case "finance":
+      return <WealthCenterPage onOpenDataService={onOpenDataService} />;
     case "installments":
       return <FinancialCatalogPage key={page} category={page} onOpenDataService={onOpenDataService} />;
     case "insurance":

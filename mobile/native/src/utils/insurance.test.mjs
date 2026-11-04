@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groups, insuranceTypes, findInsurance, sources, regClasses, regSubLabels, formTags, CATALOG_UPDATED_AT } from '../prototype/insurance/catalog.ts';
+import { groups, insuranceTypes, findInsurance, sources, regClasses, regSubLabels, formTags, groupInsurers, trustedOutboundUrl, CATALOG_UPDATED_AT } from '../prototype/insurance/catalog.ts';
 
 test('every insurance entry has a valid group and reading guidance', () => {
   assert.equal(new Set(insuranceTypes.map(item => item.id)).size, insuranceTypes.length);
@@ -72,4 +72,19 @@ test('discovery combines regulatory class, form filters and new vocabulary', () 
   assert.ok(findInsurance('医疗保险', 'health').every(item => ['medical', 'outpatient', 'premium-medical', 'city-medical', 'special-drug'].includes(item.id)));
   assert.ok(findInsurance('责任保险').length > 3);
   assert.equal(findInsurance('宠物', 'home', 'property').length, 1);
+});
+
+test('every group lists exactly three official insurers with trusted https application entries', () => {
+  for (const group of groups) {
+    const refs = groupInsurers[group.id];
+    assert.ok(Array.isArray(refs) && refs.length === 3, group.id);
+    for (const ref of refs) {
+      assert.ok(ref.name.every(Boolean) && ref.host.length > 0, ref.url);
+      assert.equal(trustedOutboundUrl(ref.url), true, ref.url);
+    }
+  }
+  assert.equal(trustedOutboundUrl('https://baoxian.pingan.com/product/'), true);
+  assert.equal(trustedOutboundUrl('http://baoxian.pingan.com/product/'), false);
+  assert.equal(trustedOutboundUrl('https://insurer.example.com/'), false);
+  for (const source of sources) assert.equal(trustedOutboundUrl(source.url), true);
 });

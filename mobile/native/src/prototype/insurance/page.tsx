@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { ArrowUpRight, ShieldCheck } from 'lucide-react-native';
 import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
-import { groups, insuranceTypes, findInsurance, sources, regClasses, regSubLabels, formTags, type Copy, type InsuranceType, type RegClass, type FormTag } from './catalog';
+import { groups, insuranceTypes, findInsurance, sources, regClasses, regSubLabels, formTags, groupInsurers, trustedOutboundUrl, type Copy, type InsuranceType, type RegClass, type FormTag } from './catalog';
 import { FinanceAdPlacement, FinanceAdSettings } from '../finance-ads';
 
 export type InsuranceEntry = { query?: string; group?: string; insuranceIds?: string[] };
@@ -17,7 +17,7 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
   const [selected, setSelected] = useState<InsuranceType | null>(initialEntry?.insuranceIds?.length === 1 ? insuranceTypes.find(item => item.id === initialEntry.insuranceIds![0]) ?? null : null);
   const [comparison, setComparison] = useState<string[]>(initialEntry?.insuranceIds ?? []);
   const [comparing, setComparing] = useState((initialEntry?.insuranceIds?.length ?? 0) >= 2);
-  const [outbound, setOutbound] = useState<(typeof sources)[number] | null>(null);
+  const [outbound, setOutbound] = useState<{ title: string; url: string } | null>(null);
   const [linkError, setLinkError] = useState(false);
   const [adSettings, setAdSettings] = useState(false);
   const results = findInsurance(query, group, regFilter, formFilter);
@@ -31,7 +31,10 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
       <Row title={text('理赔材料参考', 'Claim preparation')} subtitle={label(category.claims)} />
       <Row title={text('监管归属与形态', 'Regulatory classification')} subtitle={`${label(regClasses[item.regClass])} · ${label(regSubLabels[item.regSub])} · ${label(formTags[item.formTag])}`} />
       <Row title={text('时效与来源', 'Reviewed and sources')} subtitle={text(`条目整理于 ${item.updatedAt}，参考来源如下。`, `Entry reviewed ${item.updatedAt}. Reference sources below.`)} />
-      {item.sources.map((source, index) => <Row key={source.url} title={label(source.title)} subtitle={new URL(source.url).hostname} last={index === item.sources.length - 1} onPress={() => { setLinkError(false); setOutbound(source); }} />)}
+      {item.sources.map(source => <Row key={source.url} title={label(source.title)} subtitle={new URL(source.url).hostname} onPress={() => { setLinkError(false); setOutbound({ title: label(source.title), url: source.url }); }} />)}
+      <Row title={text('承保公司官方投保入口', 'Official insurer entries')} subtitle={text('列举 3 家（非排名非推荐）；实际承保与条款以官方页面为准，投保在官方渠道完成。', 'Three listed insurers, not a ranking or recommendation; official pages govern and applications happen there.')} />
+      {(groupInsurers[category.id] ?? []).map(insurer => <Row key={insurer.url} title={label(insurer.name)} subtitle={insurer.host} onPress={() => { setLinkError(false); setOutbound({ title: label(insurer.name), url: insurer.url }); }} />)}
+      <Row title={text('投保边界说明', 'Application boundary')} subtitle={text('小Q不代办投保、不报价、不收款，也不会自动提交任何资料。', 'Q places no applications, quotes or payments, and submits nothing automatically.')} last />
       <Type size={12} muted>{text('具体保障、除外责任、材料及价格以所选产品条款和保险公司要求为准；备案信息请在承保公司官网核验。', 'Coverage, exclusions, documents and pricing depend on the chosen policy and insurer; verify filing details on the insurer\'s official website.')}</Type>
     </>;
   };
@@ -102,7 +105,7 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
       <Row title={text('个性化信息咨询', 'Personalized inquiries')} subtitle={text('信息询问服务尚未开放。现在可浏览通用知识；实际核保、报价和理赔结论请向保险公司确认。', 'Personalized inquiries are unavailable. General guidance is available; confirm underwriting, quotes and claims with the insurer.')} last />
       <Type size={20} weight="600">{text('官方信息入口', 'Official information')}</Type>
       <Row title={text('官方评级信息怎么查', 'Where official ratings live')} subtitle={text('偿付能力充足率、风险综合评级与服务评价由保险公司和监管部门定期公开披露。请在承保公司官网或监管发布渠道查看披露原文并注意数据期；小Q不评分、不排名、不比价。', 'Solvency ratios, risk-based ratings and service evaluation results are published periodically by insurers and regulators. Read the original disclosures on official channels and note the reporting period. Q does not score, rank or compare prices.')} />
-      {sources.map(source => <Row key={source.url} title={label(source.title)} subtitle={new URL(source.url).hostname} onPress={() => { setLinkError(false); setOutbound(source); }} right={<ArrowUpRight size={18} color={colors.accent} />} />)}
+      {sources.map(source => <Row key={source.url} title={label(source.title)} subtitle={new URL(source.url).hostname} onPress={() => { setLinkError(false); setOutbound({ title: label(source.title), url: source.url }); }} right={<ArrowUpRight size={18} color={colors.accent} />} />)}
     </>}
     <Type size={12} muted>{text('资料整理：2026-10-22。参考平安、新华保险和中国人保公开目录，部分细分类别为编辑整理。此页不报价、不承保、不出单、不收款。', 'Reviewed 2026-10-22. Based on public Ping An, New China Life and PICC directories with editorial subcategories. No quotes, underwriting, policy issuance or payments.')}</Type>
     <Sheet visible={!!selected} title={selected ? label(selected.title) : ''} onClose={() => setSelected(null)}>{selected ? <>{details(selected)}<Action label={text('加入 / 移出对比', 'Toggle comparison')} onPress={() => toggle(selected.id)} /><Type size={12} muted>{comparison.includes(selected.id) ? text('已加入对比，最多保留最近 3 项。', 'Selected. Up to the most recent 3 entries are kept.') : text('可在目录中打开对比。', 'Open comparison from the catalogue.')}</Type></> : null}</Sheet>
@@ -112,9 +115,11 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
       <Action kind="secondary" label={text('清空对比', 'Clear comparison')} onPress={() => { setComparison([]); setComparing(false); }} />
     </Sheet>
     <Sheet visible={!!outbound} title={text('前往官方网站', 'Visit official website')} onClose={() => setOutbound(null)}>
-      <Type>{text('将离开小Q查看机构公开信息，不会自动提交资料。', 'Leave Q to read public information. No data will be submitted automatically.')}</Type><Type selectable>{outbound?.url}</Type>
+      <Type>{text('即将离开小Q，打开以下官方页面。投保申请、健康告知与保费支付均在官方渠道完成；小Q不代办投保、不收款，也不会自动提交任何资料。', 'You are leaving Q for this official page. Applications, disclosures and premiums happen on the official channel; Q places none and submits nothing automatically.')}</Type>
+      {outbound ? <Type weight="500">{outbound.title}</Type> : null}
+      <Type selectable>{outbound?.url}</Type>
       {linkError ? <Type color={colors.danger}>{text('打开失败，请重试或复制链接。', 'Unable to open. Retry or copy the link.')}</Type> : null}
-      <Action label={text('继续打开', 'Continue')} onPress={() => { if (outbound && sources.some(source => source.url === outbound.url)) void Linking.openURL(outbound.url).then(() => setOutbound(null)).catch(() => setLinkError(true)); }} />
+      <Action label={text('继续打开', 'Continue')} onPress={() => { if (outbound && trustedOutboundUrl(outbound.url)) void Linking.openURL(outbound.url).then(() => setOutbound(null)).catch(() => setLinkError(true)); }} />
     </Sheet>
   </Page>;
 }
