@@ -202,7 +202,7 @@ Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标�
 | 部署与数据 | `/opt/q/current` 指向发布目录；配置 `/etc/q/deploy.env`（root 0600）；数据 `/var/lib/q/postgres`；备份 `/var/backups/q` |
 | 定时任务 | `q-backup.timer` 每日备份，`q-health.timer` 每五分钟检查；外部告警、定时异地复制待运维配置 |
 
-操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。当前发布程序来自 GitLab #11941 的 Linux 发布制品，经人工运维安装；部署成功不代表 GitLab 部署作业运行。`64ff5b5` 和 `4af1ed7` 的历史验收不覆盖当前版本。支付汇率为运维快照，当前到期时间为 2026-11-06 22:56:38 北京时间，未部署自动刷新，届时新报价关闭。MCP 宿主接口、公开 origin 与 CIMD 元数据可用，`oauth_configured: true`；真实第三方 OAuth 和可灵业务仍需单独验收。TestFlight `0.1.0 (1)` 已于 2026-10-20 上传成功，Apple 状态为 `VALID / READY_FOR_BETA_TESTING`；测试者分配、外部 Beta 审核与真机安装未进行；构建冻结后新合入的功能不自动成为已部署能力。
+操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。当前发布程序来自 GitLab #11941 的 Linux 发布制品，经人工运维安装；部署成功不代表 GitLab 部署作业运行。`64ff5b5` 和 `4af1ed7` 的历史验收不覆盖当前版本。支付汇率为运维快照，当前到期时间为 2026-11-06 22:56:38 北京时间，未部署自动刷新，届时新报价关闭。MCP 宿主接口、公开 origin 与 CIMD 元数据可用，`oauth_configured: true`；真实第三方 OAuth 和可灵业务仍需单独验收。TestFlight `0.1.0 (5)` 于 2026-11-04 获 Apple 上传接收，上传允许外部测试；公测组、处理/审核与公开下载状态仍待账号核实，真机安装未验收。Android 构建 5 的签名测试包与原生回归见[移动发布记录](mobile/docs/mobile-release-2026-11-04/README.md)。构建冻结后新合入的功能不自动成为已部署能力。
 
 - 登录使用用户指定的本地 SSH 私钥或已配置别名；私钥、密码、数据库凭据和供应商密钥不得写入本文件或提交。`ecs-user` 作为运维登录身份，业务进程使用独立受限身份。
 - 部署前先核对系统、资源、现有服务、端口和数据；保留已有业务和数据库，不重置主机、不覆盖未知目录。默认部署经过人工审核的 `main` 明确提交，记录版本、配置位置、服务状态与回退方法；开发分支的新能力不能自动算作已部署。
