@@ -6,7 +6,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 test.after(() => resolver.deregister());
-const { dataServices, dataServiceById, priceText, REAL_CHANNEL_CONNECTED, DATA_SERVICE_REVIEWED_ON } = await import('../prototype/data-service/catalog.ts');
+const { dataServices, dataServiceById, priceText, REAL_CHANNEL_CONNECTED, DATA_SERVICE_REVIEWED_ON, fundOptions, fundById, trustedFundUrl } = await import('../prototype/data-service/catalog.ts');
 const { createServiceLedger, topUpDemoCredit, chargeService, markDelivered, refundOrder, redeemProQaCredit, DEMO_INITIAL_TOPUP_MINOR_CNY } = await import('../prototype/data-service/core.ts');
 
 const newId = (() => { let n = 0; return () => `id-${++n}`; })();
@@ -19,6 +19,7 @@ test('service catalogue prices every service inside the documented pay-per-use b
     assert.ok(service.priceMinorCny >= 5 && service.priceMinorCny <= 50, service.id);
     assert.ok(service.title.every(Boolean) && service.summary.every(Boolean) && service.deliverable.every(Boolean), service.id);
     assert.match(service.sourceUrl, /^https:/);
+    assert.ok(['market-report', 'fund-profile', 'qa-credit'].includes(service.delivery), service.id);
     assert.ok(dataServiceById(service.id) === service);
   }
   assert.equal(dataServiceById('missing'), null);
@@ -26,6 +27,19 @@ test('service catalogue prices every service inside the documented pay-per-use b
   assert.equal(priceText(50), '¥0.50');
   assert.equal(DATA_SERVICE_REVIEWED_ON, '2026-11-03');
   assert.equal(REAL_CHANNEL_CONNECTED, false);
+});
+
+test('fund options carry public disclosures, non-fixed fee notes and trusted official urls', () => {
+  assert.equal(fundOptions.length, 2);
+  for (const fund of fundOptions) {
+    assert.ok(fund.name.every(Boolean) && fund.feeNote.every(Boolean) && fund.risk.every(Boolean), fund.id);
+    assert.match(fund.risk[0], /不保证|有风险/);
+    assert.equal(trustedFundUrl(fund.url), true, fund.id);
+    assert.equal(fundById(fund.id), fund);
+  }
+  assert.equal(fundById('missing'), null);
+  assert.equal(trustedFundUrl('http://www.efunds.com.cn/'), false);
+  assert.equal(trustedFundUrl('https://example.com/fund'), false);
 });
 
 test('charging debits once, records a charge event and grants one Pro credit', () => {
