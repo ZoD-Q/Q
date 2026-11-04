@@ -74,7 +74,7 @@ export function InsurancePage() {
       : text(`${value} 万 Q`, `${Number(value) * 10000} Q`);
   return (
     <Page
-      title={text("保险", "Insurance")}
+      title={text("保险示例", "Insurance example")}
       description={text(
         "保障与保费为虚构示例，当前不可投保。",
         "Coverage and premiums are fictional examples, unavailable for purchase.",

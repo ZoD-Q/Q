@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { ArrowUpRight, ShieldCheck } from 'lucide-react-native';
 import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
-import { groups, insuranceTypes, findInsurance, sources, type Copy, type InsuranceType } from './catalog';
+import { groups, insuranceTypes, findInsurance, sources, regClasses, regSubLabels, formTags, type Copy, type InsuranceType, type RegClass, type FormTag } from './catalog';
 import { FinanceAdPlacement, FinanceAdSettings } from '../finance-ads';
 
 export type InsuranceEntry = { query?: string; group?: string; insuranceIds?: string[] };
@@ -11,6 +11,8 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
   const label = (copy: Copy) => text(copy[0], copy[1]);
   const [query, setQuery] = useState(initialEntry?.query ?? '');
   const [group, setGroup] = useState(initialEntry?.group ?? 'all');
+  const [regFilter, setRegFilter] = useState<'all' | RegClass>('all');
+  const [formFilter, setFormFilter] = useState<'all' | FormTag>('all');
   const [tab, setTab] = useState('catalog');
   const [selected, setSelected] = useState<InsuranceType | null>(initialEntry?.insuranceIds?.length === 1 ? insuranceTypes.find(item => item.id === initialEntry.insuranceIds![0]) ?? null : null);
   const [comparison, setComparison] = useState<string[]>(initialEntry?.insuranceIds ?? []);
@@ -18,7 +20,7 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
   const [outbound, setOutbound] = useState<(typeof sources)[number] | null>(null);
   const [linkError, setLinkError] = useState(false);
   const [adSettings, setAdSettings] = useState(false);
-  const results = findInsurance(query, group);
+  const results = findInsurance(query, group, regFilter, formFilter);
   const toggle = (id: string) => setComparison(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id].slice(-3));
   const details = (item: InsuranceType) => {
     const category = groups.find(value => value.id === item.group)!;
@@ -26,8 +28,11 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
       <Row title={text('保障方向', 'Coverage overview')} subtitle={label(item.coverage)} />
       <Row title={text('重点核对', 'Key considerations')} subtitle={text(item.caution, category.questions[1])} />
       <Row title={text('投保前问清楚', 'Questions before buying')} subtitle={label(category.questions)} />
-      <Row title={text('理赔材料参考', 'Claim preparation')} subtitle={label(category.claims)} last />
-      <Type size={12} muted>{text('具体保障、除外责任、材料及价格以所选产品条款和保险公司要求为准。', 'Coverage, exclusions, documents and pricing depend on the chosen policy and insurer.')}</Type>
+      <Row title={text('理赔材料参考', 'Claim preparation')} subtitle={label(category.claims)} />
+      <Row title={text('监管归属与形态', 'Regulatory classification')} subtitle={`${label(regClasses[item.regClass])} · ${label(regSubLabels[item.regSub])} · ${label(formTags[item.formTag])}`} />
+      <Row title={text('时效与来源', 'Reviewed and sources')} subtitle={text(`条目整理于 ${item.updatedAt}，参考来源如下。`, `Entry reviewed ${item.updatedAt}. Reference sources below.`)} />
+      {item.sources.map((source, index) => <Row key={source.url} title={label(source.title)} subtitle={new URL(source.url).hostname} last={index === item.sources.length - 1} onPress={() => { setLinkError(false); setOutbound(source); }} />)}
+      <Type size={12} muted>{text('具体保障、除外责任、材料及价格以所选产品条款和保险公司要求为准；备案信息请在承保公司官网核验。', 'Coverage, exclusions, documents and pricing depend on the chosen policy and insurer; verify filing details on the insurer\'s official website.')}</Type>
     </>;
   };
   return <Page title={text('保险全景', 'Insurance explorer')} action={<Action kind="ghost" label={text('广告设置', 'Ad settings')} onPress={() => setAdSettings(true)} />} description={text('从个人健康到家庭资产、企业经营，按生活与业务场景了解保障。', 'Explore protection for your health, family, assets and business.')}>
@@ -59,11 +64,18 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
         <Action kind="secondary" label={text(`对比 (${comparison.length}/3)`, `Compare (${comparison.length}/3)`)} disabled={comparison.length < 2} onPress={() => setComparing(true)} />
         <Type size={13} muted>{text(`${results.length} 项结果`, `${results.length} results`)}</Type>
       </View>
-      {!results.length ? <View style={{ gap: 12 }}><Type>{text('没有匹配的险种，试试更短的关键词或其他分类。', 'No matches. Try a shorter query or a different category.')}</Type><Action label={text('清除筛选', 'Reset filters')} onPress={() => { setQuery(''); setGroup('all'); }} /></View> : null}
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {([['all', '全部口径', 'All classes'], ['life', '人身保险', 'Personal'], ['property', '财产保险', 'Property']] as const).map(([id, zh, en]) => <Choice key={id} label={text(zh, en)} selected={regFilter === id} onPress={() => setRegFilter(id)} />)}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {([['all', '全部形态', 'All forms'], ['main', '主险', 'Main'], ['rider', '附加险', 'Rider'], ['form-only', '形态条目', 'Form entries']] as const).map(([id, zh, en]) => <Choice key={id} label={text(zh, en)} selected={formFilter === id} onPress={() => setFormFilter(id)} />)}
+      </View>
+      {!results.length ? <View style={{ gap: 12 }}><Type>{text('没有匹配的险种，试试更短的关键词或其他分类。', 'No matches. Try a shorter query or a different category.')}</Type><Action label={text('清除筛选', 'Reset filters')} onPress={() => { setQuery(''); setGroup('all'); setRegFilter('all'); setFormFilter('all'); }} /></View> : null}
       {groups.filter(category => results.some(item => item.group === category.id)).map(category => <View key={category.id} style={{ gap: 13 }}>
         <Type size={20} weight="600">{label(category.title)}</Type>
         {results.filter(item => item.group === category.id).map(item => <View key={item.id} style={{ borderRadius: 16, borderWidth: 1, borderColor: colors.line, padding: 16, gap: 10 }}>
           <Row title={label(item.title)} subtitle={label(item.coverage)} onPress={() => setSelected(item)} right={<ArrowUpRight size={18} color={colors.accent} />} last />
+          {item.formTag !== 'main' ? <Tag>{item.formTag === 'rider' ? text('附加险 · 依附主险，不计入险种', 'Rider · attached to a main policy') : text('形态类条目 · 非独立险种', 'Product form · not a standalone type')}</Tag> : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             <Action kind="ghost" label={text('保障详情', 'Coverage details')} onPress={() => setSelected(item)} />
             <Choice label={comparison.includes(item.id) ? text('已选对比', 'Selected') : text('加入对比', 'Compare')} selected={comparison.includes(item.id)} onPress={() => toggle(item.id)} />
@@ -89,6 +101,7 @@ export function InsuranceDashboard({ initialEntry }: { initialEntry?: InsuranceE
       <Row title={text('客服对话', 'Customer service conversation')} subtitle={text('尚未接通客服机构，暂不能发送消息或创建工单。', 'No support provider is connected. Messages and tickets are unavailable.')} />
       <Row title={text('个性化信息咨询', 'Personalized inquiries')} subtitle={text('信息询问服务尚未开放。现在可浏览通用知识；实际核保、报价和理赔结论请向保险公司确认。', 'Personalized inquiries are unavailable. General guidance is available; confirm underwriting, quotes and claims with the insurer.')} last />
       <Type size={20} weight="600">{text('官方信息入口', 'Official information')}</Type>
+      <Row title={text('官方评级信息怎么查', 'Where official ratings live')} subtitle={text('偿付能力充足率、风险综合评级与服务评价由保险公司和监管部门定期公开披露。请在承保公司官网或监管发布渠道查看披露原文并注意数据期；小Q不评分、不排名、不比价。', 'Solvency ratios, risk-based ratings and service evaluation results are published periodically by insurers and regulators. Read the original disclosures on official channels and note the reporting period. Q does not score, rank or compare prices.')} />
       {sources.map(source => <Row key={source.url} title={label(source.title)} subtitle={new URL(source.url).hostname} onPress={() => { setLinkError(false); setOutbound(source); }} right={<ArrowUpRight size={18} color={colors.accent} />} />)}
     </>}
     <Type size={12} muted>{text('资料整理：2026-10-22。参考平安、新华保险和中国人保公开目录，部分细分类别为编辑整理。此页不报价、不承保、不出单、不收款。', 'Reviewed 2026-10-22. Based on public Ping An, New China Life and PICC directories with editorial subcategories. No quotes, underwriting, policy issuance or payments.')}</Type>

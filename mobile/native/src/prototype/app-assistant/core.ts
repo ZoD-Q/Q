@@ -1,4 +1,4 @@
-import { findInsurance, groups, insuranceTypes, sources, type InsuranceType } from '../insurance/catalog';
+import { findInsurance, groups, insuranceTypes, regClasses, regSubLabels, formTags, sources, type InsuranceType } from '../insurance/catalog';
 import { validateMarketQuery, type MarketQuery } from '../market-data/core';
 import { APP_MODULES, appCopy, isModuleId, moduleDefinition, type AppLocale, type ModuleId } from './catalog';
 
@@ -165,6 +165,7 @@ function insuranceSources(locale: AppLocale): AppJson[] {
 function insuranceRow(item: InsuranceType, locale: AppLocale): { [key: string]: AppJson } {
   const category = groups.find(group => group.id === item.group)!;
   return { id: item.id, group: item.group, title: appCopy(item.title, locale), coverage: appCopy(item.coverage, locale),
+    regulation: `${appCopy(regClasses[item.regClass], locale)} · ${appCopy(regSubLabels[item.regSub], locale)} · ${appCopy(formTags[item.formTag], locale)}`,
     considerations: locale === 'zh' ? item.caution : category.questions[1],
     questions: appCopy(category.questions, locale), claimPreparation: appCopy(category.claims, locale) };
 }
@@ -203,7 +204,7 @@ export function executeLocalAppCommand(input: AppCommand, locale: AppLocale): Ap
     const selected = command.arguments.ids.map(id => insuranceTypes.find(item => item.id === id)!);
     const rows = selected.map(item => insuranceRow(item, locale));
     return { text: [zh ? '按保障目的比较以下险种：' : 'Compare these coverage types by purpose:',
-      ...rows.map(row => `${row.title}\n${zh ? '保障方向' : 'Coverage purpose'}：${row.coverage}\n${zh ? '重点核对' : 'Check carefully'}：${row.considerations}\n${zh ? '投保前问题' : 'Questions before buying'}：${row.questions}\n${zh ? '理赔材料参考' : 'Claim-document guidance'}：${row.claimPreparation}`), insuranceLimit(locale), sourceText(locale)].join('\n\n'),
+      ...rows.map(row => `${row.title}\n${zh ? '保障方向' : 'Coverage purpose'}：${row.coverage}\n${zh ? '监管归属与形态' : 'Regulation & form'}：${row.regulation}\n${zh ? '重点核对' : 'Check carefully'}：${row.considerations}\n${zh ? '投保前问题' : 'Questions before buying'}：${row.questions}\n${zh ? '理赔材料参考' : 'Claim-document guidance'}：${row.claimPreparation}`), insuranceLimit(locale), sourceText(locale)].join('\n\n'),
       actions: [{ ...createAppNavigationAction('insurance', locale, { insuranceIds: command.arguments.ids }), label: zh ? '打开保障方向对比' : 'Open coverage comparison' }],
       data: { kind: 'insurance_compare', records: rows, sources: insuranceSources(locale), limits: insuranceLimit(locale) } };
   }
