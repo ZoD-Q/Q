@@ -51,6 +51,7 @@ function component(path, exportName, imports, options = {}) {
   const text = (zh, en) => options.locale === 'en' ? en : zh;
   const notify = value => notices.push(value);
   const design = { ...Object.fromEntries(['Action', 'Choice', 'Divider', 'IconAction', 'Input', 'Page', 'Row', 'Sheet', 'Tabs', 'Tag', 'Type'].map(name => [name, name])),
+    useLayoutDimensions: () => ({ width: 393, height: 852, fontScale: 1, scale: 3 }),
     useDesign: () => ({ colors: {}, text, notify, locale: options.locale ?? 'zh', phone: true, notice: '' }) };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Modal', 'Pressable', 'ScrollView', 'TextInput', 'View'].map(name => [name, name])),
     Keyboard: { addListener: () => ({ remove: noop }) }, AppState: { currentState: 'active', addEventListener: () => ({ remove: noop }) },

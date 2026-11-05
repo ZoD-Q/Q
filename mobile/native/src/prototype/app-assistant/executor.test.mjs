@@ -14,7 +14,7 @@ const companyClient = await import('../company-research/client.ts');
 const companyCore = await import('../company-research/core.ts');
 test.after(() => resolver.deregister());
 const transpile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-function runtime() {
+function runtime(platform) {
   const session = {};
   new Function('require', 'exports', transpile('../market-data/use-market-data.ts'))(name => {
     if (name === './core') return marketCore;
@@ -22,7 +22,7 @@ function runtime() {
     return {};
   }, session);
   const executor = {};
-  new Function('require', 'exports', transpile('./executor.ts'))(name => {
+  new Function('require', 'exports', 'process', transpile('./executor.ts'))(name => {
     if (name === './core') return core;
     if (name === '../company-research/client') return companyClient;
     if (name === '../company-research/core') return companyCore;
@@ -30,11 +30,50 @@ function runtime() {
     if (name === '../market-data/client') return client;
     if (name === '../market-data/use-market-data') return session;
     throw new Error(name);
-  }, executor);
+  }, executor, { env: { EXPO_OS: platform } });
   return { ...executor, session };
 }
 const fedCommand = { name: 'market_query', arguments: { kind: 'news', topic: 'fed' } };
 const rss = '<rss><channel><item><title>Federal Reserve statement</title><description>Public test statement</description><link>https://www.federalreserve.gov/newsevents/pressreleases/monetary20261101a.htm</link><pubDate>Sun, 01 Nov 2026 00:00:00 GMT</pubDate></item></channel></rss>';
+
+test('repeated browser-restricted assistant queries remain capability limits without cooldown or cache reads', async () => {
+  const api = runtime('web'); let reads = 0;
+  const options = { signal: new AbortController().signal, transport: async () => { reads++; throw new Error('must not fetch a browser-restricted source'); } };
+  for (const locale of ['zh', 'en']) {
+    for (const command of [fedCommand, { name: 'market_query', arguments: { kind: 'filings', company: 'AAPL' } }]) {
+      const first = await api.executeAppCommand(command, locale, options);
+      const repeated = await api.executeAppCommand(command, locale, options);
+      assert.equal(first.data.success, false);
+      assert.equal(first.data.code, 'browser_unsupported');
+      assert.equal(first.data.nextAllowedAt, null);
+      assert.equal(repeated.text, first.text);
+      assert.deepEqual(repeated.data, first.data);
+      assert.doesNotMatch(repeated.text, /cooling down|冷却/);
+      assert.match(repeated.text, locale === 'zh' ? /小Q App|官方来源/ : /Q app|official source/);
+      assert.equal(first.actions[0].module, 'market-data');
+      assert.deepEqual(first.actions[0].marketQuery, command.arguments);
+      assert.doesNotThrow(() => core.validateAppNavigationAction(first.actions[0]));
+    }
+  }
+  assert.equal(reads, 0);
+  assert.equal(api.session.publicMemory.cache.size, 0);
+  assert.equal(api.session.publicMemory.cooldowns.size, 0);
+  // A result acquired before the platform restriction must not bypass it.
+  const cached = { report: marketCore.parseFedReport(rss, fedCommand.arguments, new Date().toISOString()), expiresAt: Date.now() + 60_000 };
+  api.session.publicMemory.cache.set('news:fed', cached);
+  const result = await api.executeAppCommand(fedCommand, 'en', options);
+  assert.equal(result.data.code, 'browser_unsupported');
+  assert.equal(api.session.publicMemory.cache.get('news:fed'), cached);
+  assert.equal(api.session.publicMemory.cooldowns.size, 0);
+  assert.equal(reads, 0);
+});
+
+test('already-cancelled browser assistant queries keep cancellation ahead of the capability response', async () => {
+  const api = runtime('web'); const controller = new AbortController(); controller.abort();
+  await assert.rejects(api.executeAppCommand(fedCommand, 'en', { signal: controller.signal, transport: async () => { throw new Error('must not fetch'); } }), /CANCELLED/);
+  assert.equal(api.session.publicMemory.cache.size, 0);
+  assert.equal(api.session.publicMemory.cooldowns.size, 0);
+});
 
 test('public executor shares UI cache and returns real source text with valid click-only navigation', async () => {
   const api = runtime(); let reads = 0;

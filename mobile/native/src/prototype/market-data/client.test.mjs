@@ -7,6 +7,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const { requestMarketReport, MARKET_TIMEOUT_MS, MARKET_RESPONSE_LIMIT_BYTES } = await import('./client.ts');
+const { marketDirectReadAllowed, marketOfficialPage } = await import('./core.ts');
 test.after(() => resolver.deregister());
 const crypto = { kind: 'crypto', asset: 'BTC' };
 const markets = { kind: 'news', topic: 'markets' };
@@ -20,6 +21,38 @@ const coin = [
 const payload = value => Response.json(value);
 const fails = (action, code) => assert.rejects(action, error => error.code === code && error.message === code);
 const withUrl = (response, url) => { Object.defineProperty(response, 'url', { value: url }); return response; };
+
+test('browser fetch transport is invoked without the request-options receiver', async () => {
+  let calls = 0;
+  async function browserFetch(url, init) {
+    // Window.fetch rejects an unrelated object as its receiver.
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+    calls++;
+    assert.equal(init.credentials, 'omit');
+    return withUrl(payload({ articles: [] }), url);
+  }
+  const report = await requestMarketReport(markets, { transport: browserFetch });
+  assert.equal(calls, 1);
+  assert.deepEqual(report.records, []);
+});
+
+test('browser source restrictions stop SEC and Fed before transport without restricting native queries', async () => {
+  let calls = 0;
+  for (const query of [fed, { kind: 'filings', company: 'AAPL' }]) {
+    assert.equal(marketDirectReadAllowed(query, 'web'), false);
+    assert.equal(marketDirectReadAllowed(query, 'ios'), true);
+    assert.equal(marketDirectReadAllowed(query, 'android'), true);
+    await fails(requestMarketReport(query, { platform: 'web', transport: async () => { calls++; return payload({}); } }), 'browser_unsupported');
+  }
+  assert.equal(calls, 0);
+  assert.equal(marketOfficialPage(fed), 'https://www.federalreserve.gov/newsevents/pressreleases.htm');
+  assert.match(marketOfficialPage({ kind: 'filings', company: 'AAPL' }), /^https:\/\/www\.sec\.gov\/edgar\/browse\/\?CIK=0000320193/);
+  assert.equal(marketDirectReadAllowed(crypto, 'web'), true);
+  assert.equal(marketDirectReadAllowed(markets, 'web'), true);
+  const report = await requestMarketReport(markets, { platform: 'web', transport: async () => { calls++; return payload({ articles: [] }); } });
+  assert.equal(calls, 1);
+  assert.deepEqual(report.records, []);
+});
 
 test('release crypto performs one anonymous read-only RPC batch without development opt-in', async () => {
   const proxies = { BTC: '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c', ETH: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', SOL: '0x4ffC43a60e009B551865A93d232E33Fce9f01507' };

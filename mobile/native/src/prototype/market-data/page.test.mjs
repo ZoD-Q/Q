@@ -29,7 +29,7 @@ function nodes(tree, result = []) {
 const buttonName = node => typeof node.type === 'function' && node.type.name === 'Button' ? node.props.label : null;
 
 /** Runs actual TSX actions and React state/effect transitions, not native layout or transport. */
-function harness({ locale = 'zh', analyze = async () => true, result = report(), market = {}, props = {} } = {}) {
+function harness({ locale = 'zh', analyze = async () => true, result = report(), market = {}, props = {}, platform = 'ios' } = {}) {
   const slots = [], analyses = [], historyLoads = [], openedUrls = [];
   let cursor = 0, tree, effects = [], dirty = true, mounted = true, writesAfterUnmount = 0;
   let currentProps = { active: true, signedIn: true, conversations: [{ id: 'history-fixture', title: 'Existing research' }],
@@ -74,6 +74,7 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
   };
   const module = { exports: {} };
   runInNewContext(source, { module, exports: module.exports, URL, AbortController, __DEV__: false,
+    process: { env: { EXPO_OS: platform } },
     require: name => { assert.ok(name in imports, `Unexpected component dependency: ${name}`); return imports[name]; } });
   function render(patch) {
     if (patch) currentProps = { ...currentProps, ...patch };
@@ -105,6 +106,16 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
     unmount() { mounted = false; slots.forEach(slot => slot.cleanup?.()); },
   };
 }
+
+test('Web Fed selection explains direct-read limits and offers a real official page without a retry action', () => {
+  const h = harness({ locale: 'en', platform: 'web', result: null, market: { phase: 'idle' } });
+  const all = h.render();
+  assert.ok(all.some(node => String(node.props.children).includes('does not allow direct cross-origin browser reads')));
+  assert.ok(!all.some(node => ['Query public data', 'Retry query'].includes(buttonName(node))));
+  h.press('View official source');
+  assert.ok(h.render().some(node => node.props.children === 'https://www.federalreserve.gov/newsevents/pressreleases.htm'));
+  assert.equal(h.analyses.length, 0);
+});
 
 test('the result header pairs Use in chat with its source before all records, with native-sized buttons', () => {
   for (const locale of ['zh', 'en']) {

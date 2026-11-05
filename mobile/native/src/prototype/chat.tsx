@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   View,
-  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReducedMotion } from "react-native-reanimated";
@@ -40,6 +39,7 @@ import {
   Sheet,
   Type,
   useDesign,
+  useLayoutDimensions,
 } from "./design";
 import { Reveal, selectionFeedback } from "./motion";
 
@@ -84,7 +84,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
   const [appFunctions, setAppFunctions] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [availableHeight, setAvailableHeight] = useState(0);
-  const { height, fontScale } = useWindowDimensions();
+  const { height, fontScale } = useLayoutDimensions();
   const insets = useSafeAreaInsets();
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);

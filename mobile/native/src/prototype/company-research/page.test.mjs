@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import * as core from './core.ts';
 const jsx = (type, props) => ({ type, props });
 const source = ts.transpileModule(readFileSync(new URL('./page.tsx', import.meta.url), 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
@@ -14,7 +15,7 @@ function nodes(tree, result = []) {
 }
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 const sample = { kind: 'company-search', query: 'Toyota', fetchedAt: '2026-11-02T00:00:00Z', candidates: [{ issuerId: 'wikidata:Q53268', name: 'Toyota', source: 'wikidata', sourceUrl: 'https://www.wikidata.org/wiki/Q53268', cik: null, listings: [{ exchange: 'Tokyo', ticker: '7203', status: 'unknown' }] }], sources: [], gaps: ['Partial directory'] };
-function harness({ lookup = async () => sample, analyze = async () => true } = {}) {
+function harness({ lookup = async () => sample, analyze = async () => true, platform = 'ios' } = {}) {
   const slots = [], calls = [], drafts = []; let cursor = 0, effects = [], dirty = true, mounted = true, writesAfterUnmount = 0, background;
   let props = { active: true, onAnalyze: (...args) => { drafts.push(args); return analyze(...args); } };
   const react = {
@@ -27,16 +28,27 @@ function harness({ lookup = async () => sample, analyze = async () => true } = {
     'react-native': { View: 'View', Pressable: 'Pressable', Linking: { openURL: async () => {} }, AppState: { currentState: 'active', addEventListener: (_, cb) => { background = cb; return { remove() {} }; } } },
     'expo/fetch': { fetch: async () => {} }, '../design': { Input: 'Input', Sheet: 'Sheet', Type: 'Type', useDesign: () => ({ colors: {}, locale: 'en', text: (_, en) => en }) },
     './client': { searchCompanies: (...args) => { calls.push(args); return lookup(...args); }, researchCompany: async () => ({ ...sample, kind: 'company-research', issuerId: 'wikidata:Q53268', company: sample.candidates[0], facts: [], calculations: [] }) },
-    './core': { companyGapText: gap => gap, buildCompanyResearchText: () => '> External public data' },
+    './core': { ...core, companyGapText: gap => gap, buildCompanyResearchText: () => '> External public data' },
   };
   const module = { exports: {} };
-  runInNewContext(source, { module, exports: module.exports, URL, AbortController, require: name => { assert.ok(name in imports, name); return imports[name]; } });
+  runInNewContext(source, { module, exports: module.exports, URL, AbortController, process: { env: { EXPO_OS: platform } }, require: name => { assert.ok(name in imports, name); return imports[name]; } });
   function render(patch = {}) { props = { ...props, ...patch }; let tree, count = 0; do { assert.ok(count++ < 12); dirty = false; cursor = 0; tree = module.exports.CompanyResearchPanel(props); const pending = effects; effects = []; pending.forEach(effect => effect()); } while (dirty); return nodes(tree); }
   function press(label) { const button = render().find(node => typeof node.type === 'function' && node.type.name === 'Button' && node.props.label === label); assert.ok(button, label); assert.ok(!button.props.disabled); button.props.onPress(); render(); }
   function enter(value) { render().find(node => node.type === 'Input').props.onChangeText(value); render(); }
   return { render, press, enter, calls, drafts, background: () => background('background'), unmount() { mounted = false; slots.forEach(slot => slot.cleanup?.()); }, get writesAfterUnmount() { return writesAfterUnmount; } };
 }
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); };
+test('Web company UI keeps Wikidata search and presents SEC as an unrequested capability limit', async () => {
+  const h = harness({ platform: 'web', lookup: async () => ({ ...sample, sources: [{ source: 'sec-directory', status: 'not_read', url: core.SEC_DIRECTORY }] }) });
+  assert.ok(h.render().some(node => String(node.props.children).includes('SEC directories and financial data do not allow direct browser reads')));
+  h.enter('Toyota'); h.press('Search companies'); await flush();
+  assert.equal(h.calls.length, 1);
+  assert.ok(h.render().some(node => String(node.props.children).includes('Not requested · browser restriction')));
+  assert.ok(!h.render().some(node => node.props.label === 'Read this company’s public financial data'));
+  assert.ok(h.render().some(node => node.props.label === 'View issuer source'));
+  h.press('View official SEC disclosures');
+  assert.ok(h.render().some(node => node.props.children === core.SEC_PUBLIC_SEARCH));
+});
 test('opening makes no request; explicit search exposes candidates and leaves send under user control', async () => {
   const h = harness(); h.render(); assert.equal(h.calls.length, 0);
   h.enter('Toyota'); h.press('Search companies'); await flush();
