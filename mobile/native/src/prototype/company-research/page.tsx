@@ -3,7 +3,7 @@ import { AppState, Linking, Pressable, View } from 'react-native';
 import { fetch as expoFetch } from 'expo/fetch';
 import { Input, Sheet, Type, useDesign } from '../design';
 import { searchCompanies, researchCompany } from './client';
-import { buildCompanyResearchText, companyGapText, type CompanySearchReport, type CompanyResearchReport } from './core';
+import { buildCompanyResearchText, companyGapText, companyOfficialFilingsPage, SEC_PUBLIC_SEARCH, type CompanySearchReport, type CompanyResearchReport } from './core';
 
 type Report = CompanySearchReport | CompanyResearchReport;
 type Props = {
@@ -47,6 +47,7 @@ const trustedLink = (value: string) => {
 };
 export function CompanyResearchPanel({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false }: Props) {
   const { text, colors, locale } = useDesign();
+  const browser = process.env.EXPO_OS === 'web';
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState<CompanySearchReport | null>(null);
   const [report, setReport] = useState<CompanyResearchReport | null>(null);
@@ -108,6 +109,10 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
   return <View style={{ gap: 18 }}>
     <Type size={20} weight="600">{text('全球公司研究', 'Global company research')}</Type>
     <Type size={14} muted>{text('输入公司名或证券代码，核对交易所后选择研究对象。公开目录并不覆盖全部上市公司；上市记录和财报可用范围会分别显示。', 'Search by company name or ticker, then check the exchange and select a candidate. Public directories do not cover every listed company; listing records and financial coverage are shown separately.')}</Type>
+    {browser ? <View style={{ gap: 8 }}>
+      <Type size={14} muted>{text('浏览器查询 Wikidata 公司与上市资料；SEC 目录和财报不允许网页直接读取，本页不会请求。可在小Q App的「金融数据」中查询财报，或前往 SEC 官网核对。', 'Browser searches read Wikidata issuer and listing records. SEC directories and financial data do not allow direct browser reads and will not be requested here. Use Financial data in the Q app or check the SEC site.')}</Type>
+      <Button label={text('查看 SEC 官方披露', 'View official SEC disclosures')} onPress={() => preview(SEC_PUBLIC_SEARCH)} />
+    </View> : null}
     <Input label={text('公司名称或代码', 'Company name or ticker')} value={query} maxLength={120} autoCapitalize="none" autoCorrect={false}
       placeholder={text('例如 Toyota、腾讯、TSM', 'For example Toyota, Tencent, TSM')} editable={!busy && !handoff}
       onChangeText={value => { setQuery(value); setSearch(null); setReport(null); setError(false); setCancelled(false); }} />
@@ -126,7 +131,10 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
           <Type size={13} selectable>{/^Q[1-9][0-9]*$/.test(listing.exchange) ? text('交易所资料 ', 'Exchange record ') : ''}{listing.exchange} · {listing.ticker} · {listing.status === 'historical' ? text('历史上市记录', 'Historical listing') : text('当前上市状态未核验', 'Current listing status unverified')}</Type>
           {/^Q[1-9][0-9]*$/.test(listing.exchange) ? <Button label={text('核对交易所', 'Check exchange')} onPress={() => preview(`https://www.wikidata.org/wiki/${listing.exchange}`)} /> : null}
         </View>)}
-        <Button label={text('读取此公司公开财报资料', 'Read this company’s public financial data')} disabled={busy || !active || Boolean(handoff)} onPress={() => void run(candidate.issuerId)} />
+        {browser ? <>
+          <Button label={text('查看公司来源资料', 'View issuer source')} onPress={() => preview(candidate.sourceUrl)} />
+          {candidate.cik ? <Button label={text('查看该公司 SEC 披露', 'View this issuer’s SEC disclosures')} onPress={() => preview(companyOfficialFilingsPage(candidate.cik))} /> : null}
+        </> : <Button label={text('读取此公司公开财报资料', 'Read this company’s public financial data')} disabled={busy || !active || Boolean(handoff)} onPress={() => void run(candidate.issuerId)} />}
       </View>)}
     </View> : null}
     {report ? <View style={{ gap: 14 }}>
@@ -145,7 +153,7 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
     {current ? <View style={{ gap: 10 }}>
       <Type size={13} muted selectable>{text('获取时间：', 'Retrieved: ')}{current.fetchedAt}</Type>
       <Type weight="600">{text('本次来源与覆盖缺口', 'Sources and coverage gaps')}</Type>
-      {current.sources.map((source, index) => <View key={`${source.source}:${index}`} style={{ gap: 4 }}><Type size={13} selectable>{sourceLabels[source.source] ? text(...sourceLabels[source.source]) : text('公开来源', 'Public source')} · {source.status === 'available' ? text('读取成功', 'Read successfully') : text('读取失败', 'Read failed')}{source.error ? ` · ${errorLabels[source.error] ? text(...errorLabels[source.error]) : text('来源暂时无法提供可用资料', 'Source cannot supply usable data right now')}` : ''}</Type><Button label={text('查看公开来源', 'View public source')} onPress={() => preview(source.url)} /></View>)}
+      {current.sources.map((source, index) => <View key={`${source.source}:${index}`} style={{ gap: 4 }}><Type size={13} selectable>{sourceLabels[source.source] ? text(...sourceLabels[source.source]) : text('公开来源', 'Public source')} · {source.status === 'available' ? text('读取成功', 'Read successfully') : source.status === 'not_read' ? text('浏览器不可直读 · 未请求', 'Not requested · browser restriction') : text('读取失败', 'Read failed')}{source.error ? ` · ${errorLabels[source.error] ? text(...errorLabels[source.error]) : text('来源暂时无法提供可用资料', 'Source cannot supply usable data right now')}` : ''}</Type><Button label={source.status === 'not_read' ? text('查看 SEC 官方披露', 'View official SEC disclosures') : text('查看公开来源', 'View public source')} onPress={() => preview(source.status === 'not_read' ? SEC_PUBLIC_SEARCH : source.url)} /></View>)}
       {current.gaps.map((gap, index) => <Type key={index} size={13} muted selectable>{companyGapText(gap, locale)}</Type>)}
       <Button label={text('用于对话', 'Use in chat')} disabled={!active || busy} onPress={() => { setHandoffError(false); setHandoff(current); }} />
       <Type size={13} muted>{text('仅准备草稿，由你确认发送。', 'Prepares a draft for you to review and send.')}</Type>

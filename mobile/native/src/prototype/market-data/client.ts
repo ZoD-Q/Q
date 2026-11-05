@@ -1,6 +1,6 @@
 import {
   MarketDataError, marketSource, cryptoReadRequest, parseCryptoReport, parseFedReport, parseFilingsReport,
-  parseGdeltReport, validateMarketQuery,
+  parseGdeltReport, validateMarketQuery, marketDirectReadAllowed,
 } from './core';
 import type { MarketQuery, MarketReport } from './core';
 export { MarketDataError, marketErrorText } from './core';
@@ -10,6 +10,7 @@ export const MARKET_TIMEOUT_MS = 10_000;
 export type MarketRequestOptions = {
   transport: typeof fetch;
   signal?: AbortSignal;
+  platform?: string;
 };
 
 function retryAfter(value: string | null): number | null {
@@ -68,6 +69,7 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
   catch { throw new MarketDataError('invalid_query'); }
   const source = marketSource(valid);
   if (options.signal?.aborted) throw new MarketDataError('cancelled');
+  if (!marketDirectReadAllowed(valid, options.platform ?? process.env.EXPO_OS)) throw new MarketDataError('browser_unsupported');
   const controller = new AbortController();
   let timedOut = false;
   const abortError = () => new MarketDataError(timedOut ? 'timeout' : 'cancelled');
@@ -78,7 +80,9 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
     const headers: Record<string, string> = { Accept: source.id === 'federal-reserve' ? 'application/rss+xml, application/xml, text/xml' : 'application/json' };
     if (source.id === 'sec') headers['User-Agent'] = 'Q-Public-Research/0.1 (+https://q.kaicloudpay.com)';
     if (valid.kind === 'crypto') headers['Content-Type'] = 'application/json';
-    const pending = options.transport(source.url, {
+    // Browser fetch must not receive the options object as its `this` value.
+    const transport = options.transport;
+    const pending = transport(source.url, {
       method: valid.kind === 'crypto' ? 'POST' : 'GET',
       ...(valid.kind === 'crypto' ? { body: JSON.stringify(cryptoReadRequest(valid)) } : {}), headers, credentials: 'omit', redirect: 'error', cache: 'no-store',
       referrerPolicy: 'no-referrer', signal: controller.signal,

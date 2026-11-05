@@ -1,7 +1,7 @@
 import { searchCompanies, researchCompany } from '../company-research/client';
 import { buildCompanyResearchText } from '../company-research/core';
 import { requestMarketReport } from '../market-data/client';
-import { buildResearchDraft, marketErrorText } from '../market-data/core';
+import { buildResearchDraft, marketErrorText, marketDirectReadAllowed, MarketDataError } from '../market-data/core';
 import { MarketDataSession, publicMemory } from '../market-data/use-market-data';
 import { createAppNavigationAction, executeLocalAppCommand, validateAppCommand, type AppCommand, type AppReadResult } from './core';
 
@@ -34,6 +34,13 @@ export async function executeAppCommand(value: AppCommand, locale: 'zh' | 'en', 
   }
   const local = executeLocalAppCommand(command, locale);
   if (command.name !== 'market_query') return local;
+  if (!marketDirectReadAllowed(command.arguments, process.env.EXPO_OS)) {
+    return {
+      text: marketErrorText(new MarketDataError('browser_unsupported'), locale),
+      actions: [createAppNavigationAction('market-data', locale, { marketQuery: command.arguments })],
+      data: { success: false, code: 'browser_unsupported', nextAllowedAt: null },
+    };
+  }
   const session = new MarketDataSession(command.arguments, {
     request: (query, signal) => requestMarketReport(query, { signal, transport: options.transport }),
     onChange: () => {}, isCurrent: () => !options.signal.aborted, memory: publicMemory,

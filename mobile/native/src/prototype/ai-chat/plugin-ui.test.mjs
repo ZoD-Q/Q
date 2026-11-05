@@ -59,7 +59,7 @@ test('selected-bank chat keeps model availability and its working refresh action
     },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
     'react-native-reanimated': { useReducedMotion: () => false },
-    './design': design, './motion': { Reveal: 'Reveal', selectionFeedback: noop },
+    './design': { ...design, useLayoutDimensions: () => ({ width: 1024, height: 768, fontScale: 1, scale: 1 }) }, './motion': { Reveal: 'Reveal', selectionFeedback: noop },
     './ai-chat/state-model': stateModel, './ai-chat/auth-sheet': { ChatAuthSheet: 'ChatAuthSheet' },
     './ai-chat/mascot-state': mascotState, './ai-chat/q-companion': { QCompanion: 'QCompanion' },
     './ai-chat/messages': messages, './plugin-host/chat-proposal': { ChatProposal: 'ChatProposal' },
