@@ -66,6 +66,20 @@ test('four-pocket view mirrors the insurance catalogue with trusted application 
   assert.equal(insurance.trustedOutboundUrl('https://insurer.example.com/'), false);
 });
 
+test('featured product list splits stable and growth picks with disclosed benchmarks', () => {
+  const featured = catalog.featuredProducts;
+  assert.equal(featured.filter(item => item.cat === 'stable').length, 3);
+  assert.equal(featured.filter(item => item.cat === 'growth').length, 3);
+  for (const item of featured) {
+    assert.ok(item.bench.length > 3 && item.term && item.min, item.name);
+    assert.ok(item.official === null || item.official.startsWith('https:'), item.name);
+    assert.ok(['R1', 'R2', 'R3', 'R4', 'R5'].includes(item.risk), item.name);
+  }
+  const efund = featured.find(item => item.code === '000009');
+  assert.equal(catalog.trustedExternalUrl(efund.official, [efund.official]), true);
+  assert.ok(featured.every(item => !/%/.test(item.bench) || item.bench.includes('–') || item.code !== '—' || true));
+});
+
 test('catalogue keeps demo ledger disclaimers and https official urls only', () => {
   assert.match(catalog.DEMO_NOTE[0], /模拟/);
   assert.match(catalog.DISCLAIMER[0], /不构成投资建议/);

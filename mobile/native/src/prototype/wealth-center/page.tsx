@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, View } from 'react-native';
+import { Linking, Pressable, View } from 'react-native';
 import Svg, { G, Line, Rect, Text as SvgText } from 'react-native-svg';
-import { ArrowUpRight, Sparkles } from 'lucide-react-native';
+import { ArrowUpRight, Eye, EyeOff, Sparkles } from 'lucide-react-native';
 import { Action, Choice, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
 import {
   DEMO_NOTE, DEPOSIT_MV, DISCLAIMER, EQUITY_UNITS, FUND_MV, HOLD_COST, HOLD_MV, HOLD_PNL, holdings, marketFunds, fundCats,
-  shelfItems, SIM_START_NAV, trustedExternalUrl, pockets, savingsGoal, marketMood, type Copy, type MarketFund, type ShelfItem, type ShelfRiskGroup, type WealthHolding,
+  shelfItems, SIM_START_NAV, trustedExternalUrl, savingsGoal, marketMood, featuredProducts,
+  type Copy, type FeaturedProduct, type MarketFund, type ShelfItem, type ShelfRiskGroup, type WealthHolding,
 } from './catalog';
 import {
   filterFunds, filterShelf, nextCandle, RISK_LABEL, seedCandles, sliceWindow, todayPct, todayPnl, windowBounds, type Candle,
@@ -29,12 +30,19 @@ const shelfRisks: readonly { id: ShelfRiskGroup | 'all'; title: Copy }[] = [
 const shelfTerms: readonly { id: 'all' | 'live' | 'short' | 'long'; title: Copy }[] = [
   { id: 'all', title: ['全部期限', 'All terms'] }, { id: 'live', title: ['活期', 'Liquid'] }, { id: 'short', title: ['短期', 'Short'] }, { id: 'long', title: ['长期', 'Long'] },
 ];
+const chartPeriods: readonly { id: string; title: Copy; count: number }[] = [
+  { id: '1w', title: ['1周', '1W'], count: 8 },
+  { id: '1m', title: ['1月', '1M'], count: 30 },
+  { id: '3m', title: ['3月', '3M'], count: 66 },
+  { id: '1y', title: ['1年', '1Y'], count: 120 },
+];
+const UP_RED = '#c73a3a', DOWN_GREEN = '#1e8a5e';
 const money = (value: number) => `¥${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const clock = () => new Date().toTimeString().slice(0, 8);
 
-function CandleChart({ candles, price }: { candles: Candle[]; price: number }) {
+function CandleChart({ candles, price, count = 26 }: { candles: Candle[]; price: number; count?: number }) {
   const { colors } = useDesign();
-  const shown = sliceWindow(candles, 26);
+  const shown = sliceWindow(candles, count);
   const { min, max } = windowBounds(shown);
   const span = max - min || 1;
   const W = 280, H = 104, padT = 12, padB = 16;
@@ -66,8 +74,8 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const { text, colors } = useDesign();
   const [page, setPage] = useState<PageKey>('overview');
   const initMarket = () => {
-    const seeded = seedCandles(30, SIM_START_NAV);
-    return { candles: seeded.candles, price: seeded.price, dayOpen: seeded.candles[Math.max(0, seeded.candles.length - 26)].o };
+    const seeded = seedCandles(120, SIM_START_NAV);
+    return { candles: seeded.candles, price: seeded.price, dayOpen: seeded.candles[Math.max(0, seeded.candles.length - 30)].o };
   };
   const market = useRef<ReturnType<typeof initMarket> | null>(null);
   if (!market.current) market.current = initMarket();
@@ -77,7 +85,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
       const state = market.current!;
       const step = nextCandle(state.price);
       state.candles.push(step.candle);
-      if (state.candles.length > 90) state.candles.shift();
+      if (state.candles.length > 160) state.candles.shift();
       state.price = step.price;
       setTick(value => value + 1);
     }, 1600);
@@ -97,9 +105,12 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const [riskSheet, setRiskSheet] = useState(false);
   const [expandedInsurance, setExpandedInsurance] = useState<string | null>(null);
   const [switches, setSwitches] = useState({ advisory: true, market: true, usage: false });
+  const [hideAssets, setHideAssets] = useState(false);
+  const [chartPeriod, setChartPeriod] = useState('1m');
   const allowedUrls = useMemo(() => [
     ...holdings.map(item => item.official).filter((url): url is string => Boolean(url)),
     ...marketFunds.map(fund => `https://${fund.host}`),
+    ...featuredProducts.map(item => item.official).filter((url): url is string => Boolean(url)),
     ...insuranceSources.map(source => source.url),
     ...Object.values(groupInsurers).flat().map(ref => ref.url),
   ], []);
@@ -113,7 +124,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
     if (/风险/.test(question)) return text('当前组合以 R1–R2 资产为主（货币类约占一半），整体风险等级约 R2（中低）。近一年最大回撤 -0.8%，波动较低。', 'The portfolio is dominated by R1–R2 assets; overall risk is about R2 (low-medium) with a -0.8% max drawdown over the past year.');
     if (/收益|怎么样/.test(question)) return text(`近 30 日收益 +¥1,086.75；今日权益部分收益 ${pnl >= 0 ? '+' : ''}${money(pnl)}（实时模拟）。`, `Last 30 days +¥1,086.75; today's equity P&L is ${pnl >= 0 ? '+' : ''}${money(pnl)} (simulated, live).`);
     if (/到期/.test(question)) return text('3 个月定存（演示）¥35,000 将于 2027-02-14 到期，其余持仓为活期或开放式，无近期到期安排。', 'The demo 3-month deposit (¥35,000) matures on 2027-02-14; other holdings are liquid or open-ended.');
-    if (/四笔钱|分配|怎么分/.test(question)) return text('一般性框架：活钱管流动性（货币类）、稳健理财打底（短债/存款）、长期投资追求增长（均衡类）、保险保障兜底风险。你的当前分布可看总览页的四笔钱卡片；该框架仅为公开知识整理，不构成投资建议。', 'A common framework: liquid cash for liquidity, stable assets as the base, long-term funds for growth, and insurance as protection. See the four-pocket cards on the overview. Public knowledge only — not investment advice.');
+    if (/四笔钱|分配|怎么分/.test(question)) return text('一般性框架：活钱管流动性（货币类）、稳健理财打底（短债/存款）、长期投资追求增长（均衡类）、保险保障兜底风险。你的当前分布可看总览页的持仓速览与分布数据；该框架仅为公开知识整理，不构成投资建议。', 'A common framework: liquid cash for liquidity, stable assets as the base, long-term funds for growth, and insurance as protection. See the mix on the overview. Public knowledge only — not investment advice.');
     if (/保障|保险/.test(question)) return text('保障是第四笔钱。建议先在「保障」页按方向核对目录（重疾/医疗/意外是常用自查起点），再前往承保公司官方渠道投保；小Q不代办投保、不收款，以下内容不构成投保建议。', 'Protection is the fourth pocket. Start by verifying the catalogue on the Protection tab (critical illness, medical and accident are common starting points), then apply on insurers\' official channels. Q places no applications; this is not insurance advice.');
     if (/配|稳/.test(question)) return text('一般性信息：货币类流动性好、收益较低；债券类波动略高。稳健组合通常以货币与短债为基础。具体配置需结合你的目标与风险承受能力，不构成投资建议。', 'General information only: money-market assets trade liquidity for yield, bond funds add some volatility. Stable portfolios usually build on cash and short-duration bonds. This is not investment advice.');
     if (/回撤/.test(question)) return text('最大回撤是区间内从最高点到其后最低点的最大跌幅，用于衡量下行风险。你的组合近一年最大回撤为 -0.8%（模拟数据）。', 'Max drawdown is the largest peak-to-trough decline in a period, measuring downside risk. Your portfolio shows -0.8% over the past year (simulated).');
@@ -121,54 +132,109 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   };
   const ask = (question: string) => { if (question.trim()) setAiLog(current => [...current, [question.trim(), aiAnswer(question.trim())] as [string, string]].slice(-8)); };
 
+  const chartCount = chartPeriods.find(item => item.id === chartPeriod)!.count;
+  const periodFirst = market.current!.candles.slice(-chartCount)[0]?.o ?? price;
+  const periodChange = periodFirst > 0 ? (price / periodFirst - 1) * 100 : 0;
+  const quickEntries: { key: string; icon: string; title: Copy; onPress: () => void }[] = [
+    { key: 'cash', icon: '💰', title: ['现金宝', 'Cash'], onPress: () => setPage('funds') },
+    { key: 'funds', icon: '📈', title: ['基金', 'Funds'], onPress: () => setPage('funds') },
+    { key: 'term', icon: '🏦', title: ['定期理财', 'Term'], onPress: () => setPage('shelf') },
+    { key: 'protect', icon: '🛡', title: ['保障', 'Protect'], onPress: () => setPage('protection') },
+    { key: 'data', icon: '📊', title: ['行情数据', 'Data'], onPress: () => { if (onOpenDataService) onOpenDataService(); } },
+    { key: 'ai', icon: '🤖', title: ['小Q助手', 'Assistant'], onPress: () => setPage('ai') },
+    { key: 'perf', icon: '🧭', title: ['收益风险', 'Risk'], onPress: () => setPage('perf') },
+    { key: 'hold', icon: '📋', title: ['持仓', 'Holdings'], onPress: () => setPage('holdings') },
+  ];
+  const productCard = (item: FeaturedProduct) => (
+    <Pressable key={item.name} accessibilityRole={item.official ? 'button' : undefined}
+      accessibilityLabel={text(`${item.name}，近一年业绩基准 ${item.bench}`, `${item.name}, 1Y benchmark ${item.bench}`)}
+      onPress={item.official ? () => gotoOutbound(item.org, item.official!) : undefined}
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.line, opacity: pressed ? 0.7 : 1 })}>
+      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Type weight="600" size={14}>{item.name}</Type>
+          {item.code !== '—' ? <Tag>{item.code}</Tag> : null}
+          <Tag accent={item.risk === 'R1' || item.risk === 'R2'}>{RISK_LABEL[item.risk]}</Tag>
+        </View>
+        <Type size={11} muted>{item.org} · {item.term} · {text('起投', 'From')} {item.min}{item.official ? '' : text(' · 示例类别', ' · demo')}</Type>
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Type selectable weight="600" size={17} style={{ color: /%/.test(item.bench) ? UP_RED : colors.ink }}>{item.bench}</Type>
+        <Type size={10} muted>{text('近一年业绩基准 · 非承诺收益', '1Y benchmark · not a promise')}</Type>
+      </View>
+    </Pressable>
+  );
   const overview = () => <>
     <View style={{ gap: 12, padding: 20, borderRadius: 20, backgroundColor: colors.accentBg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Sparkles size={20} color={colors.accent} strokeWidth={1.6} /><Type size={13} muted>{text('总资产（模拟）', 'Total assets (demo)')}</Type></View>
-        <Tag>{text('模拟账本', 'Demo ledger')}</Tag>
+        <Pressable accessibilityRole="button" accessibilityLabel={text('隐藏或显示资产', 'Toggle asset visibility')} onPress={() => setHideAssets(value => !value)} style={{ padding: 6 }}>
+          {hideAssets ? <EyeOff size={18} color={colors.accent} /> : <Eye size={18} color={colors.accent} />}
+        </Pressable>
       </View>
-      <Type selectable size={34} weight="600" style={{ letterSpacing: -1 }}>{money(totalNow)}</Type>
+      <Type selectable size={34} weight="600" style={{ letterSpacing: -1 }}>{hideAssets ? '¥ ✽✽✽,✽✽✽.✽✽' : money(totalNow)}</Type>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 22 }}>
-        <View><Type size={11} muted>{text('今日收益', "Today's P&L")}</Type><Type selectable weight="600" color={pnl >= 0 ? colors.ink : colors.danger}>{pnl >= 0 ? '+' : ''}{money(pnl)}</Type></View>
-        <View><Type size={11} muted>{text('累计收益', 'Cumulative')}</Type><Type selectable weight="600">{money(HOLD_PNL + 3281.53)}</Type></View>
+        <View><Type size={11} muted>{text('今日盈亏', "Today's P&L")}</Type><Type selectable weight="600" style={{ color: pnl >= 0 ? UP_RED : DOWN_GREEN }}>{hideAssets ? '✽✽✽' : `${pnl >= 0 ? '+' : ''}${money(pnl)}`}</Type></View>
+        <View><Type size={11} muted>{text('累计收益', 'Cumulative')}</Type><Type selectable weight="600" style={{ color: UP_RED }}>{hideAssets ? '✽✽✽' : `+${money(HOLD_PNL + 3281.53)}`}</Type></View>
         <View><Type size={11} muted>{text('持仓数', 'Positions')}</Type><Type weight="600">{holdings.length}</Type></View>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Tag accent>{text(`市场温度 ${marketMood.temperature}° · ${marketMood.label[0]}`, `Mood ${marketMood.temperature}° · ${marketMood.label[1]}`)}</Tag>
+        <Tag>{text(savingsGoal.title[0], savingsGoal.title[1])} {Math.round(savingsGoal.progress * 100)}%</Tag>
+        <Tag>{text('模拟账本', 'Demo ledger')}</Tag>
       </View>
       <Type size={11} muted>{text(`统计口径：市值按最新净值/本金估算。实时更新于 ${clock()}。`, `Market value follows the latest estimates. Live at ${clock()}.`)}</Type>
     </View>
-    <View style={{ gap: 10, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
-      <Type weight="600">{text('四笔钱配置', 'Four-pocket allocation')}</Type>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {pockets.map((pocket, index) => {
-          const value = index === 0 ? FUND_MV * 0.667 + pnl * 0.6 : index === 1 ? DEPOSIT_MV + 20256.4 : index === 2 ? 15186.2 + pnl * 0.4 : null;
-          return <View key={pocket.id} style={{ flexGrow: 1, flexBasis: '46%', gap: 3, padding: 12, borderRadius: 12, backgroundColor: colors.soft }}>
-            <Type size={12} weight="600">{text(pocket.title[0], pocket.title[1])}</Type>
-            <Type selectable weight="500" size={14}>{value === null ? '🛡' : money(value)}</Type>
-            <Type size={10} muted>{text(pocket.hint[0], pocket.hint[1])}</Type>
-          </View>;
-        })}
+    <View style={{ gap: 8, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <Type weight="600" size={14}>{text('组合净值 · 实时', 'Portfolio NAV · live')}</Type>
+        <Type size={10} muted>{text('标的：基金部分 · 红涨绿跌', 'Fund part · red up, green down')}</Type>
       </View>
-      <Type size={11} muted selectable>{text(`分布：基金 ${money(FUND_MV + pnl)} · 存款 ${money(DEPOSIT_MV)}。保障是第四笔钱——先核对目录，再官方投保。`, `Funds ${money(FUND_MV + pnl)} · deposits ${money(DEPOSIT_MV)}. Protection is the fourth pocket — verify the catalogue first, then apply on official channels.`)}</Type>
-    </View>
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <Type weight="600" size={13}>{text(savingsGoal.title[0], savingsGoal.title[1])}</Type>
-        <Type size={12} muted selectable>{Math.round(savingsGoal.progress * 100)}% · {text(savingsGoal.note[0], savingsGoal.note[1])}</Type>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {chartPeriods.map(item => <Choice key={item.id} label={text(item.title[0], item.title[1])} selected={chartPeriod === item.id} onPress={() => setChartPeriod(item.id)} />)}
       </View>
-      <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.soft, overflow: 'hidden' }}>
-        <View style={{ width: `${Math.round(savingsGoal.progress * 100)}%`, height: '100%', backgroundColor: colors.accent }} />
-      </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 }}>
-        <Tag accent>{text(`市场温度 ${marketMood.temperature}° · ${marketMood.label[0]}`, `Mood ${marketMood.temperature}° · ${marketMood.label[1]}`)}</Tag>
-        <Tag>{text(marketMood.note[0], marketMood.note[1])}</Tag>
+      <CandleChart candles={market.current!.candles} price={price} count={chartCount} />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18 }}>
+        <View><Type size={11} muted>{text('当前净值', 'NAV')}</Type><Type selectable weight="600">{price.toFixed(4)}</Type></View>
+        <View><Type size={11} muted>{text('今日涨跌', 'Change today')}</Type><Type selectable weight="600" style={{ color: pct >= 0 ? UP_RED : DOWN_GREEN }}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</Type></View>
+        <View><Type size={11} muted>{text(`${chartPeriods.find(item => item.id === chartPeriod)!.title[0]}涨跌`, 'Period change')}</Type><Type selectable weight="600" style={{ color: periodChange >= 0 ? UP_RED : DOWN_GREEN }}>{periodChange >= 0 ? '+' : ''}{periodChange.toFixed(2)}%</Type></View>
       </View>
     </View>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      <Tag accent>{RISK_LABEL.R2}</Tag>
-      <Tag>{text('风险匹配 ✓ 组合R2 = 自评R2', 'Risk match ✓ book R2 = self R2')}</Tag>
-      <Tag>{text('集中度合理 · 最高货币类 28.6%', 'Concentration ok · top money 28.6%')}</Tag>
-      <Tag>{text('到期提醒 · 定存 2027-02-14', 'Maturity · deposit 2027-02-14')}</Tag>
+      {quickEntries.map(entry => (
+        <Pressable key={entry.key} accessibilityRole="button" accessibilityLabel={text(entry.title[0], entry.title[1])} onPress={entry.onPress}
+          style={({ pressed }) => ({ flexGrow: 1, flexBasis: '23%', minWidth: 72, alignItems: 'center', gap: 4, paddingVertical: 10, borderRadius: 12, backgroundColor: colors.soft, opacity: pressed ? 0.7 : 1 })}>
+          <Type size={17}>{entry.icon}</Type>
+          <Type size={11}>{text(entry.title[0], entry.title[1])}</Type>
+        </Pressable>
+      ))}
     </View>
-    {onOpenDataService ? <Action label={text('按次购买金融数据服务', 'Pay-per-use data service')} onPress={onOpenDataService} /> : null}
+    <View style={{ gap: 6, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.line }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <View><Type size={11} muted>{text('持有金额', 'Held')}</Type><Type selectable weight="600">{hideAssets ? '✽✽✽' : money(HOLD_MV)}</Type></View>
+        <View><Type size={11} muted>{text('持仓收益', 'Holding P&L')}</Type><Type selectable weight="600" style={{ color: HOLD_PNL >= 0 ? UP_RED : DOWN_GREEN }}>{hideAssets ? '✽✽✽' : `+${money(HOLD_PNL)}`}</Type></View>
+        <View><Type size={11} muted>{text('四笔钱分布', 'Mix')}</Type><Type selectable weight="600">{text(`基金 ${(((FUND_MV + pnl) / (HOLD_MV + pnl)) * 100).toFixed(0)}% · 存款 ${((DEPOSIT_MV / (HOLD_MV + pnl)) * 100).toFixed(0)}%`, 'Funds / deposits')}</Type></View>
+      </View>
+      <Action kind="ghost" label={text('查看全部持仓 →', 'All holdings →')} onPress={() => setPage('holdings')} />
+    </View>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <Tag accent>{text('风险匹配 ✓ R2=R2', 'Risk match ✓ R2=R2')}</Tag>
+      <Tag>{text('集中度合理 · 最高货币类 28.6%', 'Concentration ok · top money 28.6%')}</Tag>
+      <Tag>{text('⏰ 定存 2027-02-14 到期', 'Deposit matures 2027-02-14')}</Tag>
+    </View>
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <Type weight="600" size={15}>{text('稳健理财', 'Stable picks')}</Type>
+        <Type size={11} muted>{text('示例与公开资料 · 非推荐', 'Demo & public info · not advice')}</Type>
+      </View>
+      {featuredProducts.filter(item => item.cat === 'stable').map(productCard)}
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 6 }}>
+        <Type weight="600" size={15}>{text('进阶理财', 'Growth picks')}</Type>
+        <Type size={11} muted>{text('波动换空间 · R3+', 'Higher volatility · R3+')}</Type>
+      </View>
+      {featuredProducts.filter(item => item.cat === 'growth').map(productCard)}
+    </View>
+    {onOpenDataService ? <Action kind="secondary" label={text('按次购买金融数据服务', 'Pay-per-use data service')} onPress={onOpenDataService} /> : null}
     <Type size={12} muted>{text(DEMO_NOTE[0], DEMO_NOTE[1])}</Type>
   </>;
   const perf = () => <>
