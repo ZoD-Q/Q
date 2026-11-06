@@ -24,7 +24,9 @@ MCP 发布配置使用独立的 `Q_MCP_ENCRYPTION_KEY`（32 随机字节的 Base
 
 ## 支付收款配置
 
-Compose 将以下三个可选值从 `/etc/q/deploy.env` 转发给 API，采用[版本化支付配置](../src/payments/README.md)：`Q_PAYMENT_CREDENTIALS_JSON` 保存商户凭据版本列表，`Q_PAYMENT_ACTIVE_CREDENTIAL_VERSION` 指定新订单使用的版本，`Q_PAYMENT_POLICY_JSON` 保存汇率证据、费用、限额、时效和双人审核账号。示例文件默认留空；空字符串按未配置处理，支付读取保留，报价和新充值订单不可用。非空且格式无效的配置会使 API 启动失败，部署前须校验完整策略。
+Compose 将可选支付配置从 `/etc/q/deploy.env` 转发给 API：`Q_PAYMENT_CREDENTIALS_JSON` 保存商户凭据版本列表，`Q_PAYMENT_ACTIVE_CREDENTIAL_VERSION` 指定新订单使用的版本，`Q_PAYMENT_POLICY_JSON` 保存引导汇率证据、费用、限额、时效和双人审核账号。示例文件默认留空；空字符串按未配置处理，支付读取保留，报价和新充值订单不可用。非空且格式无效的配置会使 API 启动失败，部署前须校验完整策略。
+
+`Q_PAYMENT_FX_AUTO_REFRESH` 默认 `0`，显式 `1` 启用版本化 ECB 刷新。接收器发布二进制时复用当前受保护的部署配置；首次升级需要核对实际 Compose 已转发此变量，不能仅在 env 写入开关或看到服务健康就宣称刷新已启用。完整策略见[支付配置](../src/payments/README.md)、[汇率切换](../src/payments/FX.md)与[钱包闭环上线顺序](WALLET-CLOSURE-2026-11-06.md)。
 
 这些值仅由受信运维写入 `root:root`、0600 的配置文件；JSON 使用单行、单引号包围的 dotenv 值，避免 Compose 展开其中的内容。不要将密钥、账号 UUID 或展开后的配置放入仓库、命令输出、工单或截图。修改后须重新创建 API 容器才能生效，并核对已认证的支付能力和报价，不能以 `/health` 成功代替支付验收。
 

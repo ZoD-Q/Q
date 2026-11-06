@@ -43,8 +43,13 @@ export function createPaymentWalletSession(deps: {
       if (current() && visible && version === walletVersion && !request.signal.aborted) deps.onWallet({ wallet: null, busy: false, error: error instanceof PaymentError ? error.code : 'NETWORK_ERROR' });
     } finally { if (walletRequest === request) walletRequest = null; }
   };
-  const controller = createFundingController({ client, journal: deps.journal, identity: { ownerId: deps.ownerId, generation }, isCurrent: current, newId: deps.newId, onCredited: refreshWallet });
-  const details = createPaymentDetailController({ client, ownerId: deps.ownerId, isCurrent: current, canDetach: () => controller.getSnapshot().capabilities?.checkout_detach_supported === true, onChanged: () => visible ? controller.refresh() : undefined, onCredited: refreshWallet });
+  const refundChanged = () => {
+    if (!current()) return;
+    deps.onWallet({ wallet: null, busy: false, error: '' });
+    return refreshWallet();
+  };
+  const controller = createFundingController({ client, journal: deps.journal, identity: { ownerId: deps.ownerId, generation }, isCurrent: current, newId: deps.newId, onCredited: refreshWallet, onRefundChanged: refundChanged });
+  const details = createPaymentDetailController({ client, ownerId: deps.ownerId, isCurrent: current, canDetach: () => controller.getSnapshot().capabilities?.checkout_detach_supported === true, onChanged: () => visible ? controller.refresh() : undefined, onCredited: refreshWallet, onRefundChanged: refundChanged });
   const dispose = () => {
     valid = false; visible = false; walletVersion++; walletRequest?.abort(); controller.dispose(); details.dispose();
     stopSubscription?.(); stopSubscription = null;
@@ -125,6 +130,7 @@ function ScopedPaymentWallet({ token, ownerId, onShowDemo }: { token: string; ow
     onRefresh={() => { if (state.pending || state.order) void controller.refresh(); else void controller.load(); }} onOpenCheckout={openCheckout} onDetach={() => { void controller.detach(); }} onOrders={orders}
     onBack={() => { if (state.phase === 'review') controller.edit(); else overview(); }} />;
   const unavailable = state.capabilities ? !state.capabilities.enabled : !!state.error && !state.busy;
+  const reviewersUnavailable = state.capabilities?.unavailable_reason === 'PAYMENT_REVIEWERS_UNAVAILABLE';
   const balanceError = ['UNAUTHORIZED', 'invalid_session', 'INVALID_SESSION'].includes(wallet.error)
     ? text('请重新登录 Q 后读取余额。', 'Sign in to Q again to read your balance.')
     : wallet.error === 'RATE_LIMITED'
@@ -133,9 +139,10 @@ function ScopedPaymentWallet({ token, ownerId, onShowDemo }: { token: string; ow
   return <Page title={text('钱包', 'Wallet')} action={<IconAction icon={RefreshCw} label={text('刷新钱包', 'Refresh wallet')} disabled={wallet.busy || state.busy} onPress={refreshAll} />}>
     <View style={{ gap: 16 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Wallet size={22} color={colors.accent} strokeWidth={1.5} /><Type size={14} muted>{text('港币支付余额', 'HKD payment balance')}</Type></View><Type selectable size={phone ? 42 : 52} weight="500" style={{ letterSpacing: -1.5, fontVariant: ['tabular-nums'] }}>{wallet.wallet ? money(wallet.wallet.balance_minor, 'HKD') : '—'}</Type><Type size={12} muted>{text('独立港币账本 · 与 QDC 及模拟银行卡资金分开', 'Separate HKD ledger · Independent of QDC and simulated bank funds')}</Type></View>
     {wallet.busy ? <ActivityIndicator color={colors.accent} accessibilityLabel={text('正在读取港币余额', 'Loading HKD balance')} /> : null}
+    {wallet.wallet?.available_minor !== undefined && wallet.wallet.frozen_minor !== undefined ? <View style={{ gap: 8 }}><Type selectable size={15}>{text('可用余额', 'Available balance')} · {money(wallet.wallet.available_minor, 'HKD')}</Type><Type selectable muted size={13}>{text('退款处理中冻结', 'Reserved for refunds')} · {money(wallet.wallet.frozen_minor, 'HKD')}</Type></View> : null}
     {wallet.error ? <View accessibilityLiveRegion="polite" style={{ gap: 12 }}><Type selectable color={colors.danger} size={14}>{balanceError}</Type><Action kind="ghost" label={text('重新读取余额', 'Reload balance')} onPress={() => { void runtime.refreshWallet(); }} disabled={wallet.busy} /></View> : null}
     <View style={{ gap: 12 }}><Action icon={ArrowDownLeft} label={text('充值', 'Add money')} disabled={state.busy} onPress={() => { controller.edit(); setPage('funding'); }} /><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}><Action kind="secondary" icon={History} label={text('充值订单', 'Funding orders')} onPress={orders} /><Action kind="secondary" icon={ArrowUpRight} label={text('提现咨询', 'Withdrawal enquiry')} onPress={() => setPage('withdraw')} /></View></View>
-    {unavailable ? <View style={{ backgroundColor: colors.soft, padding: 20, borderRadius: 20, gap: 10 }}><Type size={15} weight="500">{text('充值服务暂未开放', 'Funding is currently unavailable')}</Type><Type muted style={{ lineHeight: 23 }}>{text('服务开放后，可使用已启用的方式以人民币付款，经核实和审核后计入港币余额。当前没有本地模拟充值。', 'When enabled, available methods accept CNY payment and credit HKD after verification and review. There is no local simulated funding fallback.')}</Type></View> : <Type muted size={13} style={{ lineHeight: 22 }}>{text('人民币付款，港币入账。每笔充值均会显示实际应付金额、汇率来源及有效期。', 'Pay in CNY and receive HKD. Each quote shows the payable amount, rate source and expiry.')}</Type>}
+    {unavailable ? <View style={{ backgroundColor: colors.soft, padding: 20, borderRadius: 20, gap: 10 }}><Type size={15} weight="500">{text('充值服务暂未开放', 'Funding is currently unavailable')}</Type><Type muted style={{ lineHeight: 23 }}>{reviewersUnavailable ? text('当前账号暂时没有独立的充值审核安排。历史订单和余额仍可查询。', 'Independent funding reviewers are not available for this account. Existing orders and balances remain readable.') : text('服务开放后，可使用已启用的方式以人民币付款，经核实和审核后计入港币余额。当前没有本地模拟充值。', 'When enabled, available methods accept CNY payment and credit HKD after verification and review. There is no local simulated funding fallback.')}</Type></View> : <Type muted size={13} style={{ lineHeight: 22 }}>{text('人民币付款，港币入账。每笔充值均会显示实际应付金额、汇率来源及有效期。', 'Pay in CNY and receive HKD. Each quote shows the payable amount, rate source and expiry.')}</Type>}
     {state.pending || (state.order && !state.order.safe_to_start_new) ? <Action kind="secondary" label={text('查询待确认的原充值', 'Check the original pending payment')} onPress={() => { setPage('funding'); void controller.refresh(); }} /> : null}
     <Divider />{onShowDemo ? <View style={{ gap: 12 }}><Type size={17} weight="500">{text('模拟银行账户', 'Simulated bank accounts')}</Type><Type muted size={13}>{text('20 家银行插件的演示资金保留在单独的钱包中。', 'Demo funds from 20 bank plugins remain in a separate wallet.')}</Type><Action kind="ghost" label={text('查看模拟账户', 'View demo accounts')} onPress={onShowDemo} /></View> : null}
   </Page>;

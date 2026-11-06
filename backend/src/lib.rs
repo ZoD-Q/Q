@@ -28,6 +28,7 @@ pub mod error;
 pub mod identity;
 pub mod insurance;
 pub mod ledger;
+pub mod market_data;
 pub mod payments;
 pub mod plugins;
 pub mod profiles;
@@ -205,6 +206,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .merge(plugins::routes())
         .merge(banking::router().layer(middleware::from_fn(private_response)))
         .merge(payments::router().layer(middleware::from_fn(private_response)))
+        .merge(market_data::router())
         .layer(cors)
         .with_state(state)
 }

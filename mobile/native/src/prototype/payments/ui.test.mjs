@@ -25,6 +25,16 @@ test('detail names quoted CNY payable rather than claiming the amount was paid',
   const tree = detail({}); assert.ok(tree.some(node => node.props.label === '订单应付（CNY）'));
   assert.ok(!tree.some(node => node.props.label === '实际支付（CNY）'));
 });
+test('a refunded original credit presents the refund instead of current credited funds', () => {
+  const tree = detail({ status: 'credited', error_code: null, evidence_version: 1, credited_transaction_id: 'original-credit', refund_status: 'refunded', refund_id: 'refund-case', refunded_at: '2026-11-05T00:00:00Z' });
+  assert.ok(tree.some(node => node.props.children === '已退款'));
+  assert.ok(!tree.some(node => node.props.children === '港币已计入钱包余额。'));
+  for (const refund_status of ['requested', 'approved_external', 'evidence_pending', 'evidence_rejected', 'unknown']) {
+    const pending = detail({ status: 'credited', refund_status });
+    assert.ok(pending.some(node => typeof node.props.children === 'string' && node.props.children.includes('被冻结')));
+    assert.ok(!pending.some(node => node.props.children === '港币已计入钱包余额。'));
+  }
+});
 test('not-submitted/no-debit wording requires complete authoritative terminal proof', () => {
   const proven = detail({}); assert.ok(proven.some(node => node.props.children === '未提交付款'));
   assert.ok(proven.some(node => typeof node.props.children === 'string' && node.props.children.includes('没有扣款')));

@@ -18,6 +18,12 @@ const coin = [
   { jsonrpc: '2.0', id: 2, result: `0x${word(8)}` },
   { jsonrpc: '2.0', id: 3, result: `0x${[1, 10000000000, 1793102340, 1793102340, 1].map(word).join('')}` },
 ];
+const newsPayload = (topic = 'markets', records = []) => {
+  const id = topic === 'fed' ? 'fed' : `gdelt_${topic}`;
+  const source = topic === 'fed' ? 'https://www.federalreserve.gov/feeds/press_monetary.xml' : new URL('https://api.gdeltproject.org/api/v2/doc/doc?' + new URLSearchParams({ query: '("stock market" OR "bond market" OR inflation)', mode: 'artlist', format: 'json', maxrecords: '20', timespan: '24h', sort: 'datedesc' })).href;
+  return { version: 1, topic, server_time: '2026-11-05T00:00:00Z', status: 'ready', records,
+    sources: [{ id, name: topic === 'fed' ? 'Federal Reserve' : 'GDELT DOC 2.0', url: source, status: 'ready', last_checked_at: '2026-11-05T00:00:00Z', last_success_at: '2026-11-05T00:00:00Z', retry_at: '2026-11-05T00:15:00Z', error_code: null }] };
+};
 const payload = value => Response.json(value);
 const fails = (action, code) => assert.rejects(action, error => error.code === code && error.message === code);
 const withUrl = (response, url) => { Object.defineProperty(response, 'url', { value: url }); return response; };
@@ -29,16 +35,16 @@ test('browser fetch transport is invoked without the request-options receiver', 
     if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
     calls++;
     assert.equal(init.credentials, 'omit');
-    return withUrl(payload({ articles: [] }), url);
+    return withUrl(payload(newsPayload()), url);
   }
   const report = await requestMarketReport(markets, { transport: browserFetch });
   assert.equal(calls, 1);
   assert.deepEqual(report.records, []);
 });
 
-test('browser source restrictions stop SEC and Fed before transport without restricting native queries', async () => {
+test('browser source restrictions stop SEC while every news topic uses Q cache', async () => {
   let calls = 0;
-  for (const query of [fed, { kind: 'filings', company: 'AAPL' }]) {
+  for (const query of [{ kind: 'filings', company: 'AAPL' }]) {
     assert.equal(marketDirectReadAllowed(query, 'web'), false);
     assert.equal(marketDirectReadAllowed(query, 'ios'), true);
     assert.equal(marketDirectReadAllowed(query, 'android'), true);
@@ -49,7 +55,7 @@ test('browser source restrictions stop SEC and Fed before transport without rest
   assert.match(marketOfficialPage({ kind: 'filings', company: 'AAPL' }), /^https:\/\/www\.sec\.gov\/edgar\/browse\/\?CIK=0000320193/);
   assert.equal(marketDirectReadAllowed(crypto, 'web'), true);
   assert.equal(marketDirectReadAllowed(markets, 'web'), true);
-  const report = await requestMarketReport(markets, { platform: 'web', transport: async () => { calls++; return payload({ articles: [] }); } });
+  const report = await requestMarketReport(markets, { platform: 'web', transport: async () => { calls++; return payload(newsPayload()); } });
   assert.equal(calls, 1);
   assert.deepEqual(report.records, []);
 });
@@ -99,13 +105,14 @@ test('transport receives exactly one anonymous GET with safe fixed URL and no ac
   let calls = 0;
   const report = await requestMarketReport(markets, { transport: async (url, init) => {
     calls++;
-    assert.equal(new URL(url).origin, 'https://api.gdeltproject.org');
-    assert.equal(new URL(url).searchParams.get('maxrecords'), '20');
+    assert.equal(new URL(url).origin, 'https://q.kaicloudpay.com');
+    assert.equal(new URL(url).pathname, '/v1/market-data/news');
+    assert.equal(new URL(url).searchParams.get('topic'), 'markets');
     assert.equal(init.method, 'GET'); assert.equal(init.credentials, 'omit'); assert.equal(init.redirect, 'error');
     assert.equal(init.cache, 'no-store'); assert.equal(init.referrerPolicy, 'no-referrer');
     assert.deepEqual(init.headers, { Accept: 'application/json' }); assert.equal(init.body, undefined);
     assert.ok(init.signal instanceof AbortSignal);
-    return withUrl(payload({ articles: [] }), url);
+    return withUrl(payload(newsPayload()), url);
   } });
   assert.equal(calls, 1); assert.deepEqual(report.records, []);
 });
@@ -120,19 +127,33 @@ test('SEC adds only its public user agent and verifies the issuer response', asy
   assert.equal(result.kind, 'filings');
 });
 
-test('Fed uses its fixed feed and XML accept types', async () => {
-  const result = await requestMarketReport(fed, { transport: async (url, init) => {
-    assert.equal(url, 'https://www.federalreserve.gov/feeds/press_monetary.xml');
-    assert.equal(Object.keys(init.headers).length, 1);
-    return new Response('<rss><channel><title>Public feed</title></channel></rss>', { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
-  } });
-  assert.equal(result.records.length, 0);
+test('Fed uses the same anonymous Q cache on Web and native without direct feed fallback', async () => {
+  for (const platform of ['web', 'ios', 'android']) {
+    let calls = 0;
+    const result = await requestMarketReport(fed, { platform, transport: async (url, init) => {
+      calls++;
+      assert.equal(url, 'https://q.kaicloudpay.com/v1/market-data/news?topic=fed');
+      assert.deepEqual(init.headers, { Accept: 'application/json' });
+      return payload(newsPayload('fed'));
+    } });
+    assert.equal(calls, 1); assert.equal(result.records.length, 0);
+  }
+});
+test('old news servers fail explicitly after one request and never call vendors', async () => {
+  for (const status of [404, 501]) {
+    let calls = 0;
+    await fails(requestMarketReport(markets, { transport: async url => {
+      calls++; assert.equal(new URL(url).hostname, 'q.kaicloudpay.com');
+      return new Response('old server', { status });
+    } }), 'news_service_unavailable');
+    assert.equal(calls, 1);
+  }
 });
 
 test('invalid selectors never reach transport, including arbitrary URL additions', async () => {
   let calls = 0;
   for (const query of [{ ...markets, url: 'https://evil.example/' }, { kind: 'crypto', asset: '__proto__' }, null]) {
-    await fails(requestMarketReport(query, { transport: async () => { calls++; return payload({ articles: [] }); } }), 'invalid_query');
+    await fails(requestMarketReport(query, { transport: async () => { calls++; return payload(newsPayload()); } }), 'invalid_query');
   }
   assert.equal(calls, 0);
 });
@@ -140,8 +161,8 @@ test('invalid selectors never reach transport, including arbitrary URL additions
 test('redirect flags, changed URLs and 3xx responses are rejected without a follow-up', async () => {
   for (const make of [
     () => new Response('', { status: 302, headers: { Location: 'https://evil.example/' } }),
-    () => { const response = payload({ articles: [] }); Object.defineProperty(response, 'redirected', { value: true }); return response; },
-    () => withUrl(payload({ articles: [] }), 'https://evil.example/'),
+    () => { const response = payload(newsPayload()); Object.defineProperty(response, 'redirected', { value: true }); return response; },
+    () => withUrl(payload(newsPayload()), 'https://evil.example/'),
   ]) {
     let calls = 0;
     await fails(requestMarketReport(markets, { transport: async () => { calls++; return make(); } }), 'redirect');
@@ -170,7 +191,7 @@ test('401/403/500 remain source HTTP failures without credential recovery', asyn
 
 test('pre-cancelled request never calls transport; in-flight cancellation rejects promptly', async () => {
   const before = new AbortController(); before.abort(); let calls = 0;
-  await fails(requestMarketReport(markets, { signal: before.signal, transport: async () => { calls++; return payload({ articles: [] }); } }), 'cancelled');
+  await fails(requestMarketReport(markets, { signal: before.signal, transport: async () => { calls++; return payload(newsPayload()); } }), 'cancelled');
   assert.equal(calls, 0);
   const active = new AbortController(); let requestSignal;
   const pending = requestMarketReport(markets, { signal: active.signal, transport: async (_url, init) => { requestSignal = init.signal; return new Promise(() => undefined); } });
@@ -233,10 +254,10 @@ test('stream limits count bytes, reject oversized chunks and cancel without full
 });
 
 test('exact byte limit is accepted and multibyte chunk boundaries decode correctly', async () => {
-  const base = JSON.stringify({ articles: [] });
+  const base = JSON.stringify(newsPayload());
   const exact = base + ' '.repeat(MARKET_RESPONSE_LIMIT_BYTES - base.length);
   assert.deepEqual((await requestMarketReport(markets, { transport: async () => new Response(exact, { headers: { 'Content-Type': 'application/json' } }) })).records, []);
-  const encoded = new TextEncoder().encode(JSON.stringify({ articles: [{ title: '比特币市场', url: 'https://example.com/a', seendate: '20261027T115000Z' }] }));
+  const encoded = new TextEncoder().encode(JSON.stringify(newsPayload('markets', [{ title: '比特币市场', url: 'https://example.com/a', source_id: 'gdelt_markets', publisher: 'example.com', published_at: null, indexed_at: '2026-11-04T23:50:00Z' }])));
   const stream = new ReadableStream({ start(controller) { for (const byte of encoded) controller.enqueue(Uint8Array.of(byte)); controller.close(); } });
   const report = await requestMarketReport(markets, { transport: async () => new Response(stream, { headers: { 'Content-Type': 'application/json' } }) });
   assert.equal(report.records[0].title, '比特币市场');
@@ -303,7 +324,7 @@ test('every admitted failure aborts the transport, preserves its error and remov
 test('successful completion aborts the finished native request and detaches caller listeners', async () => {
   const external = new AbortController(); let transportSignal;
   const result = await requestMarketReport(markets, { signal: external.signal, transport: async (_url, init) => {
-    transportSignal = init.signal; return payload({ articles: [] });
+    transportSignal = init.signal; return payload(newsPayload());
   } });
   assert.deepEqual(result.records, []);
   assert.equal(transportSignal.aborted, true);

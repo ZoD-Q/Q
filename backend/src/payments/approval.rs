@@ -1,4 +1,4 @@
-use super::store;
+use super::{operator, store};
 use crate::{
     AppState,
     error::{ApiError, ApiResult},
@@ -67,10 +67,22 @@ pub async fn proposal(
     let user = store::owner(&state.pool, id).await?;
     let mut tx = state.pool.begin().await?;
     let identities = store::lock_identities(&mut tx, &[user, auth.user_id]).await?;
+    if user == auth.user_id {
+        return Err(forbidden());
+    }
     if !store::active(&identities, user) || !store::active(&identities, auth.user_id) {
         return Err(store::conflict());
     }
+    operator::authorize(&mut tx, r, auth.user_id, Some("maker")).await?;
     let order = store::lock_order(&mut tx, id).await?;
+    let refund: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payment_refunds WHERE payment_id=$1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if refund {
+        return Err(store::conflict());
+    }
     store::slot(&mut tx, user).await?;
     if !proof(&order)
         || order.evidence_version != request.evidence_version
@@ -90,6 +102,14 @@ pub async fn proposal(
     }
     let result=sqlx::query_as("INSERT INTO payment_proposals(id,payment_id,maker_id,evidence_version,evidence_hash) VALUES($1,$2,$3,$4,$5) RETURNING id AS proposal_id,payment_id,maker_id,evidence_version,created_at")
  .bind(Uuid::new_v4()).bind(id).bind(auth.user_id).bind(order.evidence_version).bind(order.evidence_hash).fetch_one(&mut *tx).await?;
+    operator::audit(
+        &mut tx,
+        auth.user_id,
+        Some(id),
+        "credit_proposed",
+        serde_json::json!({"evidence_version":request.evidence_version}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(result))
 }
@@ -110,7 +130,11 @@ pub async fn approve(
     let Some((maker, hash)) = proposed else {
         return Err(store::conflict());
     };
-    if maker == auth.user_id || !r.policy.makers.contains(&maker) {
+    if maker == auth.user_id
+        || maker == user
+        || auth.user_id == user
+        || !r.policy.makers.contains(&maker)
+    {
         return Err(forbidden());
     }
     let mut tx = state.pool.begin().await?;
@@ -121,8 +145,18 @@ pub async fn approve(
     {
         return Err(store::conflict());
     }
+    operator::authorize(&mut tx, r, auth.user_id, Some("checker")).await?;
+    operator::authorize(&mut tx, r, maker, Some("maker")).await?;
     let order = store::lock_order(&mut tx, id).await?;
     let current = store::slot(&mut tx, user).await?;
+    let refund: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payment_refunds WHERE payment_id=$1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if refund {
+        return Err(store::conflict());
+    }
     if !proof(&order)
         || order.evidence_version != request.evidence_version
         || order.evidence_hash.as_ref() != Some(&hash)
@@ -161,6 +195,7 @@ pub async fn approve(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    operator::audit(&mut tx,auth.user_id,Some(id),"credit_approved",serde_json::json!({"proposal_id":request.proposal_id,"evidence_version":request.evidence_version,"transaction_id":transaction})).await?;
     let result = store::lock_order(&mut tx, id).await?;
     let current = store::slot(&mut tx, user).await?;
     tx.commit().await?;

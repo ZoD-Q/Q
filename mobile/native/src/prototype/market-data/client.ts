@@ -1,7 +1,8 @@
 import {
-  MarketDataError, marketSource, cryptoReadRequest, parseCryptoReport, parseFedReport, parseFilingsReport,
-  parseGdeltReport, validateMarketQuery, marketDirectReadAllowed,
+  MarketDataError, marketSource, cryptoReadRequest, parseCryptoReport, parseFilingsReport,
+  parseNewsCache, validateMarketQuery, marketDirectReadAllowed,
 } from './core';
+import { resolveApiUrl } from '../../services/api-target.mjs';
 import type { MarketQuery, MarketReport } from './core';
 export { MarketDataError, marketErrorText } from './core';
 
@@ -11,6 +12,7 @@ export type MarketRequestOptions = {
   transport: typeof fetch;
   signal?: AbortSignal;
   platform?: string;
+  apiBaseUrl?: string;
 };
 
 function retryAfter(value: string | null): number | null {
@@ -68,6 +70,16 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
   try { valid = validateMarketQuery(query); }
   catch { throw new MarketDataError('invalid_query'); }
   const source = marketSource(valid);
+  const news = valid.kind === 'news';
+  let requestUrl = source.url;
+  if (valid.kind === 'news') {
+    const base = resolveApiUrl(options.apiBaseUrl ?? process.env.EXPO_PUBLIC_API_URL);
+    try {
+      const url = new URL(base);
+      if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('invalid origin');
+      requestUrl = `${base}/v1/market-data/news?${new URLSearchParams({ topic: valid.topic })}`;
+    } catch { throw new MarketDataError('news_service_unavailable'); }
+  }
   if (options.signal?.aborted) throw new MarketDataError('cancelled');
   if (!marketDirectReadAllowed(valid, options.platform ?? process.env.EXPO_OS)) throw new MarketDataError('browser_unsupported');
   const controller = new AbortController();
@@ -77,12 +89,12 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
   options.signal?.addEventListener('abort', cancel, { once: true });
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, MARKET_TIMEOUT_MS);
   try {
-    const headers: Record<string, string> = { Accept: source.id === 'federal-reserve' ? 'application/rss+xml, application/xml, text/xml' : 'application/json' };
+    const headers: Record<string, string> = { Accept: 'application/json' };
     if (source.id === 'sec') headers['User-Agent'] = 'Q-Public-Research/0.1 (+https://q.kaicloudpay.com)';
     if (valid.kind === 'crypto') headers['Content-Type'] = 'application/json';
     // Browser fetch must not receive the options object as its `this` value.
     const transport = options.transport;
-    const pending = transport(source.url, {
+    const pending = transport(requestUrl, {
       method: valid.kind === 'crypto' ? 'POST' : 'GET',
       ...(valid.kind === 'crypto' ? { body: JSON.stringify(cryptoReadRequest(valid)) } : {}), headers, credentials: 'omit', redirect: 'error', cache: 'no-store',
       referrerPolicy: 'no-referrer', signal: controller.signal,
@@ -95,16 +107,17 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
     });
     const response = await abortable(pending, controller.signal, abortError);
     if (response.redirected || response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)
-      || (response.url && response.url !== source.url)) {
+      || (response.url && response.url !== requestUrl)) {
       void response.body?.cancel().catch(() => undefined);
       throw new MarketDataError('redirect');
     }
     if (!response.ok) {
       void response.body?.cancel().catch(() => undefined);
+      if (news && [404, 501].includes(response.status)) throw new MarketDataError('news_service_unavailable', response.status);
       throw new MarketDataError(response.status === 429 ? 'rate_limited' : 'http', response.status, response.status === 429 ? retryAfter(response.headers.get('Retry-After')) : null);
     }
     const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
-    const allowed = source.id === 'federal-reserve' ? ['application/rss+xml', 'application/xml', 'text/xml'] : ['application/json'];
+    const allowed = ['application/json'];
     if (!contentType || !allowed.includes(contentType)) {
       void response.body?.cancel().catch(() => undefined);
       throw new MarketDataError('invalid_data');
@@ -112,12 +125,11 @@ export async function requestMarketReport(query: MarketQuery, options: MarketReq
     const body = await readBounded(response, controller.signal, abortError);
     if (controller.signal.aborted) throw abortError();
     const fetchedAt = new Date().toISOString();
-    if (valid.kind === 'news' && valid.topic === 'fed') return parseFedReport(body, valid, fetchedAt);
     let data: unknown;
     try { data = JSON.parse(body); } catch { throw new MarketDataError('invalid_data'); }
     if (valid.kind === 'crypto') return parseCryptoReport(data, valid, fetchedAt);
     if (valid.kind === 'filings') return parseFilingsReport(data, valid, fetchedAt);
-    return parseGdeltReport(data, valid, fetchedAt);
+    return parseNewsCache(data, valid);
   } catch (error) {
     if (controller.signal.aborted) throw abortError();
     if (error instanceof MarketDataError) throw error;

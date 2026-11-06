@@ -39,6 +39,7 @@ pub struct PaymentRuntime {
     pub policy: PaymentPolicy,
     pub fingerprint: Vec<u8>,
     pub credential_version: String,
+    pub auto_fx_refresh: bool,
     providers: BTreeMap<String, ProviderVersion>,
 }
 pub struct ProviderVersion {
@@ -111,7 +112,13 @@ impl PaymentRuntime {
                 client,
             });
         }
-        Self::new_versioned(providers, active, policy).map(Some)
+        let mut runtime = Self::new_versioned(providers, active, policy)?;
+        runtime.auto_fx_refresh = match read("Q_PAYMENT_FX_AUTO_REFRESH").as_deref() {
+            None | Some("0") => false,
+            Some("1") => true,
+            _ => return Err("Q_PAYMENT_FX_AUTO_REFRESH must be 0 or 1"),
+        };
+        Ok(Some(runtime))
     }
     pub fn new(
         client: QixiangClient,
@@ -154,15 +161,31 @@ impl PaymentRuntime {
         let selected = providers
             .get(&active)
             .ok_or("Active payment credential version missing")?;
+        // Public-rate refreshes cannot silently invalidate an accepted quote.
+        // Credentials, fees, limits, timing and governance remain in the signature.
         let fingerprint = Sha256::digest(
-            serde_json::to_vec(&(&selected.merchant_id, &active, &policy))
-                .map_err(|_| "Invalid payment policy")?,
+            serde_json::to_vec(&(
+                "q-payments-business-v2",
+                &selected.merchant_id,
+                &active,
+                policy.fee_basis_points,
+                policy.min_credit_amount_minor_hkd,
+                policy.max_credit_amount_minor_hkd,
+                policy.quote_ttl_seconds,
+                policy.checkout_ttl_seconds,
+                policy.rate_max_age_seconds,
+                policy.provider_utc_offset_seconds,
+                &policy.makers,
+                &policy.checkers,
+            ))
+            .map_err(|_| "Invalid payment policy")?,
         )
         .to_vec();
         Ok(Self {
             client: selected.client.clone(),
             merchant_id: selected.merchant_id.clone(),
             credential_version: active,
+            auto_fx_refresh: false,
             policy,
             fingerprint,
             providers,
@@ -180,6 +203,21 @@ impl PaymentRuntime {
             .map(|p| format!("{}:{}", p.version, p.merchant_id))
             .collect()
     }
+    pub fn accepts_quote_fingerprint(
+        &self,
+        fingerprint: &[u8],
+        frozen_rate: &RateSnapshot,
+    ) -> bool {
+        if fingerprint == self.fingerprint {
+            return true;
+        }
+        // The old signature serialized the whole policy, including its rate. Rebuild
+        // it with THIS quote's immutable snapshot, never today's environment rate.
+        let mut legacy = self.policy.clone();
+        legacy.rate = frozen_rate.clone();
+        serde_json::to_vec(&(&self.merchant_id, &self.credential_version, &legacy))
+            .is_ok_and(|bytes| Sha256::digest(bytes).as_slice() == fingerprint)
+    }
 }
 impl PaymentPolicy {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -189,7 +227,7 @@ impl PaymentPolicy {
             || self.max_credit_amount_minor_hkd > crate::ledger::real_hkd::MAX_MINOR
             || !(1..=900).contains(&self.quote_ttl_seconds)
             || !(1..=3600).contains(&self.checkout_ttl_seconds)
-            || !(1..=604800).contains(&self.rate_max_age_seconds)
+            || !(1..=345600).contains(&self.rate_max_age_seconds)
             || self.makers.is_empty()
             || self.checkers.is_empty()
             || !self
@@ -226,11 +264,16 @@ impl PaymentPolicy {
         Ok(())
     }
     pub fn fresh(&self, now: DateTime<Utc>) -> bool {
-        self.rate.rate_at <= self.rate.rate_fetched_at
-            && self.rate.rate_fetched_at <= now
-            && now - self.rate.rate_at <= chrono::Duration::seconds(self.rate_max_age_seconds)
-            && now - self.rate.rate_fetched_at
-                <= chrono::Duration::seconds(self.rate_max_age_seconds)
+        self.rate_fresh(&self.rate, now)
+    }
+    pub fn rate_fresh(&self, rate: &RateSnapshot, now: DateTime<Utc>) -> bool {
+        rate.rate_at <= rate.rate_fetched_at
+            && rate.rate_fetched_at <= now
+            && now <= self.rate_expires_at(rate)
+    }
+    pub fn rate_expires_at(&self, rate: &RateSnapshot) -> DateTime<Utc> {
+        rate.rate_at.min(rate.rate_fetched_at)
+            + chrono::Duration::seconds(self.rate_max_age_seconds.min(345600))
     }
 }
 pub fn rational(value: &str) -> Result<(i128, i128), &'static str> {

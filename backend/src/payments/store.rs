@@ -9,11 +9,15 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-pub const ORDER_SELECT: &str = "SELECT o.*,q.channel,q.credit_minor,q.base_minor,q.fee_minor,q.pay_minor,q.fee_bps,q.rate_snapshot,q.expires_at AS quote_expires_at,q.config_fingerprint FROM payment_orders o JOIN payment_quotes q ON q.id=o.quote_id";
+pub const ORDER_SELECT: &str = "SELECT o.*,refund.id AS refund_id,refund.version AS refund_version,refund.status AS refund_status,CASE WHEN refund.status='refunded' THEN refund.updated_at ELSE NULL END AS refunded_at,q.channel,q.credit_minor,q.base_minor,q.fee_minor,q.pay_minor,q.fee_bps,q.rate_snapshot,q.expires_at AS quote_expires_at,q.config_fingerprint FROM payment_orders o JOIN payment_quotes q ON q.id=o.quote_id LEFT JOIN payment_refunds refund ON refund.payment_id=o.id";
 #[derive(Clone, sqlx::FromRow)]
 pub struct Order {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub refund_id: Option<Uuid>,
+    pub refund_version: Option<i64>,
+    pub refund_status: Option<String>,
+    pub refunded_at: Option<DateTime<Utc>>,
     pub quote_id: Uuid,
     pub client_request_id: Uuid,
     pub merchant_id: String,
@@ -104,6 +108,10 @@ pub struct OrderView {
     pub error_code: Option<String>,
     pub credited_transaction_id: Option<Uuid>,
     pub evidence_version: i64,
+    pub refund_id: Option<Uuid>,
+    pub refund_version: Option<i64>,
+    pub refund_status: Option<String>,
+    pub refunded_at: Option<DateTime<Utc>>,
 }
 impl Order {
     pub fn channel(&self) -> Channel {
@@ -162,6 +170,10 @@ impl Order {
             error_code: self.error_code,
             credited_transaction_id: self.credited_transaction_id,
             evidence_version: self.evidence_version,
+            refund_id: self.refund_id,
+            refund_version: self.refund_version,
+            refund_status: self.refund_status,
+            refunded_at: self.refunded_at,
         })
     }
 }

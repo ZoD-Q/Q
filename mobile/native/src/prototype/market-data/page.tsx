@@ -119,8 +119,9 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
   const market = useMarketData(query, active && !companies && directRead);
   const loading = market.phase === 'loading';
   const oldResult = Boolean(market.report && (market.stale || market.phase === 'error' || market.phase === 'cancelled'));
-  const currentProvider = query.kind === 'crypto' ? 'Chainlink · Ethereum' : query.kind === 'filings' ? 'SEC EDGAR' : query.topic === 'fed' ? text('美联储', 'Federal Reserve') : 'GDELT';
-  const providerUrl = query.kind === 'crypto' ? 'https://docs.chain.link/data-feeds/using-data-feeds' : query.kind === 'filings' ? 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' : query.topic === 'fed' ? 'https://www.federalreserve.gov/feeds/feeds.htm' : 'https://www.gdeltproject.org/';
+  const newsCache = market.report?.kind === 'news' ? market.report.newsCache : undefined;
+  const currentProvider = query.kind === 'crypto' ? 'Chainlink · Ethereum' : query.kind === 'filings' ? 'SEC EDGAR' : query.topic === 'central_banks' ? text('美联储 / 欧洲央行', 'Federal Reserve / ECB') : query.topic === 'fed' ? text('美联储', 'Federal Reserve') : 'GDELT';
+  const providerUrl = query.kind === 'crypto' ? 'https://docs.chain.link/data-feeds/using-data-feeds' : query.kind === 'filings' ? 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' : query.topic === 'central_banks' ? 'https://www.ecb.europa.eu/home/html/rss.en.html' : query.topic === 'fed' ? 'https://www.federalreserve.gov/feeds/feeds.htm' : 'https://www.gdeltproject.org/';
   const choose = (next: MarketQuery) => { setCompanies(false); if (marketQueryKey(next) === marketQueryKey(query)) return; market.cancel(); setHandoffError(false); setQuery(next); };
   const preview = (link: Outbound) => { setLinkError(false); setSourceDetails(false); setOutbound(link); };
   const openLink = async () => {
@@ -147,7 +148,7 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
     <Group>
       <Button label={text('加密货币行情', 'Crypto quotes')} selected={!companies && query.kind === 'crypto'} onPress={() => choose({ kind: 'crypto', asset: 'BTC' })} />
       <Button label={text('全球公司研究', 'Global companies')} selected={companies} onPress={() => { market.cancel(); closeHandoff(); setCompanies(true); }} />
-      <Button label={text('新闻热点', 'News themes')} selected={!companies && query.kind === 'news'} onPress={() => choose({ kind: 'news', topic: 'fed' })} />
+      <Button label={text('新闻热点', 'News themes')} selected={!companies && query.kind === 'news'} onPress={() => choose({ kind: 'news', topic: 'central_banks' })} />
     </Group>
     {companies ? <CompanyResearchPanel active={active} onAnalyze={onAnalyze} conversations={conversations} historyBusy={historyBusy} historyError={historyError} hasMoreHistory={hasMoreHistory} onLoadHistory={onLoadHistory} signedIn={signedIn} /> : <>
     <View style={{ gap: 12 }}>
@@ -155,12 +156,14 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
       <Group>
         {query.kind === 'crypto' ? (['BTC', 'ETH', 'SOL'] as const).map(asset => <Button key={asset} label={asset} selected={query.asset === asset} onPress={() => choose({ kind: 'crypto', asset })} />) : null}
         {query.kind === 'filings' ? ([['AAPL', '苹果', 'Apple'], ['MSFT', '微软', 'Microsoft'], ['NVDA', '英伟达', 'NVIDIA']] as const).map(([company, zh, en]) => <Button key={company} label={`${company} · ${text(zh, en)}`} selected={query.company === company} onPress={() => choose({ kind: 'filings', company })} />) : null}
-        {query.kind === 'news' ? ([['fed', '美联储', 'Federal Reserve'], ['markets', '金融市场', 'Markets'], ['crypto', '加密资产', 'Crypto'], ['technology', '科技', 'Technology']] as const).map(([topic, zh, en]) => <Button key={topic} label={text(zh, en)} selected={query.topic === topic} onPress={() => choose({ kind: 'news', topic })} />) : null}
+        {query.kind === 'news' ? ([['central_banks', '央行动态', 'Central banks'], ['fed', '美联储', 'Federal Reserve'], ['markets', '金融市场', 'Markets'], ['crypto', '加密资产', 'Crypto'], ['technology', '科技', 'Technology']] as const).map(([topic, zh, en]) => <Button key={topic} label={text(zh, en)} selected={query.topic === topic} onPress={() => choose({ kind: 'news', topic })} />) : null}
       </Group>
       <Type size={13} muted>{text('来源：', 'Source: ')}{currentProvider}{text(' · 仅公开资料 · 点击后查询', ' · Public data only · Query on tap')}</Type>
       {query.kind === 'crypto' ? <Type size={13} muted>{text('读取以太坊上的 Chainlink 美元参考价，仅提供价格与更新时间；这是预言机参考值，不是交易所实时成交报价。', 'Reads Chainlink USD reference prices on Ethereum, with price and update time only. These oracle values are not live exchange trade quotes.')}</Type> : null}
       {query.kind === 'filings' ? <Type size={13} muted>{text('查询 SEC 公开申报摘要，不包含股票报价。', 'Queries SEC public filing metadata; stock prices are not included.')}</Type> : null}
-      {query.kind === 'news' && query.topic !== 'fed' ? <Type size={13} muted>{text('GDELT 仅提供标题与索引信息。限流或暂不可用时会显示错误，不替换为其他来源。', 'GDELT supplies headline and index metadata. Rate limits or unavailable data are shown explicitly; no other source is substituted.')}</Type> : null}
+      {query.kind === 'news' ? <Type size={13} muted>{text('从小Q共享缓存读取公开标题与原文链接。后台约每15分钟检查来源；刷新此页不会向源站追加请求。', 'Reads public headlines and original links from Q’s shared cache. Providers are checked about every 15 minutes; refreshing this page does not add upstream requests.')}</Type> : null}
+      {query.kind === 'news' && ['fed', 'central_banks'].includes(query.topic) ? <Type size={13} muted>{text('央行发布频率不固定；这里是官方央行动态，不代表全网财经、科技或加密新闻。', 'Central banks publish on their own schedules. These official releases are not global market, technology or crypto coverage.')}</Type> : null}
+      {query.kind === 'news' && !['fed', 'central_banks'].includes(query.topic) ? <Type size={13} muted>{text('此主题保持GDELT来源；限流或不可用时独立显示采集状态，不用央行动态冒充结果。', 'This topic retains GDELT as its source. Collection failures remain visible and are not replaced by central-bank releases.')}</Type> : null}
     </View>
     <View style={{ gap: 12 }}>
       {!directRead ? <View style={{ gap: 8 }}>
@@ -183,11 +186,11 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
     </View>
     {market.report ? <View style={{ gap: 22 }}>
       <View style={{ gap: 8, borderLeftWidth: 3, borderLeftColor: oldResult ? colors.muted : colors.accent, paddingLeft: 14 }}>
-        <Type weight="600">{oldResult ? text('旧结果 · 未更新', 'Previous result · not updated') : market.fromCache ? text('本次会话缓存', 'Cached in this session') : text('已获取公开资料', 'Public data retrieved')}</Type>
+        <Type weight="600">{newsCache?.status === 'unavailable' ? text('暂无可用新闻缓存', 'No available news cache') : newsCache?.status === 'partial' ? text('已取得部分来源', 'Some sources available') : oldResult ? text('旧结果 · 未更新', 'Previous result · not updated') : market.fromCache ? text('本次会话缓存', 'Cached in this session') : text('已获取公开资料', 'Public data retrieved')}</Type>
         {oldResult ? <Type size={13} muted>{text('以下仍是上次成功获取的资料，不代表当前状态。', 'The data below is the last successful result and may not reflect the current state.')}</Type> : null}
         <Type size={13} muted selectable>{text('提供方：', 'Provider: ')}{market.report.source.name}</Type>
         <Type size={13} muted selectable>{text('资料截至（源方）：', 'As of (provider): ')}{timestamp(market.report.asOf, text('未提供', 'Not provided'))}</Type>
-        <Type size={13} muted selectable>{text('本次获取：', 'Fetched at: ')}{timestamp(market.report.fetchedAt, text('未提供', 'Not provided'))}</Type>
+        <Type size={13} muted selectable>{newsCache ? text('读取缓存时间：', 'Cache read time: ') : text('本次获取：', 'Fetched at: ')}{timestamp(market.report.fetchedAt, text('未提供', 'Not provided'))}</Type>
         <Type size={13} muted>{market.stale ? text('资料已过期或源方时间较旧，请在允许时刷新。', 'Data has expired or the provider timestamp is old. Refresh when available.') : market.report.freshness === 'unknown' ? text('无法确认资料新鲜度。', 'Data freshness cannot be confirmed.') : text('仍可能存在源方延迟；不保证实时。', 'Provider delays may still apply; real-time data is not guaranteed.')}</Type>
         <Group>
           <Button icon={ExternalLink} label={text('本次资料来源', 'Source of this result')} onPress={() => preview({ title: market.report!.source.name, url: market.report!.source.referenceUrl ?? market.report!.source.url })} />
@@ -195,7 +198,18 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
         </Group>
         <Type size={13} muted>{text('选择新对话或历史对话，资料会填入草稿，由你确认发送。', 'Choose a new or existing chat. Review the draft before sending it yourself.')}</Type>
       </View>
-      {!market.report.records.length ? <Type muted>{text('此次查询没有返回记录。', 'No records returned by this query.')}</Type> : <ResultRecords report={market.report} preview={preview} />}
+      {newsCache ? <View style={{ gap: 16 }}>
+        <Type size={15} weight="600">{text('各来源采集状态', 'Provider collection status')}</Type>
+        {newsCache.sources.map(source => <View key={source.id} style={{ gap: 6, paddingBottom: 14, borderBottomWidth: 1, borderColor: colors.line }}>
+          <Type size={14} weight="500">{source.name} · {source.status === 'ready' ? text('缓存有效', 'Cache available') : source.status === 'stale' ? text('旧缓存', 'Previous cache') : text('暂不可用', 'Unavailable')}</Type>
+          <Type size={13} muted selectable>{text('上次成功采集：', 'Last successful collection: ')}{timestamp(source.lastSuccessAt, text('尚无', 'None yet'))}</Type>
+          <Type size={13} muted selectable>{text('最近检查：', 'Last checked: ')}{timestamp(source.lastCheckedAt, text('等待首次采集', 'Awaiting first collection'))}</Type>
+          <Type size={13} muted selectable>{text('下次后台采集计划：', 'Next scheduled collection: ')}{timestamp(source.retryAt, '—')}</Type>
+          {source.errorCode ? <Type size={13} color={colors.danger}>{source.errorCode === 'rate_limited' ? text('源方正在限流，后台会按允许时间重试。', 'Provider rate limit active. Collection resumes after the allowed time.') : text('最近一次采集未成功，保留此前通过校验的缓存。', 'The latest collection failed. Previously validated data is preserved.')}</Type> : null}
+          <View style={{ alignSelf: 'flex-start' }}><Button icon={ExternalLink} label={text('查看官方来源', 'View official source')} onPress={() => preview({ title: source.name, url: source.url })} /></View>
+        </View>)}
+      </View> : null}
+      {!market.report.records.length ? <Type muted>{newsCache?.status === 'unavailable' ? text('尚无可展示的成功缓存；不会把读取失败当作“没有新闻”。可按上方计划稍后刷新。', 'No successful cache is available. A failed read does not mean there is no news. Refresh after the scheduled collection.') : text('此次查询没有返回记录。', 'No records returned by this query.')}</Type> : <ResultRecords report={market.report} preview={preview} />}
       <View style={{ gap: 6 }}>{market.report.limitations.map(item => <Type key={item} size={13} muted>{marketLimitationText(item, locale)}</Type>)}</View>
       <View style={{ gap: 10, alignItems: 'flex-start' }}>
         <Button primary label={text('用于对话', 'Use in chat')} disabled={!active || loading || market.report.records.length === 0} onPress={openHandoff} />
@@ -219,7 +233,7 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
       <Row title="Chainlink · Ethereum" subtitle={text('公开链上只读参考价；无需钱包或交易，来源更新时间与获取时间分开显示。', 'Public on-chain reference prices, read-only without a wallet or transaction. Source update and retrieval times are shown separately.')} onPress={() => preview({ title: 'Chainlink Data Feeds', url: 'https://docs.chain.link/data-feeds/using-data-feeds' })} />
       <Row title="Wikidata" subtitle={text('全球公司候选与交易所记录；目录不完整，当前上市状态未经独立核验。', 'Global issuer candidates and exchange records; incomplete directory and unverified current listing status.')} onPress={() => preview({ title: 'Wikidata', url: 'https://www.wikidata.org/' })} />
       <Row title="SEC EDGAR" subtitle={text('按需查询 EDGAR 主体目录、申报及标准年度财务数据；不覆盖全球全部财报。', 'On-demand EDGAR issuer directory, filings and standard annual financial facts; global reports are not fully covered.')} onPress={() => preview({ title: 'SEC EDGAR', url: 'https://www.sec.gov/search-filings/edgar-application-programming-interfaces' })} />
-      <Row title={text('美联储 / GDELT', 'Federal Reserve / GDELT')} subtitle={text('公开新闻源；GDELT 可能限流，未抓取文章全文。', 'Public news sources; GDELT may rate-limit requests. Article bodies are not fetched.')} last />
+      <Row title={text('美联储 / 欧洲央行 / GDELT', 'Federal Reserve / ECB / GDELT')} subtitle={text('小Q后台采集官方RSS与GDELT元数据，共享缓存、独立来源状态；央行动态与原三类新闻分开，未抓取文章全文。', 'Q collects official RSS and GDELT metadata with a shared cache and separate source status. Central-bank releases stay separate from the three GDELT topics. Article bodies are not fetched.')} last />
       <Type size={16} weight="600">{text('需官方权限，未连接', 'Official access required · Not connected')}</Type>
       {externalProviders.map(provider => <Row key={provider.name[1]} title={text(provider.name[0], provider.name[1])} subtitle={`${text('需官方权限，未连接', 'Official access required · Not connected')}\n${publicHost(provider.url)}`} onPress={() => preview({ title: text(provider.name[0], provider.name[1]), url: provider.url })} last />)}
       <Type size={13} muted>{text('官方账号、订阅与数据展示许可须另行确认，本页不提供密钥输入或自动授权。', 'Official accounts, subscriptions and display permissions require separate confirmation. This page has no key-entry or automatic authorization flow.')}</Type>

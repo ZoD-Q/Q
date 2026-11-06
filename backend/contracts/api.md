@@ -7,6 +7,12 @@ Authenticated endpoints require `Authorization: Bearer <opaque token>`; sessions
 
 See [payment contract](payments.md) for `/v1/payments` capabilities, independent HKD wallet, CNY quotes, orders, recovery, signed notification hints and maker/checker approval. These funds never mix with QDC or bank simulations. Missing merchant/rate/policy configuration disables new funding. Source implementation and isolated tests do not mean deployment, provider activation or real settlement.
 
+The [operator contract](payment-operations.md) adds authenticated payment review, full external-refund evidence workflows, immutable HKD reversal journals and source-file reconciliation. The [FX contract](../src/payments/FX.md) adds explicit opt-in collection of versioned ECB reference evidence while preserving frozen quotes. Neither feature authorizes automatic payouts or bank FX conversion.
+
+## Shared public news cache
+
+`GET /v1/market-data/news` anonymously reads only the durable Q cache for fixed news topics. Requests do not trigger provider calls or accept arbitrary URLs. Publication/index timestamps, collection times, source-specific failures and stale states remain distinct. Central-bank releases do not replace the coverage of GDELT topics. See [news contract](market-news.md).
+
 ## Built-in bank plugins and HKD wallet
 
 See [banking contract](banking.md). `GET /v1/banking/wallet`, `POST /v1/banking/connect`, and paginated `GET /v1/banking/transactions` / `entries` reuse Q identity and return `no-store`. The first explicit addition issues HKD 100,000 to each new simulated account; retries never refill balances. Existing QDC routes are unchanged.

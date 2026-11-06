@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "tsx --test src/*.test.ts",
-    "build": "vite build && node scripts/stamp-build.mjs",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e": "playwright test"
   },

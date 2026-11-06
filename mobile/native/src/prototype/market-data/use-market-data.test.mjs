@@ -184,10 +184,10 @@ test('different company data may be requested after the short provider interval,
   assert.equal(f.owner.state.fromCache, true);
 });
 
-test('crypto and GDELT use short shared provider intervals independently of each query cache', async () => {
+test('crypto and Q news cache use short shared read intervals independently of each query cache', async () => {
   for (const [first, next, interval] of [
     [{ kind: 'crypto', asset: 'BTC' }, { kind: 'crypto', asset: 'ETH' }, 2_000],
-    [{ kind: 'news', topic: 'markets' }, { kind: 'news', topic: 'crypto' }, 5_000],
+    [{ kind: 'news', topic: 'markets' }, { kind: 'news', topic: 'crypto' }, 1_000],
   ]) {
     let calls = 0;
     const f = fixture(async query => {
@@ -236,4 +236,18 @@ test('public cache survives navigation without keeping the previous page request
   assert.equal(second.owner.state.fromCache, true);
   assert.equal(await second.owner.run(), true);
   assert.equal(calls, 1);
+});
+
+test('news view cache expires after thirty seconds without adding another fifteen-minute delay', async () => {
+  const query = { kind: 'news', topic: 'markets' };
+  let calls = 0;
+  const f = fixture(async () => { calls++; return { ...report(), kind: 'news', query, source: core.marketSource(query), hotspots: [] }; }, query);
+  f.select(query);
+  assert.equal(await f.owner.run(), true);
+  f.advance(29_999);
+  assert.equal(await f.owner.run(), true);
+  assert.equal(calls, 1);
+  f.advance(2);
+  assert.equal(await f.owner.run(), true);
+  assert.equal(calls, 2);
 });
