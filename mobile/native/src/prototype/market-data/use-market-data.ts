@@ -22,9 +22,10 @@ export const createMarketDataMemory = (): MarketDataMemory => ({ cache: new Map(
 export const publicMemory = createMarketDataMemory();
 
 const idle = (key: string): MarketDataState => ({ key, phase: 'idle', report: null, error: null, fromCache: false, expiresAt: null, nextAllowedAt: null });
-const sourceKey = (query: MarketQuery) => query.kind === 'news' ? query.topic === 'fed' ? 'federal-reserve' : 'gdelt' : query.kind === 'filings' ? 'sec' : 'chainlink';
-const lifetime = (query: MarketQuery) => query.kind === 'news' && query.topic !== 'fed' ? 15 * 60_000 : 5 * 60_000;
-const minimumInterval = (query: MarketQuery) => query.kind === 'filings' ? 1_000 : query.kind === 'news' && query.topic !== 'fed' ? 5_000 : 2_000;
+const sourceKey = (query: MarketQuery) => query.kind === 'news' ? 'q-public-news' : query.kind === 'filings' ? 'sec' : 'chainlink';
+// A short view cache does not add another 15-minute delay to the durable server cache.
+const lifetime = (query: MarketQuery) => query.kind === 'news' ? 30_000 : 5 * 60_000;
+const minimumInterval = (query: MarketQuery) => query.kind === 'news' || query.kind === 'filings' ? 1_000 : 2_000;
 
 /** An in-memory request owner; no account, persistence, automatic request, or retry. */
 export class MarketDataSession {

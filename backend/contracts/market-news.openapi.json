@@ -1,0 +1,237 @@
+{
+  "paths": {
+    "/v1/market-data/news": {
+      "get": {
+        "operationId": "publicNews",
+        "tags": [
+          "market-data"
+        ],
+        "security": [],
+        "description": "Reads durable public headline cache only; does not trigger upstream collection. See market-news.md for source scope, partial/stale/unavailable semantics and fencing.",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PublicNewsTopic"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cache status read, which may explicitly report unavailable source data.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "public, max-age=30"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicNewsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error including invalid query parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PublicNewsTopic": {
+        "type": "string",
+        "enum": [
+          "central_banks",
+          "fed",
+          "markets",
+          "crypto",
+          "technology"
+        ]
+      },
+      "PublicNewsArticle": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "url",
+          "source_id",
+          "publisher",
+          "published_at",
+          "indexed_at"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "source_id": {
+            "type": "string",
+            "enum": [
+              "fed",
+              "ecb",
+              "gdelt_markets",
+              "gdelt_crypto",
+              "gdelt_technology"
+            ]
+          },
+          "publisher": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "indexed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "PublicNewsSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "url",
+          "status",
+          "last_checked_at",
+          "last_success_at",
+          "retry_at",
+          "error_code"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "fed",
+              "ecb",
+              "gdelt_markets",
+              "gdelt_crypto",
+              "gdelt_technology"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "stale",
+              "unavailable"
+            ]
+          },
+          "last_checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "last_success_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error_code": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "network",
+              "timeout",
+              "rate_limited",
+              "http",
+              "invalid_data",
+              "too_large",
+              "unsafe_destination",
+              null
+            ]
+          }
+        }
+      },
+      "PublicNewsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "topic",
+          "server_time",
+          "status",
+          "records",
+          "sources"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "topic": {
+            "$ref": "#/components/schemas/PublicNewsTopic"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "partial",
+              "stale",
+              "unavailable"
+            ]
+          },
+          "records": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/PublicNewsArticle"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/PublicNewsSource"
+            }
+          }
+        }
+      }
+    }
+  }
+}

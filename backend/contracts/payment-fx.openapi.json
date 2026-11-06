@@ -1,0 +1,484 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Q payment FX integration fragment",
+    "version": "2026-11-05"
+  },
+  "paths": {
+    "/v1/payments/fx/status": {
+      "get": {
+        "operationId": "getPaymentFxStatus",
+        "summary": "Read FX evidence, freshness/hold and 24h/6h alert flags (current payment operator only)",
+        "tags": [
+          "Payments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current public FX evidence metadata; no raw XML or credentials.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentFxStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid hash/review reason/body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: ordinary Q session missing/inactive/expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PAYMENT_OPERATOR_REQUIRED: current maker/checker role required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PAYMENT_FX_CHANGED or PAYMENT_OPERATOR_POLICY_CHANGED: reload current evidence/generation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "PAYMENTS_UNAVAILABLE: no configured payment runtime.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/payments/fx/activations": {
+      "post": {
+        "operationId": "activatePaymentFxCandidate",
+        "summary": "Explicitly review an immutable valid FX anomaly candidate (current payment operator only)",
+        "tags": [
+          "Payments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current public FX evidence metadata; no raw XML or credentials.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentFxActivation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: invalid hash/review reason/body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: ordinary Q session missing/inactive/expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PAYMENT_OPERATOR_REQUIRED: current maker/checker role required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PAYMENT_FX_CHANGED or PAYMENT_OPERATOR_POLICY_CHANGED: reload current evidence/generation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "PAYMENTS_UNAVAILABLE: no configured payment runtime.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentFxActivationRequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PaymentFxRateStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "source_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "rate_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remaining_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rate_cny_per_100_hkd": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]{1,8})?$"
+          },
+          "evidence_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "evidence_verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "source_date",
+          "rate_at",
+          "fetched_at",
+          "expires_at",
+          "remaining_seconds",
+          "rate_cny_per_100_hkd",
+          "evidence_sha256",
+          "evidence_verified"
+        ]
+      },
+      "PaymentFxCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "rate_cny_per_100_hkd": {
+            "type": "string"
+          },
+          "evidence_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "manual_activation_allowed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "source_date",
+          "rate_cny_per_100_hkd",
+          "evidence_sha256",
+          "reason",
+          "manual_activation_allowed"
+        ]
+      },
+      "PaymentFxAlerts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "within_24h": {
+            "type": "boolean"
+          },
+          "within_6h": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "held": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "within_24h",
+          "within_6h",
+          "stale",
+          "held"
+        ]
+      },
+      "PaymentFxActivationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "evidence_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500,
+            "description": "Trimmed explicit review reason; no control characters. No XML, date or numeric overrides accepted."
+          }
+        },
+        "required": [
+          "candidate_id",
+          "evidence_sha256",
+          "expected_generation",
+          "reason"
+        ]
+      },
+      "PaymentFxActivation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "activation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "activated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "activation_id",
+          "snapshot_id",
+          "generation",
+          "activated_at"
+        ]
+      },
+      "PaymentFxStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "automatic"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "stale",
+              "held",
+              "unconfigured"
+            ]
+          },
+          "generation": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "policy_fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFxRateStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFxCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_success_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hold_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_attempt_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_http_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "refresh_in_progress": {
+            "type": "boolean"
+          },
+          "alerts": {
+            "$ref": "#/components/schemas/PaymentFxAlerts"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "mode",
+          "state",
+          "generation",
+          "policy_fingerprint",
+          "current",
+          "candidate",
+          "last_checked_at",
+          "last_success_at",
+          "last_error_code",
+          "hold_reason",
+          "next_attempt_at",
+          "last_http_status",
+          "refresh_in_progress",
+          "alerts",
+          "server_time"
+        ]
+      }
+    }
+  },
+  "x-merge-note": "Merge paths/schemas into the root contract; ApiErrorBody and bearerAuth reuse the existing root definitions. Both routes inherit the payment private/no-store middleware."
+}

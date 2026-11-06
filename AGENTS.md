@@ -17,7 +17,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | 视频 | 原创本地演示短片保留；API 工作台支持个人可灵凭据与真实请求适配，供应商实账生成另行验证；不上传广场 |
 | API 工作台 | 复用 Q 身份，服务端加密个人可灵 API Key，持久化任务并查询结果；本地测试替身不等于供应商实测 |
 | 已保留后端 | Rust + PostgreSQL，支持身份、资料、模拟 QDC/银行 HKD、独立支付 HKD、AI 历史及插件/社交；旧客户端联调代码保留，API 工作台复用身份端点 |
-| 独立 Web | `web/` 已有 `/q-admin/` 平台管理静态演示原型；真实管理接口和普通用户 Web 产品未实现；Expo web 仍是移动端开发预览 |
+| 独立 Web | `web/` 保留 `/q-admin/` 平台管理演示，并新增 `/q-admin/wallet-payments` 真实钱包操作员工作区源码；支付审核、退款证据与对账按 Q 身份授权。该新增版本的部署及实账状态单独验收，其他管理页面仍为 demo，普通用户 Web 未实现；Expo web 仍为移动端开发预览 |
 | 插件协议 | MCP 2026-07-28 客户端、四类远程发现、个人连接、OAuth/CIMD、工具/资源/提示词与聊天提案已实现；Apps HTML 沙箱及公共索引未实现。见 [实现边界](mobile/docs/mcp-host.md) |
 
 **不得把原型、规范、未来领域或测试替身写成已上线能力。** 接入真实服务是单独的开发任务；本规范本身不授权部署、交易或对外发送信息。
@@ -32,7 +32,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | `mobile/native/src/prototype/` | 当前对话、服务、视频和设计组件；语义主题、文案与会话状态集中管理 |
 | `mobile/native/src/screens/`、`providers/`、`services/` | 保留的 API 联调实现，接回前核对与当前入口的差异 |
 | `mobile/shared/` | OpenAPI 生成类型与可共享纯逻辑，不依赖原生 UI、服务端秘密或数据库 |
-| `web/` | React / TypeScript / Vite 管理工作台演示原型；本地虚构数据、三主题、双语；真实管理授权与业务接口另行接入 |
+| `web/` | React / TypeScript / Vite 管理工作台，三主题、双语；演示页面使用本地虚构数据，独立钱包操作员入口复用 Q 登录和服务端权限，不能用演示署名切换真实角色 |
 | `backend/` | Rust 2024 edition 模块化单体，Axum 0.8、Tokio 1、SQLx 0.8、PostgreSQL |
 | `backend/contracts/` | API 字段、权限、错误及机器可读 OpenAPI 合同 |
 | `backend/scripts/` | PostgreSQL、Rust API 启动与验收；这里的 Node 工具不是第二套业务后端 |
@@ -94,7 +94,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | `identity`（已实现） | 凭据、登录限流、会话签发与撤销；Argon2 密码、随机会话令牌只存摘要，默认七天过期 |
 | `profiles`（已实现） | 可编辑资料、主题与语言；不拥有身份权限或余额 |
 | `ledger`（已实现） | 账户、不可变分录、转账与幂等；唯一余额写入入口 |
-| `payments`（已部署，缺省配置仍关闭） | Qixiang CNY 收款、查询复核、双人审批与恢复任务；通过 `ledger::real_hkd` 入独立 HKD 账本。2026-11-03 部署并启用配置，报价和两渠道未支付收银台已验证；实际付款、审批、入账和清算未实账验收。见 [支付合同](backend/contracts/payments.md)与[部署记录](backend/deploy/PAYMENTS-2026-11-03.md) |
+| `payments`（原版本已部署，缺省配置仍关闭） | Qixiang CNY 收款、查询复核、双人审批与恢复任务；通过 `ledger::real_hkd` 入独立 HKD 账本。2026-11-05 源码新增版本化自动汇率、操作员读取、全额退款证据补正/冻结/冲正及对账；新增代码不等于已部署。2026-11-03 上线的报价和未支付收银台已验证，实付、实际两人审批和银行清算仍需外部验收。见[支付合同](backend/contracts/payments.md)、[操作合同](backend/contracts/payment-operations.md)与[部署记录](backend/deploy/PAYMENTS-2026-11-03.md) |
 
 目前 QDC 与银行插件 HKD 均为模拟资金、分表记账；100 个最小单位分别为 1.00 Q / HK$1.00，不可兑换真实资产。银行插件每个新模拟账户初始 HK$100,000，重复添加不重发；银行账本由 `ledger::bank_demo` 独占写入。见 [银行插件说明](mobile/docs/bank-plugins.md)。资金相关界面须清楚标为演示。保留账号、历史交易和本地数据库；界面重做、目录整理和修复依赖都不是清库理由。
 
@@ -202,7 +202,7 @@ Runner 使用项目已启用的实例 Runner，任务以 `docker` + `linux` 标�
 | 部署与数据 | `/opt/q/current` 指向发布目录；配置 `/etc/q/deploy.env`（root 0600）；数据 `/var/lib/q/postgres`；备份 `/var/backups/q` |
 | 定时任务 | `q-backup.timer` 每日备份，`q-health.timer` 每五分钟检查；外部告警、定时异地复制待运维配置 |
 
-操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。当前发布程序来自 GitLab #11941 的 Linux 发布制品，经人工运维安装；部署成功不代表 GitLab 部署作业运行。`64ff5b5` 和 `4af1ed7` 的历史验收不覆盖当前版本。支付汇率为运维快照，当前到期时间为 2026-11-06 22:56:38 北京时间，未部署自动刷新，届时新报价关闭。MCP 宿主接口、公开 origin 与 CIMD 元数据可用，`oauth_configured: true`；真实第三方 OAuth 和可灵业务仍需单独验收。TestFlight `0.1.0 (5)` 于 2026-11-04 获 Apple 上传接收，上传允许外部测试；公测组、处理/审核与公开下载状态仍待账号核实，真机安装未验收。Android 构建 5 的签名测试包与原生回归见[移动发布记录](mobile/docs/mobile-release-2026-11-04/README.md)。构建冻结后新合入的功能不自动成为已部署能力。
+操作步骤见 [部署说明](backend/deploy/README.md)，已验证结果及域名交接见 [部署状态](backend/deploy/STATUS.md)。当前发布程序来自 GitLab #11941 的 Linux 发布制品，经人工运维安装；部署成功不代表 GitLab 部署作业运行。`64ff5b5` 和 `4af1ed7` 的历史验收不覆盖当前版本。支付汇率于 2026-11-06 18:22 北京时间手动更新，当前到期时间为 2026-11-09 08:00 北京时间。自动刷新待发布，当前快照过期时关闭新报价。MCP 宿主接口、公开 origin 与 CIMD 元数据可用，`oauth_configured: true`；真实第三方 OAuth 和可灵业务仍需单独验收。TestFlight `0.1.0 (5)` 于 2026-11-04 获 Apple 上传接收，上传允许外部测试；公测组、处理/审核与公开下载状态仍待账号核实，真机安装未验收。Android 构建 5 的签名测试包与原生回归见[移动发布记录](mobile/docs/mobile-release-2026-11-04/README.md)。构建冻结后新合入的功能不自动成为已部署能力。
 
 - 登录使用用户指定的本地 SSH 私钥或已配置别名；私钥、密码、数据库凭据和供应商密钥不得写入本文件或提交。`ecs-user` 作为运维登录身份，业务进程使用独立受限身份。
 - 部署前先核对系统、资源、现有服务、端口和数据；保留已有业务和数据库，不重置主机、不覆盖未知目录。默认部署经过人工审核的 `main` 明确提交，记录版本、配置位置、服务状态与回退方法；开发分支的新能力不能自动算作已部署。

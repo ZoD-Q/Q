@@ -5,9 +5,9 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.includes('/prototype/') && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(`${specifier}.ts`, context);
   return next(specifier, context);
 } });
-const { amountMinor, money, decodeCapabilities, decodeQuote, decodeOrder, safeCheckout, PaymentError } = await import('./validation.ts');
+const { amountMinor, money, decodeCapabilities, decodeQuote, decodeOrder, decodeWallet, decodeLedger, safeCheckout, PaymentError } = await import('./validation.ts');
 const { createPaymentJournal } = await import('./journal-core.ts');
-const { createFundingController } = await import('./controller.ts');
+const { createFundingController, createPaymentDetailController } = await import('./controller.ts');
 const { createPaymentClient } = await import('./client.ts');
 test.after(() => resolver.deregister());
 const owner = '11111111-1111-4111-8111-111111111111';
@@ -54,6 +54,69 @@ test('strict quote/order validation requires correct currencies, integer math an
   assert.throws(() => decodeOrder(order({ checkout_url: 'https://api.payqixiang.cn.evil.invalid/' })));
   assert.equal(safeCheckout('https://api.payqixiang.cn/pay?id=x'), true);
   for (const url of ['http://api.payqixiang.cn/', 'javascript:alert(1)', 'https://user@api.payqixiang.cn/', 'https://api.payqixiang.cn:444/']) assert.equal(safeCheckout(url), false);
+});
+test('refund balances validate the reserved/available invariant while older servers remain readable', () => {
+  const old = { currency: 'HKD', balance_minor: 1000, updated_at: stamp };
+  assert.equal(decodeWallet(old).available_minor, undefined);
+  assert.equal(decodeWallet({ ...old, frozen_minor: 300, available_minor: 700 }).available_minor, 700);
+  for (const patch of [{ frozen_minor: 300 }, { frozen_minor: -1, available_minor: 1001 }, { frozen_minor: 300, available_minor: 701 }, { frozen_minor: 1100, available_minor: 0 }]) {
+    assert.throws(() => decodeWallet({ ...old, ...patch }), { code: 'INVALID_RESPONSE' });
+  }
+});
+test('refund metadata must be complete and ledger reversals carry an original refund reference', () => {
+  assert.equal(decodeOrder(order({ refund_id: key, refund_status: 'refunded', refunded_at: stamp, refund_version: 2 })).refund_status, 'refunded');
+  for (const patch of [{ refund_id: key }, { refund_id: key, refund_status: 'refunded', refunded_at: null }, { refund_id: null, refund_status: 'unknown', refunded_at: null }]) {
+    assert.throws(() => decodeOrder(order(patch)), { code: 'INVALID_RESPONSE' });
+  }
+  const entry = { transaction_id: key, payment_id: paymentId, amount_minor: -1000, balance_after_minor: 0, created_at: stamp };
+  const decoded = decodeLedger({ items: [{ ...entry, kind: 'refund_reversal', refund_id: quoteId }], next_cursor: null });
+  assert.equal(decoded.items[0].amount_minor, -1000);
+  assert.equal(decoded.items[0].refund_id, quoteId);
+  for (const patch of [{}, { kind: 'credit', refund_id: quoteId }, { kind: 'refund_reversal', refund_id: null }, { amount_minor: 0, kind: 'credit', refund_id: null }]) {
+    assert.throws(() => decodeLedger({ items: [{ ...entry, ...patch }], next_cursor: null }), { code: 'INVALID_RESPONSE' });
+  }
+});
+test('refunded intent A recovers without blocking checkout B or authorizing duplicate funding', async () => {
+  const refunded = order({ status: 'failed', error_code: 'refunded', terminal: true, evidence_version: 1, refund_id: quoteId, refund_status: 'refunded', refunded_at: stamp, refund_version: 2 });
+  const other = order({ payment_id: quoteId, client_request_id: owner, quote_id: owner, status: 'awaiting_payment' });
+  let creates = 0;
+  const f = fixture({ byKey: async () => refunded, active: async () => other, create: async () => { creates++; return other; } });
+  await f.journal.save(pending());
+  await f.controller.load();
+  assert.equal(await f.journal.read(), null);
+  assert.equal(f.controller.getSnapshot().order.payment_id, quoteId);
+  await f.controller.quote('100', 'wechat');
+  assert.equal(f.controller.getSnapshot().error, 'PAYMENT_OPERATION_PENDING');
+  assert.equal(creates, 0);
+  f.controller.dispose();
+});
+test('both readers refresh balances for new refund versions and fence old versions and sign-out', async () => {
+  for (const kind of ['funding', 'detail']) {
+    const f = fixture(); let current = true; let delayed = null;
+    const original = order({ status: 'credited', terminal: true, safe_to_start_new: true, credited_transaction_id: quoteId, evidence_version: 1, refund_id: null, refund_status: null, refunded_at: null, refund_version: null });
+    let response = original; const events = [];
+    const client = { ...f.client, active: async () => response, get: async () => delayed ? delayed.promise : response };
+    const deps = { client, ownerId: owner, isCurrent: () => current, onCredited: () => events.push('credit'), onRefundChanged: value => events.push(value.refund_status) };
+    const reader = kind === 'funding'
+      ? createFundingController({ ...deps, journal: f.journal, identity: { ownerId: owner, generation: 1 }, newId: () => key, now: () => clock })
+      : createPaymentDetailController({ ...deps, canDetach: () => false });
+    if (kind === 'funding') await reader.load();
+    else { reader.setActive(true); reader.select(paymentId); await new Promise(resolve => setImmediate(resolve)); }
+    assert.deepEqual(events, ['credit']);
+    response = { ...original, refund_id: key, refund_status: 'requested', refund_version: 1 };
+    await reader.refresh();
+    response = { ...response, refund_status: 'refunded', refund_version: 2, refunded_at: stamp };
+    await reader.refresh(); await reader.refresh();
+    assert.deepEqual(events, ['credit', 'requested', 'refunded']);
+    response = { ...response, refund_status: 'requested', refund_version: 1, refunded_at: null };
+    await reader.refresh();
+    assert.equal(reader.getSnapshot().error, 'PAYMENT_RESPONSE_MISMATCH');
+    assert.equal(reader.getSnapshot().order.refund_status, 'refunded');
+    delayed = deferred(); const late = reader.refresh(); current = false;
+    delayed.resolve({ ...response, refund_status: 'unknown', refund_version: 3 }); await late;
+    assert.deepEqual(events, ['credit', 'requested', 'refunded']);
+    reader.dispose(); f.controller.dispose();
+  }
 });
 test('journal strips token-like fields, scopes by owner and origin, and verifies writes before submission', async () => {
   const f = fixture(); await f.journal.save({ ...pending(), token: 'NEVER_STORE', request: { ...pending().request, Authorization: 'secret' } });

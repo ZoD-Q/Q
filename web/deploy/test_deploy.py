@@ -15,6 +15,15 @@ import deploy_tools as deploy
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_payment_connect_policy_is_confined_to_exact_wallet_documents(self):
+        https = deploy.snippet('https')
+        self.assertIn('location = /q-admin/wallet-payments {', https)
+        self.assertIn('location ^~ /q-admin/wallet-payments/ {', https)
+        self.assertNotIn('location ^~ /q-admin/wallet-payments {', https)
+        self.assertEqual(https.count("connect-src 'self';"), 2)
+        self.assertIn("connect-src 'none'", deploy.security_headers('no-cache'))
+        self.assertNotIn("connect-src 'self'", deploy.snippet('http'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

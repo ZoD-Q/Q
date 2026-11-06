@@ -1,6 +1,6 @@
 use super::{
     config::quote_math,
-    jobs,
+    fx, jobs, operator,
     store::{self, ORDER_SELECT, Order, Page, Quote},
 };
 use crate::{
@@ -45,11 +45,13 @@ struct ChannelCapability {
 async fn configured_operators(
     state: &AppState,
     runtime: &super::PaymentRuntime,
+    payer: Uuid,
 ) -> ApiResult<bool> {
     let ids: Vec<Uuid> = runtime
         .policy
         .makers
         .union(&runtime.policy.checkers)
+        .filter(|id| **id != payer)
         .copied()
         .collect();
     let active: Vec<Uuid> =
@@ -57,37 +59,75 @@ async fn configured_operators(
             .bind(ids)
             .fetch_all(&state.pool)
             .await?;
-    Ok(runtime.policy.makers.iter().any(|m| {
-        active.contains(m)
+    Ok(independent_reviewers(runtime, payer, |id| {
+        active.contains(&id)
+    }))
+}
+fn independent_reviewers(
+    runtime: &super::PaymentRuntime,
+    payer: Uuid,
+    active: impl Fn(Uuid) -> bool,
+) -> bool {
+    runtime.policy.makers.iter().any(|m| {
+        *m != payer
+            && active(*m)
             && runtime
                 .policy
                 .checkers
                 .iter()
-                .any(|c| c != m && active.contains(c))
-    }))
+                .any(|c| *c != payer && c != m && active(*c))
+    })
 }
-async fn ready(state: &AppState) -> ApiResult<&super::PaymentRuntime> {
-    let r = store::runtime(state)?;
-    if !r.policy.fresh(Utc::now()) || !configured_operators(state, r).await? {
-        return Err(store::unavailable());
+fn funding_identity_ids(runtime: Option<&super::PaymentRuntime>, payer: Uuid) -> Vec<Uuid> {
+    let mut ids = vec![payer];
+    if let Some(runtime) = runtime {
+        ids.extend(
+            runtime
+                .policy
+                .makers
+                .union(&runtime.policy.checkers)
+                .copied(),
+        );
     }
-    Ok(r)
+    ids
+}
+fn reviewers_unavailable() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "PAYMENT_REVIEWERS_UNAVAILABLE",
+        "Payments require two independent active reviewers other than the payer.",
+    )
+}
+async fn require_funding_reviewers(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    runtime: &super::PaymentRuntime,
+    identities: &[(Uuid, String)],
+    payer: Uuid,
+) -> ApiResult<()> {
+    if !independent_reviewers(runtime, payer, |id| store::active(identities, id))
+        || !operator::funding_policy_is_current(tx, runtime).await?
+    {
+        return Err(reviewers_unavailable());
+    }
+    Ok(())
 }
 pub async fn capabilities(
     State(state): State<AppState>,
-    _auth: Authenticated,
+    auth: Authenticated,
 ) -> ApiResult<Json<Capabilities>> {
     let runtime = state.payments.as_deref();
-    let enabled = if let Some(r) = runtime {
-        r.policy.fresh(Utc::now()) && configured_operators(&state, r).await?
-    } else {
-        false
-    };
-    let reason = if enabled {
-        None
+    let reason = if let Some(r) = runtime {
+        if !configured_operators(&state, r, auth.user_id).await? {
+            Some("PAYMENT_REVIEWERS_UNAVAILABLE")
+        } else if !fx::quote_available(&state.pool, r).await? {
+            Some("PAYMENTS_NOT_READY")
+        } else {
+            None
+        }
     } else {
         Some("PAYMENTS_NOT_READY")
     };
+    let enabled = reason.is_none();
     Ok(Json(Capabilities {
         enabled,
         unavailable_reason: reason,
@@ -132,7 +172,7 @@ pub async fn quote(
     ApiJson(request): ApiJson<QuoteRequest>,
 ) -> ApiResult<Json<Quote>> {
     state.limit_auth(format!("payment-quote:{}", auth.user_id), 30)?;
-    let r = ready(&state).await?;
+    let r = store::runtime(&state)?;
     let p = &r.policy;
     if !matches!(request.channel.as_str(), "wechat" | "alipay")
         || !(p.min_credit_amount_minor_hkd..=p.max_credit_amount_minor_hkd)
@@ -142,24 +182,27 @@ pub async fn quote(
             "Choose an available channel and amount within the allowed HKD range.",
         ));
     }
+    let mut tx = state.pool.begin().await?;
+    let ids = funding_identity_ids(Some(r), auth.user_id);
+    let identities = store::lock_identities(&mut tx, &ids).await?;
+    if !store::active(&identities, auth.user_id) {
+        return Err(ApiError::unauthorized());
+    }
+    require_funding_reviewers(&mut tx, r, &identities, auth.user_id).await?;
+    let rate = fx::rate_for_quote(&mut tx, r).await?;
     let (base, fee, pay) = quote_math(
         request.credit_amount_minor_hkd,
-        &p.rate.rate_cny_per_100_hkd,
+        &rate.rate_cny_per_100_hkd,
         p.fee_basis_points,
     )
     .map_err(|_| ApiError::validation("The amount cannot be quoted."))?;
     let expires = std::cmp::min(
         Utc::now() + Duration::seconds(p.quote_ttl_seconds),
-        p.rate.rate_at + Duration::seconds(p.rate_max_age_seconds),
+        p.rate_expires_at(&rate),
     );
-    let mut tx = state.pool.begin().await?;
-    let identities = store::lock_identities(&mut tx, &[auth.user_id]).await?;
-    if !store::active(&identities, auth.user_id) {
-        return Err(ApiError::unauthorized());
-    }
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO payment_quotes(id,user_id,channel,credit_minor,base_minor,fee_minor,pay_minor,fee_bps,rate_snapshot,config_fingerprint,expires_at,merchant_id,credential_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
- .bind(id).bind(auth.user_id).bind(request.channel).bind(request.credit_amount_minor_hkd).bind(base).bind(fee).bind(pay).bind(p.fee_basis_points).bind(serde_json::to_value(&p.rate).map_err(|_|ApiError::internal())?).bind(&r.fingerprint).bind(expires).bind(&r.merchant_id).bind(&r.credential_version).execute(&mut *tx).await?;
+ .bind(id).bind(auth.user_id).bind(request.channel).bind(request.credit_amount_minor_hkd).bind(base).bind(fee).bind(pay).bind(p.fee_basis_points).bind(serde_json::to_value(&rate).map_err(|_|ApiError::internal())?).bind(&r.fingerprint).bind(expires).bind(&r.merchant_id).bind(&r.credential_version).execute(&mut *tx).await?;
     let quote: Quote = sqlx::query_as("SELECT * FROM payment_quotes WHERE id=$1")
         .bind(id)
         .fetch_one(&mut *tx)
@@ -173,17 +216,27 @@ pub struct CreateRequest {
     pub quote_id: Uuid,
     pub client_request_id: Uuid,
 }
+#[derive(sqlx::FromRow)]
+struct QuoteAuthorizationRow {
+    expires_at: chrono::DateTime<Utc>,
+    config_fingerprint: Vec<u8>,
+    merchant_id: String,
+    credential_version: String,
+    rate_snapshot: serde_json::Value,
+}
 pub async fn create(
     State(state): State<AppState>,
     auth: Authenticated,
     ApiJson(request): ApiJson<CreateRequest>,
 ) -> ApiResult<Json<store::OrderView>> {
     state.limit_auth(format!("payment-create:{}", auth.user_id), 20)?;
-    // Readiness may query identities; do it before reserving a pooled transaction connection.
-    // Original-key recovery still takes precedence if configuration is temporarily unavailable.
-    let readiness = ready(&state).await;
+    // Lock all candidate identities in the common UUID order. A suspension cannot slip
+    // between the eligibility check and the new order/work-item commit. Original-key
+    // recovery and the expired never-created receipt do not depend on current policy.
+    let runtime = store::runtime(&state);
+    let ids = funding_identity_ids(runtime.as_ref().ok().copied(), auth.user_id);
     let mut tx = state.pool.begin().await?;
-    let identities = store::lock_identities(&mut tx, &[auth.user_id]).await?;
+    let identities = store::lock_identities(&mut tx, &ids).await?;
     if !store::active(&identities, auth.user_id) {
         return Err(ApiError::unauthorized());
     }
@@ -205,14 +258,21 @@ pub async fn create(
         tx.commit().await?;
         return Ok(Json(order.view(slot)?));
     }
-    let quote: Option<(chrono::DateTime<Utc>, Vec<u8>,String,String)> = sqlx::query_as(
-        "SELECT expires_at,config_fingerprint,merchant_id,credential_version FROM payment_quotes WHERE id=$1 AND user_id=$2 FOR SHARE",
+    let quote: Option<QuoteAuthorizationRow> = sqlx::query_as(
+        "SELECT expires_at,config_fingerprint,merchant_id,credential_version,rate_snapshot FROM payment_quotes WHERE id=$1 AND user_id=$2 FOR SHARE",
     )
     .bind(request.quote_id)
     .bind(auth.user_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((expires, fingerprint, merchant_id, credential_version)) = quote else {
+    let Some(QuoteAuthorizationRow {
+        expires_at: expires,
+        config_fingerprint: fingerprint,
+        merchant_id,
+        credential_version,
+        rate_snapshot,
+    }) = quote
+    else {
         return Err(store::not_found());
     };
     // The quote is single-use, including authoritative no-create receipts. Another key
@@ -238,12 +298,22 @@ pub async fn create(
         tx.commit().await?;
         return Ok(Json(order.view(slot)?));
     }
-    let r = readiness?;
-    if fingerprint != r.fingerprint {
+    let r = runtime?;
+    require_funding_reviewers(&mut tx, r, &identities, auth.user_id).await?;
+    let frozen_rate: super::RateSnapshot =
+        serde_json::from_value(rate_snapshot).map_err(|_| ApiError::internal())?;
+    if merchant_id != r.merchant_id
+        || credential_version != r.credential_version
+        || r.provider(&credential_version, &merchant_id).is_none()
+        || !r.accepts_quote_fingerprint(&fingerprint, &frozen_rate)
+    {
         return Err(ApiError::conflict(
             "PAYMENT_QUOTE_CHANGED",
             "The server policy changed. Request a new quote.",
         ));
+    }
+    if !fx::creation_allowed(&mut tx, r).await? || !r.policy.rate_fresh(&frozen_rate, Utc::now()) {
+        return Err(store::unavailable());
     }
     if store::slot(&mut tx, auth.user_id).await?.is_some() {
         return Err(ApiError::conflict(
@@ -264,6 +334,37 @@ pub async fn create(
     let order = store::lock_order(&mut tx, id).await?;
     tx.commit().await?;
     Ok(Json(order.view(Some(id))?))
+}
+pub async fn fx_status(
+    State(state): State<AppState>,
+    auth: Authenticated,
+) -> ApiResult<Json<fx::FxStatus>> {
+    let r = store::runtime(&state)?;
+    let mut tx = state.pool.begin().await?;
+    let identities = store::lock_identities(&mut tx, &[auth.user_id]).await?;
+    if !store::active(&identities, auth.user_id) {
+        return Err(ApiError::unauthorized());
+    }
+    operator::authorize(&mut tx, r, auth.user_id, None).await?;
+    let result = fx::status(&mut tx, r).await?;
+    tx.commit().await?;
+    Ok(Json(result))
+}
+pub async fn fx_activate(
+    State(state): State<AppState>,
+    auth: Authenticated,
+    ApiJson(request): ApiJson<fx::ActivationRequest>,
+) -> ApiResult<Json<fx::Activation>> {
+    let r = store::runtime(&state)?;
+    let mut tx = state.pool.begin().await?;
+    let identities = store::lock_identities(&mut tx, &[auth.user_id]).await?;
+    if !store::active(&identities, auth.user_id) {
+        return Err(ApiError::unauthorized());
+    }
+    operator::authorize(&mut tx, r, auth.user_id, None).await?;
+    let result = fx::activate(&mut tx, r, auth.user_id, request).await?;
+    tx.commit().await?;
+    Ok(Json(result))
 }
 pub async fn detail(
     State(state): State<AppState>,

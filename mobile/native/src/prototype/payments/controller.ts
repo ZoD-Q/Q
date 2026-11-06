@@ -1,21 +1,28 @@
 import type { PaymentClient } from './client';
 import type { PaymentJournal } from './journal-core';
 import type { FundingState, PaymentChannel, PaymentIdentity, PaymentOrder, PendingPayment } from './types';
-import { amountMinor, decodeOrder, PaymentError, safeCheckout, trustedUnsubmittedProof } from './validation';
+import { amountMinor, decodeOrder, PaymentError, safeCheckout, trustedRefundedProof, trustedUnsubmittedProof } from './validation';
 
 const frozenFields = ['quote_id', 'account_id', 'channel', 'credit_currency', 'pay_currency', 'credit_amount_minor_hkd', 'base_amount_minor_cny', 'fee_minor_cny', 'pay_amount_minor_cny', 'fee_basis_points', 'rate_cny_per_100_hkd', 'rate_source', 'rate_source_url', 'rate_source_date', 'rate_at', 'rate_fetched_at', 'rate_evidence_sha256', 'expires_at', 'rounding_policy'] as const;
+const refundPending = (order: PaymentOrder | null) => !!order?.refund_status && order.refund_status !== 'refunded';
+const refundRevision = (order: PaymentOrder) => `${order.refund_id ?? ''}:${order.refund_version ?? ''}:${order.refund_status ?? ''}`;
+const refundRegressed = (previous: PaymentOrder, next: PaymentOrder) =>
+  (!!previous.refund_id && previous.refund_id !== next.refund_id) ||
+  (previous.refund_version != null && (next.refund_version == null || next.refund_version < previous.refund_version)) ||
+  (previous.refund_status === 'refunded' && next.refund_status !== 'refunded');
 
 export const initialFundingState = (): FundingState => ({ phase: 'loading', capabilities: null, quote: null, order: null, pending: null, busy: false, error: '', retryAt: null, serverOffset: 0, orders: { view: 'pending', items: [], cursor: null, busy: false, error: '' } });
 export function createFundingController(deps: {
   client: PaymentClient; journal: PaymentJournal; identity: PaymentIdentity;
   isCurrent(identity: PaymentIdentity): boolean; newId(): string;
-  onCredited?(order: PaymentOrder): void | Promise<void>; now?: () => number;
+  onCredited?(order: PaymentOrder): void | Promise<void>; onRefundChanged?(order: PaymentOrder): void | Promise<void>; now?: () => number;
 }) {
   let state = initialFundingState(); let disposed = false; let active = false; let checkoutFresh = false; let request: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null; let polls = 0; let windowStart = 0; let historyVersion = 0;
   let activeBlock: PaymentOrder | null = null;
   let historyRequest: AbortController | null = null;
   const now = deps.now ?? Date.now; const credited = new Set<string>(); const listeners = new Set<() => void>();
+  const refunds = new Map<string, string>();
   const current = () => !disposed && deps.isCurrent(deps.identity);
   const check = () => { if (!current() || request?.signal.aborted) throw new PaymentError('PAYMENT_IDENTITY_CHANGED'); };
   const emit = (patch: Partial<FundingState>) => { if (current()) { state = { ...state, ...patch }; for (const f of listeners) f(); } };
@@ -32,15 +39,17 @@ export function createFundingController(deps: {
     if (state.pending && order.client_request_id === state.pending.request.client_request_id && (order.quote_id !== state.pending.request.quote_id || order.credit_amount_minor_hkd !== state.pending.creditAmount || order.channel !== state.pending.channel)) fail('PAYMENT_RESPONSE_MISMATCH');
     const frozen = state.order?.payment_id === order.payment_id ? state.order : state.quote?.quote_id === order.quote_id ? state.quote : null;
     if (frozen && frozenFields.some(field => frozen[field] !== order[field])) fail('PAYMENT_RESPONSE_MISMATCH');
-    if (state.order?.payment_id === order.payment_id && (order.evidence_version < state.order.evidence_version || (state.order.status === 'credited' && order.status !== 'credited'))) fail('PAYMENT_RESPONSE_MISMATCH');
+    if (state.order?.payment_id === order.payment_id && (order.evidence_version < state.order.evidence_version || (state.order.status === 'credited' && order.status !== 'credited') || refundRegressed(state.order, order))) fail('PAYMENT_RESPONSE_MISMATCH');
+    const previousRefund = refunds.get(order.payment_id); const previousCredit = credited.has(order.payment_id);
+    refunds.set(order.payment_id, refundRevision(order));
     if (!order.safe_to_start_new) activeBlock = order;
     else if (activeBlock?.payment_id === order.payment_id) activeBlock = null;
     emit({ order, phase: 'result', serverOffset: Date.parse(order.server_time) - now() });
-    const unsubmitted = trustedUnsubmittedProof(order);
-    if ((order.safe_to_start_new || unsubmitted) && state.pending?.request.client_request_id === order.client_request_id) {
+    const resolvedIntent = trustedUnsubmittedProof(order) || trustedRefundedProof(order);
+    if ((order.safe_to_start_new || resolvedIntent) && state.pending?.request.client_request_id === order.client_request_id) {
       await deps.journal.clear(order.client_request_id); check(); emit({ pending: null });
     }
-    if (unsubmitted && !order.safe_to_start_new) {
+    if (resolvedIntent && !order.safe_to_start_new) {
       const activeOrder = await deps.client.active(request?.signal); check();
       if (activeOrder) {
         if (activeOrder.payment_id === order.payment_id || activeOrder.account_id !== deps.identity.ownerId) fail('PAYMENT_RESPONSE_MISMATCH');
@@ -54,11 +63,15 @@ export function createFundingController(deps: {
       credited.add(order.payment_id); check();
       try { await deps.onCredited?.(order); } catch { /* Account refresh failure must not reverse confirmed credit. */ }
     }
+    if (order.refund_status && previousRefund !== refundRevision(order) && (previousRefund !== undefined || previousCredit || order.status !== 'credited')) {
+      check();
+      try { await deps.onRefundChanged?.(order); } catch { /* A balance-read failure never rolls back refund evidence. */ }
+    }
     checkoutFresh = active && current() && !request?.signal.aborted;
     return order;
   };
   const schedule = () => {
-    stopTimer(); if (!active || !current() || state.busy || (!state.pending && (!state.order || state.order.terminal))) return;
+    stopTimer(); if (!active || !current() || state.busy || (!state.pending && (!state.order || (state.order.terminal && !refundPending(state.order))))) return;
     if (now() - windowStart > 20 * 60_000) { windowStart = now(); polls = 0; }
     if (polls >= 20 || (state.error === 'UNAUTHORIZED')) return;
     const delay = Math.max(5000, Math.min(60000, (state.order?.poll_after_seconds ?? 5) * 1000));
@@ -176,12 +189,13 @@ export type FundingController = ReturnType<typeof createFundingController>;
 /** Independent selected-order reads never replace the primary funding/recovery state. */
 export function createPaymentDetailController(deps: {
   client: PaymentClient; ownerId: string; isCurrent(): boolean; canDetach(): boolean;
-  onChanged?(): void | Promise<void>; onCredited?(order: PaymentOrder): void | Promise<void>;
+  onChanged?(): void | Promise<void>; onCredited?(order: PaymentOrder): void | Promise<void>; onRefundChanged?(order: PaymentOrder): void | Promise<void>;
 }) {
   let state: { paymentId: string | null; order: PaymentOrder | null; busy: boolean; error: string; serverOffset: number } = { paymentId: null, order: null, busy: false, error: '', serverOffset: 0 };
   let active = false; let disposed = false; let checkoutFresh = false; let request: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null; let polls = 0; let retryAt = 0;
   const listeners = new Set<() => void>(); const credited = new Set<string>();
+  const refunds = new Map<string, string>();
   const current = () => !disposed && deps.isCurrent();
   const emit = (patch: Partial<typeof state>) => { if (current()) { state = { ...state, ...patch }; for (const listener of listeners) listener(); } };
   const stop = () => { if (timer) clearTimeout(timer); timer = null; };
@@ -193,15 +207,21 @@ export function createPaymentDetailController(deps: {
   };
   const schedule = () => {
     stop();
-    if (!current() || !active || state.busy || !state.paymentId || state.order?.terminal || state.order?.status === 'review_required' || state.error === 'UNAUTHORIZED' || polls >= 20) return;
+    if (!current() || !active || state.busy || !state.paymentId || (state.order?.terminal && !refundPending(state.order)) || (state.order?.status === 'review_required' && !refundPending(state.order)) || state.error === 'UNAUTHORIZED' || polls >= 20) return;
     const delay = Math.max(5000, Math.min(60000, (state.order?.poll_after_seconds ?? 10) * 1000));
     timer = setTimeout(() => { polls++; void refresh(); }, Math.max(delay, retryAt - Date.now()));
   };
   const accept = async (value: PaymentOrder, id: string) => {
     const order = decodeOrder(value); const previous = state.order;
-    if (order.payment_id !== id || order.account_id !== deps.ownerId || (previous && (frozenFields.some(field => previous[field] !== order[field]) || previous.client_request_id !== order.client_request_id || order.evidence_version < previous.evidence_version || (previous.status === 'credited' && order.status !== 'credited')))) throw new PaymentError('PAYMENT_RESPONSE_MISMATCH');
+    if (order.payment_id !== id || order.account_id !== deps.ownerId || (previous && (frozenFields.some(field => previous[field] !== order[field]) || previous.client_request_id !== order.client_request_id || order.evidence_version < previous.evidence_version || (previous.status === 'credited' && order.status !== 'credited') || refundRegressed(previous, order)))) throw new PaymentError('PAYMENT_RESPONSE_MISMATCH');
+    const previousRefund = refunds.get(id); const previousCredit = credited.has(id);
+    refunds.set(id, refundRevision(order));
     emit({ order, error: '', serverOffset: Date.parse(order.server_time) - Date.now() }); checkoutFresh = true;
     if (order.status === 'credited' && !credited.has(id)) { credited.add(id); try { await deps.onCredited?.(order); } catch { /* Balance refresh cannot reverse confirmed credit. */ } }
+    if (!current() || !active || state.paymentId !== id || request?.signal.aborted) return;
+    if (order.refund_status && previousRefund !== refundRevision(order) && (previousRefund !== undefined || previousCredit || order.status !== 'credited')) {
+      try { await deps.onRefundChanged?.(order); } catch { /* Keep the acknowledged refund if its balance read failed. */ }
+    }
   };
   const run = async (job: (id: string, signal: AbortSignal) => Promise<PaymentOrder>, changed = false) => {
     const id = state.paymentId;
