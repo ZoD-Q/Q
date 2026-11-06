@@ -90,7 +90,7 @@ jobs:
       - name: Verify artifact revision and checksums
         working-directory: web
         run: |
-          node -e "const v=JSON.parse(require('fs').readFileSync('dist/version.json')); if(v.sha!==process.env.CI_COMMIT_SHA || v.mode!=='demo' || v.sourceDirty) process.exit(1)"
+          node -e "const v=JSON.parse(require('fs').readFileSync('dist/version.json')); if(v.sha!==process.env.CI_COMMIT_SHA || v.mode!=='admin' || v.sourceDirty) process.exit(1)"
           mkdir -p .local
           (cd dist && find . -type f -print0 | sort -z | xargs -0 sha256sum) > .local/SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

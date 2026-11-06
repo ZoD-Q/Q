@@ -20,7 +20,7 @@ function activationReference(value: unknown): ActivationReference | null {
   if (typeof v.candidate_id !== 'string' || !uuid.test(v.candidate_id)
     || typeof v.evidence_sha256 !== 'string' || !hash.test(v.evidence_sha256)
     || typeof v.expected_generation !== 'number' || !Number.isSafeInteger(v.expected_generation)
-    || v.expected_generation < 1) return null;
+    || v.expected_generation < 1 || v.expected_generation >= Number.MAX_SAFE_INTEGER) return null;
   return { candidate_id: v.candidate_id, evidence_sha256: v.evidence_sha256, expected_generation: v.expected_generation };
 }
 
@@ -28,9 +28,9 @@ function parseReceipt(value: unknown, expected: ActivationReference): Receipt {
   if (!value || typeof value !== 'object') throw Error('INVALID_RESPONSE');
   const v = value as Record<string, unknown>;
   if (typeof v.activation_id !== 'string' || !uuid.test(v.activation_id)
-    || v.snapshot_id !== expected.candidate_id || v.generation !== expected.expected_generation
+    || v.snapshot_id !== expected.candidate_id || v.generation !== expected.expected_generation + 1
     || typeof v.activated_at !== 'string' || !Number.isFinite(Date.parse(v.activated_at))) throw Error('INVALID_RESPONSE');
-  return { activation_id: v.activation_id, snapshot_id: expected.candidate_id, generation: expected.expected_generation, activated_at: v.activated_at };
+  return { activation_id: v.activation_id, snapshot_id: expected.candidate_id, generation: expected.expected_generation + 1, activated_at: v.activated_at };
 }
 
 function Facts({ rows }: { rows: [string, ReactNode][] }) {
@@ -49,6 +49,7 @@ function FxPanelSession() {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(true);
   const [currentVerified, setCurrentVerified] = useState(false);
+  const [receivedAt, setReceivedAt] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -76,7 +77,7 @@ function FxPanelSession() {
     inFlight.current = true;
     void api.get(statusPath, parseFxStatus).then((next) => {
       if (!mounted.current || id !== operation.current) return;
-      setStatus(next); setCurrentVerified(true); setError(null);
+      setStatus(next); setCurrentVerified(true); setReceivedAt(new Date().toISOString()); setError(null);
     }).catch((cause: unknown) => {
       if (mounted.current && id === operation.current) { setError(cause); setCurrentVerified(false); }
     }).finally(() => {
@@ -93,11 +94,12 @@ function FxPanelSession() {
     try {
       const next = reconcile ? await api.recover(pendingKey, parseFxStatus) : await api.get(statusPath, parseFxStatus);
       if (!mounted.current || id !== operation.current) return;
-      setStatus(next); setCurrentVerified(true);
+      setStatus(next); setCurrentVerified(true); setReceivedAt(new Date().toISOString());
       if (reconcile) {
         // A matching live snapshot resolves the desired state, not who activated it.
-        // A changed generation or a missing candidate never proves non-execution.
-        const matches = original !== null && next.generation === original.expected_generation
+        // Rust increments the reviewed generation once on activation. Later generations
+        // or a missing candidate never prove this activation's outcome.
+        const matches = original !== null && next.generation === original.expected_generation + 1
           && next.current?.snapshot_id === original.candidate_id
           && next.current.evidence_sha256 === original.evidence_sha256;
         if (matches) await api.clearPending(pendingKey);
@@ -132,7 +134,7 @@ function FxPanelSession() {
       setReceipt(result); setReason(''); setPrepared(null);
       // Read the new state after a definitive receipt; never refresh the provider.
       const next = await api.get(statusPath, parseFxStatus);
-      if (mounted.current && id === operation.current) { setStatus(next); setCurrentVerified(true); }
+      if (mounted.current && id === operation.current) { setStatus(next); setCurrentVerified(true); setReceivedAt(new Date().toISOString()); }
     } catch (cause) {
       if (mounted.current && id === operation.current) { setPrepared(null); setError(cause); }
     } finally {
@@ -144,6 +146,7 @@ function FxPanelSession() {
   return <section className="panel full-detail" aria-label={t('汇率状态', 'FX status')} aria-busy={busy}>
     <div className="panel-heading"><div><h2>{t('参考汇率与证据', 'Reference rate and evidence')}</h2><p>{t('所显示参考价仅用于报价计算，来源核验状态见下方证据；不是可成交汇率，也不表示兑换或清算已发生。', 'Displayed reference rates support quoting; source verification is shown with the evidence below. They are not executable prices or proof of currency conversion or settlement.')}</p></div><button className="button secondary" disabled={busy} onClick={() => void refresh(Boolean(pending))}>{busy ? t('查询中…', 'Reading…') : pending ? t('查询待确认激活', 'Reconcile pending activation') : t('查询当前状态', 'Read current status')}</button></div>
     <p className="muted">{t('本页只读取服务端已保存状态，不触发供应商刷新。所有时间按服务端返回展示；剩余时间不会伪装为实时倒计时。', 'This page reads saved server state and does not refresh the provider. Times come from the server; remaining time is a snapshot, not a live countdown.')}</p>
+    <p className="muted">{t('范围：当前服务保存的参考汇率、候选与诊断。','Scope: reference rates, candidates and diagnostics saved by this service.')}{receivedAt&&<> · {t('浏览器最近接收时间','Last received by this browser')}: <time dateTime={receivedAt}>{receivedAt}</time></>}</p>
     {error !== null && <p role="alert" className="pay-error">{errorMessage(error, t)}</p>}
     {pending && <div role="status" className="impact"><div><strong>{t('激活结果待确认', 'Activation outcome unknown')}</strong><p>{t('原候选编号、证据摘要和策略版本已保留。先查询当前状态；不重新提交激活，也不因候选消失就推断失败。', 'The original candidate, evidence hash, and generation are retained. Query the state first; do not resubmit or infer failure from a missing candidate.')}</p><code>{activationReference(pending.body)?.candidate_id ?? missing}</code></div></div>}
     {recovery && <p role="status">{recovery === 'matched' ? t('当前生效快照、证据摘要与策略版本匹配原候选。已核实目标状态；这不替代具体操作者的激活回执。', 'The active snapshot, evidence hash, and generation match the original candidate. The desired state is verified; this does not replace an actor-specific activation receipt.') : t('当前状态仍不能确认原激活结果。原引用继续保留，请由运维核对审计记录，勿重复激活。', 'The original outcome is still unconfirmed. Its references remain retained; have operations review the audit record without repeating activation.')}</p>}

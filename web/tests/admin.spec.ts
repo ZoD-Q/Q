@@ -1,396 +1,300 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { pages } from '../src/catalog'
+import { expect, test, type Page } from '@playwright/test';
+import { readFileSync, readdirSync } from 'node:fs';
+import type { PaymentAuditEvent } from '../src/payments/audit-data';
 
-const unexpectedRequests = new WeakMap<Page, string[]>()
-test.beforeEach(async ({ page, baseURL }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:4173/q-admin/').origin
-  const unexpected: string[] = []
-  unexpectedRequests.set(page, unexpected)
-  page.on('websocket', (socket) => unexpected.push(`WebSocket ${socket.url()}`))
-  page.on('request', (request) => {
-    const url = new URL(request.url())
-    const staticResource = request.resourceType() === 'document' || /\.(?:js|css|png|webp|svg|ico|woff2?|json)$/.test(url.pathname)
-    const businessTransport = ['fetch', 'xhr', 'websocket', 'eventsource'].includes(request.resourceType())
-    if (url.origin !== origin || request.method() !== 'GET' || businessTransport || !staticResource || !url.pathname.startsWith('/q-admin/') || /\/q-admin\/(?:api|v1|graphql)(?:\/|$)/.test(url.pathname)) unexpected.push(`${request.method()} ${request.resourceType()} ${request.url()}`)
-  })
-})
-test.afterEach(async ({ page }) => {
-  expect(unexpectedRequests.get(page) ?? [], 'All UI tests must stay within same-site static resources').toEqual([])
-})
-
-async function detail(page: Page, route: string, id: string): Promise<Locator> {
-  await page.goto(`${route}?item=${id}`)
-  const drawer = page.getByRole('dialog', { name: '记录详情', exact: true })
-  await expect(drawer).toBeVisible()
-  return drawer.getByRole('article')
+const apiOrigin = 'http://127.0.0.1:18789';
+const maker = '22222222-2222-4222-8222-222222222222';
+const checker = '33333333-3333-4333-8333-333333333333';
+const payer = '11111111-1111-4111-8111-111111111111';
+const payment = '44444444-4444-4444-8444-444444444444';
+const batch = '55555555-5555-4555-8555-555555555555';
+const auditIds = ['66666666-6666-4666-8666-666666666661', '66666666-6666-4666-8666-666666666662', '66666666-6666-4666-8666-666666666663'];
+const at = '2026-11-06T12:00:00.000Z';
+const cursor = `${at}|${auditIds[1]}`;
+const pages = [
+  ['orders', '支付审核与退款'], ['settlements', '结算与储备凭证'], ['fx', '汇率状态'], ['audit', '支付操作记录'],
+] as const;
+const settlement = {
+  settlement_id: batch, client_request_id: '77777777-7777-4777-8777-777777777777', kind: 'order_reconciliation', source: 'Controlled server evidence', currency: 'CNY',
+  status: 'awaiting_verification', mapping_sha256: 'a'.repeat(64), evidence_sha256: 'b'.repeat(64), source_document_media_type: 'application/pdf',
+  bank_reference: null, bank_amount_minor: null, check_version: 1, record_count: 1, matched_count: 1, differences: [],
+  maker_id: maker, checker_id: null, created_at: at, verified_at: null, source_validation: 'operator_supplied',
+};
+function auditEvent(id: string, actor: string, action = 'credit_proposed', target: string | null = payment): PaymentAuditEvent {
+  return { audit_id: id, actor_id: actor, payment_id: target, action, created_at: at, details: { evidence_version: 1 } };
 }
 
-async function action(record: Locator, label: string, options: { outcome?: 'success' | 'failure' | 'unknown'; value?: string; reason?: string } = {}): Promise<void> {
-  await record.getByRole('button', { name: label, exact: true }).click()
-  if (options.value !== undefined) await record.getByLabel('新配置值', { exact: true }).fill(options.value)
-  if (options.outcome) await record.getByRole('combobox', { name: '模拟返回结果', exact: true }).selectOption(options.outcome)
-  await record.getByRole('textbox', { name: /^处理原因/ }).fill(options.reason ?? '自动验收：使用虚构记录验证操作与影响范围。')
-  await record.getByRole('button', { name: '确认演示操作', exact: true }).click()
-  await expect(record.getByRole(options.outcome === 'failure' ? 'alert' : 'status')).toBeVisible()
-  await record.getByRole('button', { name: '返回详情', exact: true }).click()
-}
-
-async function expectStatus(record: Locator, text: string): Promise<void> {
-  await expect(record.locator('.detail-title').getByText(text, { exact: true })).toBeVisible()
-}
-
-test(`all ${pages.length} catalog routes open with their correct heading and no page errors`, async ({ page }) => {
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  for (const definition of pages) {
-    await page.goto(definition.id === 'dashboard' ? './' : definition.id)
-    await expect(page.getByRole('heading', { level: 1, name: definition.title.zh, exact: true })).toBeVisible()
-    await expect(page.getByText('演示原型', { exact: true })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '没有这个页面', exact: true })).toHaveCount(0)
-  }
-  expect(errors).toEqual([])
-})
-
-test('Chinese and English, all themes, and operator choices are interactive', async ({ page }) => {
-  await page.goto('./')
-  await page.getByRole('button', { name: '切换语言', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible()
-  for (const theme of ['dark', 'warm', 'light']) {
-    await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme)
-    await expect(page.locator('.app')).toHaveAttribute('data-theme', theme)
-  }
-  await page.getByRole('combobox', { name: 'Demo operator', exact: true }).selectOption('hera')
-  await expect(page.getByRole('heading', { name: /Hello，hera/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Switch language', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: '今日工作台', exact: true })).toBeVisible()
-})
-
-test('session revocation records its actor and only revokes the selected session', async ({ page }) => {
-  const record = await detail(page, 'sessions', 'session-101')
-  await expectStatus(record, '正常')
-  await action(record, '撤销会话', { reason: '演示设备遗失，撤销单个会话。' })
-  await expectStatus(record, '已撤销')
-  await expect(record.getByRole('button', { name: '撤销会话', exact: true })).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('row').filter({ has: page.getByRole('button', { name: '海盐 · 浏览器会话', exact: true }) }).getByText('已过期', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '系统与安全', exact: true }).click()
-  await page.getByRole('link', { name: '演示操作记录', exact: true }).click()
-  await expect(page.getByText('演示设备遗失，撤销单个会话。', { exact: true })).toBeVisible()
-  await expect(page.getByText('Mandow', { exact: true }).last()).toBeVisible()
-})
-
-test('account restriction revokes its session and restoring access does not revive the session', async ({ page }) => {
-  const account = await detail(page, 'accounts', 'user-101')
-  await action(account, '限制演示账号', { reason: '演示账户访问限制核验。' })
-  await expectStatus(account, '访问受限')
-  await account.getByRole('link', { name: '登录会话', exact: true }).click()
-  await expect(page).toHaveURL(/\/sessions\/session-101$/)
-  await expectStatus(page.getByRole('article'), '已撤销')
-  await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '用户账号', exact: true }).click()
-  await page.getByRole('button', { name: '演示用户 · 林间', exact: true }).click()
-  const restored = page.getByRole('dialog', { name: '记录详情' }).getByRole('article')
-  await action(restored, '恢复演示账号')
-  await expectStatus(restored, '正常')
-  await restored.getByRole('link', { name: '登录会话', exact: true }).click()
-  await expectStatus(page.getByRole('article'), '已撤销')
-  await page.getByRole('button', { name: '业务与账务', exact: true }).click()
-  await page.getByRole('link', { name: '模拟 QDC 账本', exact: true }).click()
-  await page.getByRole('button', { name: 'QDC 分录 L-701 · 模拟转出', exact: true }).click()
-  const ledger = page.getByRole('dialog', { name: '记录详情' }).getByRole('article')
-  await expect(ledger.getByText('−500 最小单位 / −5.00 Q', { exact: true })).toBeVisible()
-  await expect(ledger.getByText('当前记录为只读展示，无可执行的管理操作。', { exact: true })).toBeVisible()
-})
-
-test('resolving an AI issue preserves the failed response and creates no retry', async ({ page }) => {
-  const record = await detail(page, 'ai-calls', 'call-301')
-  await action(record, '标记问题已处理')
-  await expectStatus(record, '已处理')
-  await expect(record.getByText('失败：流式中断', { exact: true })).toBeVisible()
-  await expect(record.getByRole('button', { name: /重试|重新调用/ })).toHaveCount(0)
-})
-
-test('video lookup can fail, remain unknown, then confirm the same task', async ({ page }) => {
-  const record = await detail(page, 'video-tasks', 'video-401')
-  await action(record, '查询原任务', { outcome: 'failure' })
-  await expectStatus(record, '结果待确认')
-  await action(record, '查询原任务', { outcome: 'unknown' })
-  await expectStatus(record, '结果待确认')
-  await expect(record.getByText('demo-provider-v401', { exact: true })).toBeVisible()
-  await action(record, '查询原任务', { outcome: 'success' })
-  await expectStatus(record, '已完成')
-  await expect(record.getByText('demo-provider-v401', { exact: true })).toBeVisible()
-  await expect(record.getByText('demo-request-v401', { exact: true })).toBeVisible()
-  await expect(record.getByRole('button', { name: '查询原任务', exact: true })).toHaveCount(0)
-  await expect(record.getByRole('button', { name: /重新提交|重新生成/ })).toHaveCount(0)
-})
-
-test('public unlisting preserves the personal connection and full related details', async ({ page }) => {
-  const record = await detail(page, 'plugin-directory', 'directory-501')
-  await action(record, '撤下公开展示')
-  await expectStatus(record, '已撤下公开展示')
-  await record.getByRole('link', { name: '个人连接', exact: true }).click()
-  await expect(page).toHaveURL(/\/plugin-connections\/connection-501$/)
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  const connected = page.getByRole('article')
-  await expect(connected.getByRole('heading', { name: '林间 → 晴窗天气', exact: true })).toBeVisible()
-  await expectStatus(connected, '已连接')
-  await page.getByRole('link', { name: '公共目录', exact: true }).click()
-  await page.getByRole('button', { name: '晴窗天气 · 公共展示', exact: true }).click()
-  const listing = page.getByRole('dialog', { name: '记录详情' }).getByRole('article')
-  await expectStatus(listing, '已撤下公开展示')
-  await action(listing, '恢复公开展示')
-  await expectStatus(listing, '公开展示中')
-})
-
-test('content restriction proceeds through appeal and restoration with history intact', async ({ page }) => {
-  const record = await detail(page, 'moderation', 'report-601')
-  await expect(record.getByRole('button', { name: '复核并恢复', exact: true })).toHaveCount(0)
-  await action(record, '限制内容展示')
-  await expectStatus(record, '已限制展示')
-  await expect(record.getByRole('button', { name: '复核并恢复', exact: true })).toHaveCount(0)
-  await action(record, '登记演示申诉')
-  await expectStatus(record, '申诉待复核')
-  await action(record, '复核并恢复')
-  await expectStatus(record, '已恢复展示')
-  await expect(record.getByText('限制内容展示', { exact: true })).toBeVisible()
-  await expect(record.getByText('登记演示申诉', { exact: true })).toBeVisible()
-  await record.getByRole('link', { name: '查看作品', exact: true }).click()
-  await expect(page).toHaveURL(/\/posts\/post-601$/)
-  await expectStatus(page.getByRole('article'), '已发布')
-})
-
-test('refunds progress through request, provider, entitlement, and reconciliation', async ({ page }) => {
-  const record = await detail(page, 'refunds', 'refund-701')
-  const stages = record.locator('[aria-label="退款流程阶段"]')
-  await expect(stages.getByText('未申请', { exact: true })).toHaveCount(2)
-  await expect(record.getByRole('button', { name: '核对权益与对账', exact: true })).toHaveCount(0)
-  await action(record, '登记退款请求', { outcome: 'unknown' })
-  await expectStatus(record, '结果待确认')
-  await expect(stages.getByText('已登记', { exact: true })).toBeVisible()
-  await expect(stages.getByText('待确认', { exact: true })).toBeVisible()
-  await expect(stages.getByText('有效', { exact: true })).toBeVisible()
-  await expect(record.getByRole('button', { name: '登记退款请求', exact: true })).toHaveCount(0)
-  await action(record, '查询原退款', { outcome: 'success' })
-  await expectStatus(record, '渠道已确认')
-  await expect(stages.getByText('已确认', { exact: true })).toBeVisible()
-  await expect(stages.getByText('有效', { exact: true })).toBeVisible()
-  await action(record, '核对权益与对账')
-  await expectStatus(record, '已对账')
-  await expect(stages.getByText('已撤销', { exact: true })).toBeVisible()
-  await expect(stages.getByText('已匹配', { exact: true })).toBeVisible()
-  await expect(record.getByText('demo-refund-701', { exact: true })).toBeVisible()
-  await record.getByRole('link', { name: '原订单', exact: true }).click()
-  await expect(page.getByRole('article').getByText('已核对并撤销', { exact: true })).toBeVisible()
-})
-
-test('configuration shows draft differences, publishes, and rolls back only configuration', async ({ page }) => {
-  const record = await detail(page, 'configuration', 'config-801')
-  await expect(record.getByRole('button', { name: '发布配置', exact: true })).toHaveCount(0)
-  await action(record, '编辑配置草稿', { value: '30 seconds' })
-  const diff = record.locator('.config-diff')
-  await expect(diff.getByText('15 seconds', { exact: true })).toBeVisible()
-  await expect(diff.getByText('30 seconds', { exact: true })).toBeVisible()
-  await expectStatus(record, '草稿')
-  await action(record, '发布配置')
-  await expectStatus(record, '已发布')
-  await expect(diff.getByText('30 seconds', { exact: true })).toBeVisible()
-  await expect(diff.getByText('上一版本：15 seconds', { exact: true })).toBeVisible()
-  await action(record, '回滚配置')
-  await expectStatus(record, '配置已回滚')
-  await expect(diff.getByText('15 seconds', { exact: true })).toBeVisible()
-  await expect(record.getByRole('button', { name: '回滚配置', exact: true })).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'AI 与任务', exact: true }).click()
-  await page.getByRole('link', { name: '视频任务', exact: true }).click()
-  await page.getByRole('button', { name: '视频 V-401 · 雨后街道', exact: true }).click()
-  await expectStatus(page.getByRole('dialog', { name: '记录详情' }).getByRole('article'), '结果待确认')
-})
-
-test('reset cancellation preserves changes and confirmation restores records and clears audit', async ({ page }) => {
-  const record = await detail(page, 'sessions', 'session-101')
-  await action(record, '撤销会话', { reason: '重置验收样例' })
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '重置演示', exact: true }).click()
-  const reset = page.getByRole('dialog', { name: '重置演示', exact: true })
-  await reset.getByRole('button', { name: '取消', exact: true }).click()
-  await page.getByRole('button', { name: '林间 · iPhone 会话', exact: true }).click()
-  await expectStatus(page.getByRole('dialog', { name: '记录详情' }).getByRole('article'), '已撤销')
-  await page.keyboard.press('Escape')
-  await page.getByRole('combobox', { name: '外观主题', exact: true }).selectOption('warm')
-  await page.getByRole('button', { name: '重置演示', exact: true }).click()
-  await reset.getByRole('button', { name: '确认重置', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: '今日工作台', exact: true })).toBeVisible()
-  await expect(page.locator('.app')).toHaveAttribute('data-theme', 'warm')
-  await expect(page.getByText('从第一次操作开始', { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: '体验会话处理', exact: true }).click()
-  await page.getByRole('button', { name: '林间 · iPhone 会话', exact: true }).click()
-  await expectStatus(page.getByRole('dialog', { name: '记录详情' }).getByRole('article'), '正常')
-})
-
-test('drawer Escape, full detail, and related links preserve navigable record identity', async ({ page }) => {
-  await page.goto('plugin-directory')
-  const open = page.getByRole('button', { name: '晴窗天气 · 公共展示', exact: true })
-  await open.click()
-  const drawer = page.getByRole('dialog', { name: '记录详情', exact: true })
-  await expect(drawer).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(drawer).toHaveCount(0)
-  await expect(page).not.toHaveURL(/item=/)
-  await open.click()
-  await drawer.getByRole('link', { name: '打开完整详情', exact: true }).click()
-  await expect(page).toHaveURL(/\/plugin-directory\/directory-501$/)
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await page.getByRole('article').getByRole('link', { name: '服务详情', exact: true }).click()
-  await expect(page).toHaveURL(/\/plugin-services\/service-501$/)
-  await expect(page.getByRole('heading', { name: '晴窗天气 · 样例服务', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '返回列表', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: '服务与发现', exact: true })).toBeVisible()
-})
-
-test('global search, list query, status filtering, and preview error recovery work', async ({ page }) => {
-  await page.goto('sessions')
-  const listSearch = page.getByRole('textbox', { name: '搜索当前列表', exact: true })
-  await listSearch.fill('iPhone')
-  await expect(page.getByRole('button', { name: '林间 · iPhone 会话', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '海盐 · 浏览器会话', exact: true })).toHaveCount(0)
-  // Dispatch consecutive control changes before the router's deferred render can commit.
-  await listSearch.evaluate((input, select) => {
-    if (!(select instanceof HTMLSelectElement)) throw new Error('Missing status filter')
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    if (!setValue) throw new Error('Missing input setter')
-    setValue.call(input, '')
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-    select.value = 'expired'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-  }, await page.getByRole('combobox', { name: '状态', exact: true }).elementHandle())
-  await expect(page).toHaveURL(url => !url.searchParams.has('q') && url.searchParams.get('status') === 'expired')
-  await expect(listSearch).toHaveValue('')
-  await expect(page.getByRole('button', { name: '海盐 · 浏览器会话', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '林间 · iPhone 会话', exact: true })).toHaveCount(0)
-  await page.getByRole('combobox', { name: '预览场景', exact: true }).selectOption('error')
-  await expect(page.getByRole('alert')).toContainText('演示加载失败')
-  await page.getByRole('button', { name: '恢复预览', exact: true }).click()
-  await expect(page.getByRole('button', { name: '海盐 · 浏览器会话', exact: true })).toBeVisible()
-  await page.getByRole('textbox', { name: '全局搜索', exact: true }).fill('video-401')
-  await page.getByRole('region', { name: '搜索结果', exact: true }).getByRole('link').click()
-  await expect(page).toHaveURL(/\/video-tasks\?item=video-401$/)
-  await expect(page.getByRole('dialog', { name: '记录详情' }).getByRole('heading', { name: '视频 V-401 · 雨后街道', exact: true })).toBeVisible()
-})
-
-test('375px viewport keeps dashboard, lists, details, and navigation within the body', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 })
-  const overflow = async () => {
-    const dimensions = await page.evaluate(() => ({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, width: window.innerWidth }))
-    expect(dimensions.body).toBeLessThanOrEqual(dimensions.width)
-    expect(dimensions.root).toBeLessThanOrEqual(dimensions.width)
-  }
-  for (const route of ['./', 'sessions', 'refunds/refund-701', 'configuration/config-801', 'plugin-directory']) {
-    await page.goto(route)
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-    await overflow()
-  }
-  await expect(page.getByRole('combobox', { name: '外观主题', exact: true })).toBeVisible()
-  for (const theme of ['dark', 'warm', 'light']) {
-    await page.getByRole('combobox', { name: '外观主题', exact: true }).selectOption(theme)
-    await expect(page.locator('.app')).toHaveAttribute('data-theme', theme)
-    await overflow()
-  }
-  await page.getByRole('button', { name: '打开导航', exact: true }).click()
-  const navigation = page.getByRole('dialog', { name: '导航', exact: true })
-  await expect(navigation).toBeVisible()
-  await navigation.getByRole('button', { name: '用户与访问', exact: true }).click()
-  await navigation.getByRole('link', { name: '登录会话', exact: true }).click()
-  await expect(navigation).toHaveCount(0)
-  await page.getByRole('button', { name: '林间 · iPhone 会话', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: '记录详情' })).toBeVisible()
-  await overflow()
-})
-
-test('whitespace reason stays editable and cannot record a failure or complete an action', async ({ page }) => {
-  const record = await detail(page, 'video-tasks', 'video-401')
-  await record.getByRole('button', { name: '查询原任务', exact: true }).click()
-  await record.getByRole('combobox', { name: '模拟返回结果', exact: true }).selectOption('failure')
-  const reason = record.getByRole('textbox', { name: /^处理原因/ })
-  await reason.fill('   ')
-  await record.getByRole('button', { name: '确认演示操作', exact: true }).click()
-  await expect(record.getByRole('alert')).toContainText('请填写处理原因。')
-  await expect(reason).toBeVisible()
-  await expect(record.getByRole('button', { name: '确认演示操作', exact: true })).toBeVisible()
-  await expect(record.getByRole('button', { name: '返回详情', exact: true })).toHaveCount(0)
-  await expectStatus(record, '结果待确认')
-  await record.getByRole('button', { name: '取消', exact: true }).click()
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '系统与安全', exact: true }).click()
-  await page.getByRole('link', { name: '演示操作记录', exact: true }).click()
-  await expect(page.getByText('从第一次操作开始', { exact: true })).toBeVisible()
-})
-
-test('navigation and state-changing demo interactions request only same-site static resources', async ({ page, baseURL }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:4173/q-admin/').origin
-  const unexpected: string[] = []
-  page.on('websocket', (socket) => unexpected.push(`WebSocket ${socket.url()}`))
-  page.on('request', (request) => {
-    const url = new URL(request.url())
-    const isStatic = request.resourceType() === 'document' || /\.(?:js|css|png|webp|svg|ico|woff2?|json)$/.test(url.pathname)
-    if (url.origin !== origin || request.method() !== 'GET' || !['document', 'script', 'stylesheet', 'image', 'font', 'manifest', 'other'].includes(request.resourceType()) || !url.pathname.startsWith('/q-admin/') || /\/q-admin\/(?:api|v1|graphql)(?:\/|$)/.test(url.pathname) || !isStatic) {
-      unexpected.push(`${request.method()} ${request.resourceType()} ${request.url()}`)
+async function fixture(page: Page, options: { settlementGate?: Promise<void>; secondOrderGate?: Promise<void> } = {}) {
+  let actor = maker;
+  const state = { orderError: false, settlementError: false, detailError: false, auditError: false, auditEmpty: false, unknownAuditActions: false };
+  const requests: { method: string; path: string; search: string; actor: string }[] = [];
+  const unexpected: string[] = [];
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('websocket', (socket) => unexpected.push(socket.url()));
+  await page.route('**/*', async (route) => {
+    const request = route.request(); const url = new URL(request.url());
+    if (url.origin !== apiOrigin) {
+      if (['127.0.0.1', 'localhost'].includes(url.hostname) && url.pathname.startsWith('/q-admin/') && request.method() === 'GET'
+        && ['document', 'script', 'stylesheet', 'font', 'other'].includes(request.resourceType())) return route.continue();
+      unexpected.push(request.url()); return route.abort();
     }
-  })
-  await page.goto('./')
-  const record = await detail(page, 'video-tasks', 'video-401')
-  await action(record, '查询原任务', { outcome: 'unknown' })
-  await action(record, '查询原任务', { outcome: 'success' })
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '重置演示', exact: true }).click()
-  await page.getByRole('dialog', { name: '重置演示' }).getByRole('button', { name: '确认重置', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: '今日工作台', exact: true })).toBeVisible()
-  expect(unexpected).toEqual([])
-})
+    const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+    const send = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', headers, body: JSON.stringify(body) });
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    requests.push({ method: request.method(), path: url.pathname, search: url.search, actor });
+    if (url.pathname === '/v1/auth/login') {
+      const handle = request.postDataJSON().handle;
+      actor = handle === 'checker' ? checker : handle === 'payer' ? payer : maker;
+      return send({ token: `controlled-${actor}`, user: { id: actor } });
+    }
+    if (url.pathname === '/v1/auth/logout') return route.fulfill({ status: 204, headers });
+    if (url.pathname === '/v1/payments/operator/me') return actor === payer ? send({}, 403) : send({ user_id: actor, roles: actor === checker ? ['checker'] : ['maker'], server_time: at });
+    if (request.method() !== 'GET' || actor === payer) { unexpected.push(`${request.method()} ${url.pathname}`); return route.abort(); }
+    if (url.pathname === '/v1/payments/operator/orders') return state.orderError ? send({}, 503) : send({ items: [], next_cursor: null });
+    if (url.pathname === `/v1/payments/operator/orders/${payment}` || url.pathname === `/v1/payments/operator/orders/${batch}`) {
+      if (url.pathname.endsWith(batch) && options.secondOrderGate) await options.secondOrderGate;
+      const id = url.pathname.split('/').at(-1)!;
+      return send({ order: { payment_id: id, account_id: payer, channel: 'alipay', status: 'awaiting_credit_approval', pay_currency: 'CNY', credit_currency: 'HKD', pay_amount_minor_cny: 9300, credit_amount_minor_hkd: 10000, fee_minor_cny: 100, evidence_version: 2, created_at: at, updated_at: at },
+        merchant_order_no: `merchant-${id}`, provider_trade_no: `trade-${id}`, provider_paid_at: at, verified_at: at, evidence_sha256: 'a'.repeat(64), proposal: null, approval: null, refund: null, audit: [] });
+    }
+    if (url.pathname === '/v1/payments/operator/settlements') {
+      if (options.settlementGate) await options.settlementGate;
+      return state.settlementError ? send({}, 503) : send({ items: [settlement], next_cursor: null });
+    }
+    if (url.pathname === `/v1/payments/operator/settlements/${batch}`) return state.detailError ? send({}, 503) : send(settlement);
+    if (url.pathname === `/v1/payments/operator/settlements/${batch}/checks`) return send({ items: [{ check_version: 1, matched_count: 1, differences: [], actor_id: maker, created_at: at }], next_cursor: null });
+    if (url.pathname === '/v1/payments/fx/status') return send({
+      mode: 'manual', state: 'unconfigured', current: null, candidate: null, generation: null, policy_fingerprint: 'c'.repeat(64),
+      last_checked_at: null, last_success_at: null, last_error_code: null, hold_reason: null, next_attempt_at: null, last_http_status: null,
+      refresh_in_progress: false, alerts: { within_24h: false, within_6h: false, stale: true, held: false }, server_time: at,
+    });
+    if (url.pathname === '/v1/payments/operator/audit') {
+      if (state.auditError) return send({}, 503);
+      if (state.auditEmpty) return send({ items: [], next_cursor: null });
+      if (state.unknownAuditActions) return send({ items: [auditEvent(auditIds[0], actor, 'constructor'), auditEvent(auditIds[1], actor, '__proto__')], next_cursor: null });
+      if (url.searchParams.has('payment_id')) return send({ items: url.searchParams.get('payment_id') === payment ? [auditEvent(auditIds[0], actor)] : [], next_cursor: null });
+      if (url.searchParams.has('cursor')) return send({ items: [auditEvent(auditIds[2], actor, 'refund_requested')], next_cursor: null });
+      return send({ items: [auditEvent(auditIds[0], actor), auditEvent(auditIds[1], actor, 'fx_candidate_activated', null)], next_cursor: cursor });
+    }
+    unexpected.push(`${request.method()} ${url.pathname}`); return route.abort();
+  });
+  return { state, requests, unexpected, errors };
+}
+async function login(page: Page, handle = 'maker') {
+  await page.getByLabel('账号', { exact: true }).fill(handle);
+  await page.getByLabel('密码', { exact: true }).fill('controlled-fixture-only');
+  await page.getByRole('button', { name: '登录并验证角色', exact: true }).click();
+  if (handle !== 'payer') await expect(page.getByRole('navigation', { name: '管理导航', exact: true })).toBeVisible();
+}
 
-test('danger and primary buttons plus ordinary text meet 4.5 contrast in every theme', async ({ page }) => {
-  const checkContrast = async (target: Locator, label: string) => {
-    await expect(target).toBeVisible()
-    const colors = await target.evaluate((element) => {
-      const rgb = (value: string): number[] => {
-        const channels = value.match(/[\d.]+/g)?.map(Number)
-        if (!channels || channels.length < 3) throw new Error(`Unsupported computed color: ${value}`)
-        return channels
-      }
-      const foreground = getComputedStyle(element).color
-      let current: Element | null = element
-      let background = 'rgb(255, 255, 255)'
-      while (current) {
-        const value = getComputedStyle(current).backgroundColor
-        const channels = rgb(value)
-        if (channels.length === 3 || channels[3] === 1) { background = value; break }
-        if (channels[3] !== 0) throw new Error(`Translucent background requires explicit compositing: ${value}`)
-        current = current.parentElement
-      }
-      const luminance = (value: string) => rgb(value).slice(0, 3).reduce((sum, channel, index) => {
-        const srgb = channel / 255
-        const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
-        return sum + linear * [0.2126, 0.7152, 0.0722][index]!
-      }, 0)
-      const a = luminance(foreground)
-      const b = luminance(background)
-      return { foreground, background, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
-    })
-    expect.soft(colors.ratio, `${label}: ${colors.foreground} on ${colors.background}`).toBeGreaterThanOrEqual(4.5)
+for (const route of ['', ...pages.map(([id]) => `wallet-payments/${id}`)]) {
+  test(`formal route ${route || '/'} requires Q sign-in before any operator data`, async ({ page }) => {
+    const f = await fixture(page); await page.goto(route || './');
+    await expect(page.getByRole('heading', { name: '使用 Q 账号登录', exact: true })).toBeVisible();
+    expect(f.requests).toEqual([]); await expect(page.locator('table')).toHaveCount(0);
+    await login(page);
+    await expect(page.getByRole('button', { name: '退出 / 切换账号', exact: true })).toBeVisible();
+    await expect.poll(() => f.requests.filter((request) => request.path.startsWith('/v1/payments/') && !request.path.endsWith('/me')).length).toBeGreaterThan(0);
+    const dataRead = f.requests.findIndex((request) => request.path.startsWith('/v1/payments/') && !request.path.endsWith('/me'));
+    expect(dataRead).toBeGreaterThan(f.requests.findIndex((request) => request.path.endsWith('/operator/me')));
+    expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+  });
+}
+
+test('four authenticated navigation links keep their URLs and preserve the same verified session', async ({ page }) => {
+  const f = await fixture(page); await page.goto('./'); await login(page);
+  const navigation = page.getByRole('navigation', { name: '管理导航', exact: true });
+  for (const [id, label] of pages) {
+    await navigation.getByRole('link', { name: label, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/q-admin/wallet-payments/${id}$`));
+    await expect(navigation.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('heading', { name: '使用 Q 账号登录', exact: true })).toHaveCount(0);
   }
-  await page.goto('sessions')
-  for (const theme of ['light', 'dark', 'warm']) {
-    await page.getByRole('combobox', { name: '外观主题', exact: true }).selectOption(theme)
-    await checkContrast(page.locator('.page-heading p'), `${theme} page description`)
-    await page.getByRole('button', { name: '林间 · iPhone 会话', exact: true }).click()
-    const record = page.getByRole('dialog', { name: '记录详情' }).getByRole('article')
-    await record.getByRole('button', { name: '撤销会话', exact: true }).click()
-    await checkContrast(record.getByRole('button', { name: '确认演示操作', exact: true }), `${theme} danger button`)
-    await checkContrast(record.locator('.action-form > p'), `${theme} action description`)
-    await page.keyboard.press('Escape')
-    await page.getByRole('button', { name: '重置演示', exact: true }).click()
-    const reset = page.getByRole('dialog', { name: '重置演示', exact: true })
-    await checkContrast(reset.getByRole('button', { name: '确认重置', exact: true }), `${theme} primary button`)
-    await reset.getByRole('button', { name: '取消', exact: true }).click()
+  expect(f.requests.filter((request) => request.path === '/v1/auth/login')).toHaveLength(1);
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('unconnected legacy routes expose no invented records, statistics, login or business requests', async ({ page }) => {
+  const f = await fixture(page);
+  for (const route of ['accounts', 'sessions', 'ai-calls', 'plugin-directory', 'video-tasks', 'refunds/refund-701', 'configuration', 'wallet-payments/not-connected']) {
+    await page.goto(route);
+    await expect(page.getByRole('heading', { name: '此模块尚未接入正式后台', exact: true })).toBeVisible();
+    await expect(page.locator('table, input[type=password]')).toHaveCount(0);
+    await expect(page.getByText(/演示原型|虚构数据|今日工作台|总用户|晴窗天气|林间/)).toHaveCount(0);
   }
-})
+  expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('an ordinary account rejected by operator/me cannot read any operator lists', async ({ page }) => {
+  const f = await fixture(page); await page.goto('wallet-payments/audit'); await login(page, 'payer');
+  await expect(page.getByRole('alert')).toContainText('没有钱包支付操作权限');
+  await expect(page.getByRole('navigation', { name: '管理导航', exact: true })).toHaveCount(0);
+  expect(f.requests.filter((request) => request.path.startsWith('/v1/payments/') && !request.path.endsWith('/operator/me'))).toEqual([]);
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('an unavailable order list is not presented as an empty queue', async ({ page }) => {
+  const f = await fixture(page); f.state.orderError = true;
+  await page.goto('wallet-payments/orders'); await login(page);
+  await expect(page.getByText('未能读取此页订单，无法判断队列是否为空。请手动刷新。', { exact: true })).toBeVisible();
+  await expect(page.getByText('此队列当前页没有返回订单', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '下一页', exact: true })).toBeDisabled();
+  f.state.orderError = false;
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await expect(page.getByText('此队列当前页没有返回订单', { exact: true })).toBeVisible();
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('settlement loading and failures identify stale data and disable attestation after a failed detail refresh', async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const f = await fixture(page, { settlementGate: gate });
+  await page.goto('wallet-payments/settlements'); await login(page, 'checker');
+  await expect(page.getByText('正在读取结算列表…', { exact: true })).toBeVisible();
+  await expect(page.getByText('本次查询没有返回结算材料。', { exact: true })).toHaveCount(0);
+  release();
+  await page.getByRole('button', { name: settlement.source, exact: true }).click();
+  await expect(page.getByRole('heading', { name: '结算详情', exact: true })).toBeVisible();
+  const check = page.getByRole('checkbox'); await check.check();
+  const attest = page.getByRole('button', { name: '核对后提交人工核材', exact: true });
+  await expect(attest).toBeEnabled();
+  f.state.settlementError = true;
+  await page.getByRole('button', { name: '刷新列表', exact: true }).click();
+  await expect(page.getByText('列表读取失败，以下为先前载入的记录，请刷新确认。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: settlement.source, exact: true })).toBeVisible();
+  f.state.detailError = true;
+  await page.getByRole('button', { name: '刷新批次与核对历史', exact: true }).click();
+  await expect(page.getByText('未能重新读取材料；当前显示上次结果，请刷新后再核材。', { exact: true })).toBeVisible();
+  await expect(attest).toBeDisabled(); await expect(check).toBeDisabled();
+  expect(f.requests.filter((request) => request.method === 'POST' && !request.path.startsWith('/v1/auth/'))).toEqual([]);
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('payment audit supports bounded pages, exact payment filtering, empty results and explicit read errors', async ({ page }) => {
+  const f = await fixture(page); await page.goto('wallet-payments/audit'); await login(page);
+  const panel = page.getByRole('region', { name: '支付审计', exact: true });
+  await expect(panel.getByText(auditIds[0], { exact: true })).toBeVisible();
+  await expect(panel.getByText('未关联付款订单', { exact: true })).toBeVisible();
+  await expect(panel.getByText(at, { exact: true })).toHaveCount(2);
+  await panel.getByRole('button', { name: '下一页审计', exact: true }).click();
+  await expect(panel.getByText(auditIds[2], { exact: true })).toBeVisible();
+  await expect(panel.getByText(auditIds[0], { exact: true })).toHaveCount(0);
+  expect(new URLSearchParams(f.requests.at(-1)!.search).get('cursor')).toBe(cursor);
+  await panel.getByRole('button', { name: '上一页审计', exact: true }).click();
+  await expect(panel.getByText(auditIds[0], { exact: true })).toBeVisible();
+  await panel.getByLabel('按付款订单筛选（可留空）', { exact: true }).fill(payment);
+  await panel.getByRole('button', { name: '应用筛选', exact: true }).click();
+  await expect(panel.getByText('未关联付款订单', { exact: true })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: '下一页审计', exact: true })).toBeDisabled();
+  expect(new URLSearchParams(f.requests.at(-1)!.search).get('payment_id')).toBe(payment);
+  f.state.auditEmpty = true;
+  await panel.getByRole('button', { name: '刷新当前页', exact: true }).click();
+  await expect(panel.getByText('本次范围与页码没有返回审计记录。', { exact: true })).toBeVisible();
+  f.state.auditError = true;
+  await panel.getByRole('button', { name: '刷新当前页', exact: true }).click();
+  await expect(panel.getByRole('alert')).toBeVisible();
+  await expect(panel.getByText('本次范围与页码没有返回审计记录。', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('未能读取此页，不能判断是否存在记录。请手动刷新。', { exact: true })).toBeVisible();
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('audit records disappear on sign-out and reload only for the next verified account', async ({ page }) => {
+  const f = await fixture(page); await page.goto('wallet-payments/audit'); await login(page);
+  let panel = page.getByRole('region', { name: '支付审计', exact: true });
+  await expect(panel.getByRole('cell', { name: maker, exact: true })).toHaveCount(2);
+  await page.getByRole('button', { name: '退出 / 切换账号', exact: true }).click();
+  await expect(page.locator('table')).toHaveCount(0);
+  await login(page, 'checker'); panel = page.getByRole('region', { name: '支付审计', exact: true });
+  await expect(panel.getByRole('cell', { name: checker, exact: true })).toHaveCount(2);
+  await expect(panel.getByRole('cell', { name: maker, exact: true })).toHaveCount(0);
+  expect(f.requests.filter((request) => request.path.endsWith('/audit')).map((request) => request.actor)).toEqual([maker, checker]);
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('unknown audit actions named constructor and __proto__ remain readable once each', async ({ page }) => {
+  const f = await fixture(page); f.state.unknownAuditActions = true;
+  await page.goto('wallet-payments/audit'); await login(page);
+  const panel = page.getByRole('region', { name: '支付审计', exact: true });
+  await expect(panel.getByText('constructor', { exact: true })).toHaveCount(1);
+  await expect(panel.getByText('__proto__', { exact: true })).toHaveCount(1);
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('production files contain no demo catalog and unofficial routes never collect credentials or request images', async ({ page }) => {
+  const production = new URL('../dist/', import.meta.url);
+  expect(readdirSync(production)).not.toContain('privacy.html');
+  expect(readdirSync(production)).not.toContain('mascot');
+  const scripts = readdirSync(new URL('assets/', production)).filter((name) => name.endsWith('.js'));
+  expect(scripts.length).toBeGreaterThan(0);
+  const code = scripts.map((name) => readFileSync(new URL(`assets/${name}`, production), 'utf8')).join('\n');
+  expect(code).not.toMatch(/晴窗天气|演示用户|确认演示操作|演示操作者|demo-refund-701|createInitialState/);
+  const unexpected: string[] = []; const images: string[] = [];
+  page.on('request', (request) => { if (request.resourceType() === 'image') images.push(request.url()); });
+  await page.route('**/*', async (route) => {
+    const request = route.request(); const url = new URL(request.url());
+    if (url.origin !== 'https://8.163.108.216' || request.method() !== 'GET') { unexpected.push(request.url()); return route.abort(); }
+    if (request.resourceType() === 'document' && url.pathname.startsWith('/q-admin/')) return route.fulfill({ contentType: 'text/html', body: readFileSync(new URL('index.html', production)) });
+    const asset = url.pathname.match(/^\/q-admin\/(assets\/[A-Za-z0-9_.-]+\.(js|css))$/);
+    if (asset) return route.fulfill({ contentType: asset[2] === 'js' ? 'text/javascript' : 'text/css', body: readFileSync(new URL(asset[1], production)) });
+    unexpected.push(request.url()); return route.abort();
+  });
+  for (const path of ['', 'accounts', 'wallet-payments/audit']) {
+    await page.goto(`https://8.163.108.216/q-admin/${path}`);
+    await expect(page.getByRole('heading', { name: '请使用小Q官方后台', exact: true })).toBeVisible();
+    await expect(page.locator('input[type=password], table')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: '打开官方后台', exact: true })).toHaveAttribute('href', 'https://q.kaicloudpay.com/q-admin/');
+  }
+  expect(unexpected).toEqual([]); expect(images).toEqual([]);
+});
+
+
+test('changing the selected payment immediately blocks an old confirmation and hides stale refund actions', async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const f = await fixture(page, { secondOrderGate: gate });
+  await page.goto('wallet-payments/orders'); await login(page);
+  await page.getByLabel('订单编号', { exact: true }).fill(payment);
+  await page.getByRole('button', { name: '查找', exact: true }).click();
+  await expect(page.getByRole('button', { name: '提交初审', exact: true })).toBeEnabled();
+  await expect(page.getByRole('region', { name: '外部全额退款', exact: true })).toBeVisible();
+  await page.getByLabel('订单编号', { exact: true }).fill(batch);
+  await page.getByRole('button', { name: '提交初审', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '确认初审', exact: true })).toBeVisible();
+  // Keep the old button reference while dispatching the new selection, before React effects run.
+  await page.evaluate(() => {
+    const oldSubmit = [...document.querySelectorAll('button')].find((button) => button.textContent === '确认提交');
+    const lookup = document.querySelector('form.pay-lookup');
+    if (!oldSubmit || !lookup) throw Error('Missing review controls');
+    lookup.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    oldSubmit.click();
+  });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '外部全额退款', exact: true })).toHaveCount(0);
+  expect(f.requests.filter((request) => request.method === 'POST' && !request.path.startsWith('/v1/auth/'))).toEqual([]);
+  release();
+  await expect(page.getByRole('button', { name: '提交初审', exact: true })).toBeEnabled();
+  await expect(page.getByRole('region', { name: '外部全额退款', exact: true })).toContainText(batch);
+  expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+});
+
+test('empty credentials and invalid order filters report in-page errors without browser validation popups or requests', async ({ page }) => {
+  const f = await fixture(page); await page.goto('./');
+  await page.getByRole('button', { name: '登录并验证角色', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('请填写账号和密码。');
+  expect(f.requests).toEqual([]);
+  await login(page);
+  await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+  const count = f.requests.length;
+  await page.getByLabel('订单编号', { exact: true }).fill('invalid');
+  await page.getByRole('button', { name: '查找', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('请输入完整有效的订单编号。');
+  expect(f.requests).toHaveLength(count);
+  await page.getByRole('link', { name: '支付操作记录', exact: true }).click();
+  await expect(page.getByRole('button', { name: '应用筛选', exact: true })).toBeEnabled();
+  const auditCount = f.requests.length;
+  await page.getByLabel('按付款订单筛选（可留空）', { exact: true }).fill('invalid');
+  await page.getByRole('button', { name: '应用筛选', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('请输入完整有效的订单编号，或留空查询。');
+  expect(f.requests).toHaveLength(auditCount); expect(f.unexpected).toEqual([]);
+});
