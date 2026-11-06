@@ -1,6 +1,6 @@
 # Wallet funding operator configuration
 
-This implementation is source capability. Fixture tests do not verify the merchant's real payment channels, FX settlement, merchant approval or deployment. Existing QDC and bank-plugin HKD remain demonstrations; real HKD starts at zero in a separate journal. No withdrawal, refund, KPS or real-bank transfer is provided.
+This implementation is source capability. Fixture tests do not verify the merchant's real payment channels, FX settlement, merchant approval or deployment. Existing QDC and bank-plugin HKD remain demonstrations; real HKD starts at zero in a separate journal. There is no withdrawal, automatic provider refund, KPS or real-bank transfer. Full externally executed refunds have a reviewed evidence, reservation and reversal workflow in the [operator contract](../../contracts/payment-operations.md).
 
 Funding remains unavailable until a complete policy and an explicitly versioned provider configuration are supplied. The preferred server configuration is:
 
@@ -46,7 +46,7 @@ The legacy single-provider environment form remains supported only when **all** 
 }
 ```
 
-Numeric placeholders must become JSON numbers. There are no built-in rate, fee, operator or merchant defaults. Operator configuration is trusted server provisioning, not an automatic FX feed: preserve the underlying source evidence separately, verify its origin/date/hash, and provision a new snapshot before it becomes stale. Stale snapshots disable new quotes and new orders. They do not prevent reading old orders or recovering an original client request.
+Numeric placeholders must become JSON numbers. There are no built-in rate, fee, operator or merchant defaults. The configured rate is a trusted manual bootstrap snapshot: retain and verify its underlying evidence. Explicit `Q_PAYMENT_FX_AUTO_REFRESH=1` enables the fixed, versioned ECB collector described in [FX.md](FX.md); default `0` remains manual. Repeated downloads and restarts never renew the source date. Stale evidence disables new funding without blocking history or original-order recovery. Ordinary rate refreshes preserve accepted quotes; business-policy and credential checks remain.
 
 The server uses checked integer rational arithmetic:
 
@@ -68,11 +68,11 @@ An expired quote whose original client request never reserved an order also rece
 
 Verified known-order notifications receive `success` only after a deduplicated reconciliation job is durable. Only a **newly inserted** notification can expedite reconciliation; replays acknowledge the original receipt without changing backoff or an active lease. Notification signatures and browser returns never credit a wallet. The worker independently queries Qixiang and matches merchant, channel, both order identifiers and exact CNY cents. Worker leases use epoch/token, expiry and captured order version; late results cannot overwrite a newer decision. Known eligible credential bindings are prioritized so unavailable old configurations cannot monopolize the bounded claim scan.
 
-1. A configured maker authenticates through ordinary Q login and reads the evidence version supplied by the customer's payment receipt or controlled operational records. `POST /v1/payments/orders/{id}/proposals` accepts `{ "evidence_version": <version> }`.
+1. A configured maker authenticates through ordinary Q login and reads the current evidence via `/v1/payments/operator/orders/{id}`. `POST /v1/payments/orders/{id}/proposals` accepts `{ "evidence_version": <version> }`.
 2. A **different** configured checker authenticates with their own Q session. `POST /v1/payments/orders/{id}/approvals` accepts `{ "proposal_id": "<UUID>", "evidence_version": <same version> }`.
-3. Both operators and the owner must still be active. The checker rechecks the immutable proposal, frozen evidence and account state under locks. Approval, paired HKD entries, balances and credited order commit together. Repeating the original approval does not credit twice.
+3. Both operators and the owner must still be active; the owner, maker and checker must be three different identities. New-funding readiness checks this independent pair before taking payment. The checker rechecks the immutable proposal, frozen evidence, current role generation and account state under locks. Approval, paired HKD entries, balances and credited order commit together. Repeating the original approval does not credit twice.
 
-Ordinary customers do not receive operator rights. Configuring UUIDs does not create accounts, invite members, sign in, or bypass Q authentication. Suspension retains evidence and holds credit. Account deletion is refused while real balance is nonzero or **any** order is unresolved, including possibly sent expired, detached, unknown or review-held payments. There is currently no automated way to write off, refund or withdraw these obligations; resolve that operational policy before accepting live money.
+Ordinary customers do not receive operator rights. Configuring UUIDs does not create accounts, invite members, sign in, or bypass Q authentication. Startup synchronizes the trusted operator policy; an old process cannot keep authorizing a revoked role. Suspension retains evidence and holds ordinary credit; independently reviewed original-method refunds may settle an existing suspended customer's obligation. Account deletion is refused while real balance, reserved funds or unresolved orders/refunds remain. Refund evidence correction and source-file reconciliation retain immutable history; neither is an automatic channel payout or bank FX operation.
 
 ## Merchant configuration changes
 

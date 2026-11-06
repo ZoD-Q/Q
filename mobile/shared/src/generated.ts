@@ -1299,6 +1299,382 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/payments/fx/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read FX evidence, freshness/hold and 24h/6h alert flags (current payment operator only) */
+        get: operations["getPaymentFxStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/fx/activations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Explicitly review an immutable valid FX anomaly candidate (current payment operator only) */
+        post: operations["activatePaymentFxCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get me */
+        get: operations["payment_operations_get_me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get orders */
+        get: operations["payment_operations_get_orders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/orders/{payment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get {payment_id} */
+        get: operations["payment_operations_get_orders_payment_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/orders/{payment_id}/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Payment operations: post refunds */
+        post: operations["payment_operations_post_orders_payment_id_refunds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get {refund_id} */
+        get: operations["payment_operations_get_refunds_refund_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Payment operations: post approve */
+        post: operations["payment_operations_post_refunds_refund_id_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}/unknown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Payment operations: post unknown */
+        post: operations["payment_operations_post_refunds_refund_id_unknown"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read immutable attachment and rejection history */
+        get: operations["payment_operations_get_refund_evidence_history"];
+        put?: never;
+        /** Payment operations: post evidence */
+        post: operations["payment_operations_post_refunds_refund_id_evidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Payment operations: post verify */
+        post: operations["payment_operations_post_refunds_refund_id_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}/document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get document */
+        get: operations["payment_operations_get_refunds_refund_id_document"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get settlements */
+        get: operations["payment_operations_get_settlements"];
+        put?: never;
+        /** Payment operations: post settlements */
+        post: operations["payment_operations_post_settlements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements/by-client-key/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get {key} */
+        get: operations["payment_operations_get_settlements_by-client-key_key"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements/{settlement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get {settlement_id} */
+        get: operations["payment_operations_get_settlements_settlement_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements/{settlement_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Payment operations: post verify */
+        post: operations["payment_operations_post_settlements_settlement_id_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements/{settlement_id}/document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get document */
+        get: operations["payment_operations_get_settlements_settlement_id_document"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market-data/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Reads durable public headline cache only; does not trigger upstream collection. See market-news.md for source scope, partial/stale/unavailable semantics and fencing. */
+        get: operations["publicNews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment operations: get audit */
+        get: operations["payment_operations_get_audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/refunds/{refund_id}/evidence-rejections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Checker requests corrected evidence without repeating the external refund */
+        post: operations["payment_operations_post_refund_evidence_rejections"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements/{settlement_id}/rechecks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recompute original immutable materials against current Q state, retaining every calculation */
+        post: operations["payment_operations_post_settlement_rechecks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/operator/settlements/{settlement_id}/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read original differences and every immutable recalculation */
+        get: operations["payment_operations_get_settlement_checks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2416,6 +2792,13 @@ export interface components {
             /** Format: uuid */
             credited_transaction_id: string | null;
             evidence_version: number;
+            /** Format: uuid */
+            refund_id?: string | null;
+            /** @enum {string|null} */
+            refund_status?: "requested" | "approved_external" | "evidence_pending" | "evidence_rejected" | "unknown" | "refunded" | null;
+            /** Format: date-time */
+            refunded_at?: string | null;
+            refund_version?: number | null;
         };
         PaymentWallet: {
             /** @enum {string} */
@@ -2423,6 +2806,10 @@ export interface components {
             balance_minor: number;
             /** Format: date-time */
             updated_at: string;
+            /** @description HKD minor units reserved by unresolved full-refund cases. Present with available_minor on refund-capable servers. */
+            frozen_minor?: number;
+            /** @description balance_minor minus frozen_minor; never inferred by the client when omitted by an older server. */
+            available_minor?: number;
         };
         PaymentOrdersPage: {
             items: components["schemas"]["PaymentOrder"][];
@@ -2445,6 +2832,10 @@ export interface components {
             balance_after_minor: number;
             /** Format: date-time */
             created_at: string;
+            /** @enum {string} */
+            kind?: "credit" | "refund_reversal";
+            /** Format: uuid */
+            refund_id?: string | null;
         };
         PaymentLedgerPage: {
             items: components["schemas"]["PaymentLedgerEntry"][];
@@ -2460,6 +2851,392 @@ export interface components {
             maker_id: string;
             /** Format: date-time */
             created_at: string;
+        };
+        PaymentFxRateStatus: {
+            /** Format: uuid */
+            snapshot_id: string | null;
+            /** Format: date */
+            source_date: string;
+            /** Format: date-time */
+            rate_at: string;
+            /** Format: date-time */
+            fetched_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: int64 */
+            remaining_seconds: number;
+            rate_cny_per_100_hkd: string;
+            evidence_sha256: string;
+            evidence_verified: boolean;
+        };
+        PaymentFxCandidate: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            source_date: string;
+            rate_cny_per_100_hkd: string;
+            evidence_sha256: string;
+            reason: string;
+            manual_activation_allowed: boolean;
+        };
+        PaymentFxAlerts: {
+            within_24h: boolean;
+            within_6h: boolean;
+            stale: boolean;
+            held: boolean;
+        };
+        PaymentFxActivationRequest: {
+            /** Format: uuid */
+            candidate_id: string;
+            evidence_sha256: string;
+            /** Format: int64 */
+            expected_generation: number;
+            /** @description Trimmed explicit review reason; no control characters. No XML, date or numeric overrides accepted. */
+            reason: string;
+        };
+        PaymentFxActivation: {
+            /** Format: uuid */
+            activation_id: string;
+            /** Format: uuid */
+            snapshot_id: string;
+            /** Format: int64 */
+            generation: number;
+            /** Format: date-time */
+            activated_at: string;
+        };
+        PaymentFxStatus: {
+            /** @enum {string} */
+            mode: "manual" | "automatic";
+            /** @enum {string} */
+            state: "ready" | "stale" | "held" | "unconfigured";
+            /** Format: int64 */
+            generation: number | null;
+            policy_fingerprint: string;
+            current: components["schemas"]["PaymentFxRateStatus"] | null;
+            candidate: components["schemas"]["PaymentFxCandidate"] | null;
+            /** Format: date-time */
+            last_checked_at: string | null;
+            /** Format: date-time */
+            last_success_at: string | null;
+            last_error_code: string | null;
+            hold_reason: string | null;
+            /** Format: date-time */
+            next_attempt_at: string | null;
+            last_http_status: number | null;
+            refresh_in_progress: boolean;
+            alerts: components["schemas"]["PaymentFxAlerts"];
+            /** Format: date-time */
+            server_time: string;
+        };
+        PaymentOperatorMe: {
+            /** Format: uuid */
+            user_id: string;
+            roles: ("maker" | "checker")[];
+            /** Format: date-time */
+            server_time: string;
+        };
+        PaymentOperatorOrderSummary: {
+            /** Format: uuid */
+            payment_id: string;
+            /** Format: uuid */
+            account_id: string;
+            channel: components["schemas"]["PaymentChannel"];
+            status: components["schemas"]["PaymentStatus"];
+            /** @enum {string} */
+            queue: "verification" | "first_review" | "second_review" | "credited" | "exceptions";
+            /** Format: int64 */
+            credit_amount_minor_hkd: number;
+            /** Format: int64 */
+            pay_amount_minor_cny: number;
+            /** Format: int64 */
+            fee_minor_cny: number;
+            /** Format: int64 */
+            evidence_version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            error_code: string | null;
+            /** @enum {string|null} */
+            refund_status: "requested" | "approved_external" | "unknown" | "evidence_pending" | "refunded" | "evidence_rejected" | null;
+        };
+        PaymentOperatorOrdersPage: {
+            items: components["schemas"]["PaymentOperatorOrderSummary"][];
+            next_cursor: string | null;
+        };
+        PaymentOperatorAuditEvent: {
+            /** Format: uuid */
+            audit_id: string;
+            /** Format: uuid */
+            actor_id: string;
+            /** Format: uuid */
+            payment_id: string | null;
+            action: string;
+            /** Format: date-time */
+            created_at: string;
+            details: {
+                [key: string]: unknown;
+            };
+        };
+        PaymentRefund: {
+            /** Format: uuid */
+            refund_id: string;
+            /** Format: uuid */
+            payment_id: string;
+            /** Format: uuid */
+            client_request_id: string;
+            /** @enum {string} */
+            status: "requested" | "approved_external" | "unknown" | "evidence_pending" | "refunded" | "evidence_rejected";
+            /** Format: int64 */
+            version: number;
+            reason: string;
+            notes: string | null;
+            /** Format: int64 */
+            pay_amount_minor_cny: number;
+            /** Format: int64 */
+            credit_amount_minor_hkd: number;
+            /** Format: int64 */
+            frozen_minor_hkd: number;
+            /** Format: uuid */
+            maker_id: string;
+            /** Format: uuid */
+            checker_id: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            external_reference: string | null;
+            /** Format: date-time */
+            executed_at: string | null;
+            evidence_sha256: string | null;
+            /** Format: uuid */
+            verified_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int64 */
+            evidence_version: number | null;
+            rejection_reason: string | null;
+        };
+        PaymentOperatorOrderDetail: {
+            order: components["schemas"]["PaymentOrder"];
+            merchant_order_no: string;
+            provider_trade_no: string | null;
+            /** Format: date-time */
+            provider_paid_at: string | null;
+            /** Format: date-time */
+            verified_at: string | null;
+            evidence_sha256: string | null;
+            proposal: components["schemas"]["PaymentProposal"] | null;
+            approval: {
+                /** Format: uuid */
+                checker_id: string;
+                /** Format: date-time */
+                created_at: string;
+            } | null;
+            refund: components["schemas"]["PaymentRefund"] | null;
+            audit: components["schemas"]["PaymentOperatorAuditEvent"][];
+        };
+        PaymentRefundCreateRequest: {
+            /** Format: uuid */
+            client_request_id: string;
+            reason: string;
+        };
+        PaymentOperationVersionRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        PaymentRefundUnknownRequest: {
+            /** Format: int64 */
+            version: number;
+            notes: string;
+        };
+        PaymentRefundEvidenceRequest: {
+            /** Format: int64 */
+            version: number;
+            evidence_base64: string;
+            external_reference: string;
+            /** Format: date-time */
+            executed_at: string;
+            notes: string;
+        };
+        PaymentRefundVerifyRequest: {
+            /** Format: int64 */
+            version: number;
+            evidence_sha256: string;
+        };
+        PaymentSettlementDifference: {
+            /** Format: int64 */
+            row: number;
+            code: string;
+        };
+        PaymentSettlement: {
+            /** Format: uuid */
+            settlement_id: string;
+            /** Format: uuid */
+            client_request_id: string;
+            /** @enum {string} */
+            kind: "order_reconciliation" | "bank_settlement" | "hkd_reserve";
+            source: string;
+            /** @enum {string} */
+            currency: "CNY" | "HKD";
+            /** @enum {string} */
+            status: "awaiting_verification" | "discrepancy" | "operator_verified";
+            mapping_sha256: string;
+            evidence_sha256: string;
+            /** @enum {string} */
+            source_document_media_type: "application/pdf" | "text/csv";
+            /** @enum {string} */
+            source_validation: "operator_supplied";
+            bank_reference: string | null;
+            /** Format: int64 */
+            bank_amount_minor: number | null;
+            /** Format: int64 */
+            record_count: number;
+            /** Format: int64 */
+            matched_count: number;
+            differences: components["schemas"]["PaymentSettlementDifference"][];
+            /** Format: uuid */
+            maker_id: string;
+            /** Format: uuid */
+            checker_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            verified_at: string | null;
+            /** Format: int64 */
+            check_version: number;
+        };
+        PaymentSettlementPage: {
+            items: components["schemas"]["PaymentSettlement"][];
+            next_cursor: string | null;
+        };
+        PaymentSettlementImportRequest: {
+            /** Format: uuid */
+            client_request_id: string;
+            /** @enum {string} */
+            kind: "order_reconciliation" | "bank_settlement" | "hkd_reserve";
+            source: string;
+            bank_reference: string | null;
+            /** Format: int64 */
+            bank_amount_minor: number | null;
+            evidence_base64: string;
+            source_document_base64: string;
+            /** @enum {string} */
+            source_document_media_type: "application/pdf" | "text/csv";
+        };
+        PaymentSettlementVerifyRequest: {
+            mapping_sha256: string;
+            evidence_sha256: string;
+        };
+        PaymentSettlementMappingRow: {
+            merchant_order_no: string;
+            provider_trade_no: string;
+            /** Format: int64 */
+            gross_minor: number;
+            /** Format: int64 */
+            channel_fee_minor: number;
+            /** Format: int64 */
+            net_minor: number;
+            /**
+             * @default payment
+             * @enum {string}
+             */
+            entry_kind: "payment" | "refund";
+            refund_external_reference?: string | null;
+        };
+        PaymentSettlementMapping: {
+            /** @enum {string} */
+            currency: "CNY" | "HKD";
+            rows: components["schemas"]["PaymentSettlementMappingRow"][];
+        };
+        /** @enum {string} */
+        PublicNewsTopic: "central_banks" | "fed" | "markets" | "crypto" | "technology";
+        PublicNewsArticle: {
+            title: string;
+            /** Format: uri */
+            url: string;
+            /** @enum {string} */
+            source_id: "fed" | "ecb" | "gdelt_markets" | "gdelt_crypto" | "gdelt_technology";
+            publisher: string;
+            /** Format: date-time */
+            published_at: string | null;
+            /** Format: date-time */
+            indexed_at: string | null;
+        };
+        PublicNewsSource: {
+            /** @enum {string} */
+            id: "fed" | "ecb" | "gdelt_markets" | "gdelt_crypto" | "gdelt_technology";
+            name: string;
+            /** Format: uri */
+            url: string;
+            /** @enum {string} */
+            status: "ready" | "stale" | "unavailable";
+            /** Format: date-time */
+            last_checked_at: string | null;
+            /** Format: date-time */
+            last_success_at: string | null;
+            /** Format: date-time */
+            retry_at: string;
+            /** @enum {string|null} */
+            error_code: "network" | "timeout" | "rate_limited" | "http" | "invalid_data" | "too_large" | "unsafe_destination" | null;
+        };
+        PublicNewsResponse: {
+            /** @enum {integer} */
+            version: 1;
+            topic: components["schemas"]["PublicNewsTopic"];
+            /** Format: date-time */
+            server_time: string;
+            /** @enum {string} */
+            status: "ready" | "partial" | "stale" | "unavailable";
+            records: components["schemas"]["PublicNewsArticle"][];
+            sources: components["schemas"]["PublicNewsSource"][];
+        };
+        PaymentOperatorAuditPage: {
+            items: components["schemas"]["PaymentOperatorAuditEvent"][];
+            next_cursor: string | null;
+        };
+        PaymentRefundEvidenceRejectionRequest: {
+            /** Format: int64 */
+            version: number;
+            evidence_sha256: string;
+            reason: string;
+        };
+        PaymentRefundEvidenceVersion: {
+            /** Format: int64 */
+            evidence_version: number;
+            evidence_sha256: string;
+            external_reference: string;
+            /** Format: date-time */
+            executed_at: string;
+            /** Format: uuid */
+            actor_id: string;
+            notes: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            rejected_by: string | null;
+            rejection_reason: string | null;
+            /** Format: date-time */
+            rejected_at: string | null;
+        };
+        PaymentRefundEvidencePage: {
+            items: components["schemas"]["PaymentRefundEvidenceVersion"][];
+            next_cursor: string | null;
+        };
+        PaymentSettlementRecheckRequest: Record<string, never>;
+        PaymentSettlementCheck: {
+            /** Format: int64 */
+            check_version: number;
+            matched_count: number;
+            differences: components["schemas"]["PaymentSettlementDifference"][];
+            /** Format: uuid */
+            actor_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PaymentSettlementChecksPage: {
+            items: components["schemas"]["PaymentSettlementCheck"][];
+            next_cursor: string | null;
         };
     };
     responses: never;
@@ -6086,6 +6863,2007 @@ export interface operations {
                 };
                 content: {
                     "text/html": string;
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    getPaymentFxStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current public FX evidence metadata; no raw XML or credentials. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentFxStatus"];
+                };
+            };
+            /** @description VALIDATION_ERROR: invalid hash/review reason/body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description UNAUTHORIZED: ordinary Q session missing/inactive/expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description PAYMENT_OPERATOR_REQUIRED: current maker/checker role required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description PAYMENT_FX_CHANGED or PAYMENT_OPERATOR_POLICY_CHANGED: reload current evidence/generation. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description PAYMENTS_UNAVAILABLE: no configured payment runtime. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    activatePaymentFxCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentFxActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Current public FX evidence metadata; no raw XML or credentials. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentFxActivation"];
+                };
+            };
+            /** @description VALIDATION_ERROR: invalid hash/review reason/body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description UNAUTHORIZED: ordinary Q session missing/inactive/expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description PAYMENT_OPERATOR_REQUIRED: current maker/checker role required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description PAYMENT_FX_CHANGED or PAYMENT_OPERATOR_POLICY_CHANGED: reload current evidence/generation. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description PAYMENTS_UNAVAILABLE: no configured payment runtime. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentOperatorMe"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_orders: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                queue?: "verification" | "first_review" | "second_review" | "credited" | "exceptions";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentOperatorOrdersPage"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_orders_payment_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentOperatorOrderDetail"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_orders_payment_id_refunds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_refunds_refund_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_refunds_refund_id_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentOperationVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_refunds_refund_id_unknown: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundUnknownRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_refund_evidence_history: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: number;
+            };
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefundEvidencePage"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_refunds_refund_id_evidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundEvidenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_refunds_refund_id_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_refunds_refund_id_document: {
+        parameters: {
+            query?: {
+                version?: number;
+            };
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_settlements: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlementPage"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_settlements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentSettlementImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlement"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    "payment_operations_get_settlements_by-client-key_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlement"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_settlements_settlement_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                settlement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlement"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_settlements_settlement_id_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                settlement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentSettlementVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlement"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_settlements_settlement_id_document: {
+        parameters: {
+            query?: {
+                part?: "source" | "mapping";
+            };
+            header?: never;
+            path: {
+                settlement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    publicNews: {
+        parameters: {
+            query: {
+                topic: components["schemas"]["PublicNewsTopic"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cache status read, which may explicitly report unavailable source data. */
+            200: {
+                headers: {
+                    /** @description public, max-age=30 */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicNewsResponse"];
+                };
+            };
+            /** @description Structured error including invalid query parameters. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_audit: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                payment_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentOperatorAuditPage"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_refund_evidence_rejections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                refund_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundEvidenceRejectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentRefund"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_post_settlement_rechecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                settlement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentSettlementRecheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlement"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Q session required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Operator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found in the authenticated owner scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Conflict, expired quote or changed evidence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Retry permitted reads after indicated wait; preserve original write intent */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Payments not configured or rate stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    payment_operations_get_settlement_checks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: number;
+            };
+            header?: never;
+            path: {
+                settlement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator-scoped no-store response; evidence downloads are attachment-only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettlementChecksPage"];
                 };
             };
             /** @description Invalid request */

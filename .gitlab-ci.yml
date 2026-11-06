@@ -110,6 +110,7 @@ mobile-check:
     - npm --prefix mobile run test:social
     - npm --prefix mobile run test:payments
     - npm --prefix mobile run api:generate
+    - node backend/scripts/check-contract-fragments.mjs
     - git diff --exit-code -- mobile/shared/src/generated.ts
     - npm --prefix mobile run export:web
 
@@ -186,6 +187,10 @@ backend-check:
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test ai_plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test payments -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test payment_fx -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test payment_operations -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test payment_upgrade -- --ignored
+    - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test market_news -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --test financial_plugins -- --ignored
     - cargo test --locked --manifest-path backend/Cargo.toml --all-features --lib trusted_readonly_rechecks -- --ignored
 

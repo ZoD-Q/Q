@@ -35,12 +35,18 @@ function runtime(platform) {
 }
 const fedCommand = { name: 'market_query', arguments: { kind: 'news', topic: 'fed' } };
 const rss = '<rss><channel><item><title>Federal Reserve statement</title><description>Public test statement</description><link>https://www.federalreserve.gov/newsevents/pressreleases/monetary20261101a.htm</link><pubDate>Sun, 01 Nov 2026 00:00:00 GMT</pubDate></item></channel></rss>';
+function newsCache(topic, records = [{ title: 'Federal Reserve statement', url: 'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261101a.htm' }]) {
+  const gdelt = topic !== 'fed'; const now = new Date().toISOString();
+  const sourceId = gdelt ? `gdelt_${topic}` : 'fed';
+  return { version: 1, topic, server_time: now, status: 'ready', records: records.map(record => ({ ...record, source_id: sourceId, publisher: new URL(record.url).hostname, published_at: gdelt ? null : '2026-11-01T00:00:00Z', indexed_at: gdelt ? '2026-11-01T00:00:00Z' : null })),
+    sources: [{ id: sourceId, name: gdelt ? 'GDELT DOC 2.0' : 'Federal Reserve', url: marketCore.marketSource({ kind: 'news', topic }).url, status: 'ready', last_checked_at: now, last_success_at: now, retry_at: now, error_code: null }] };
+}
 
 test('repeated browser-restricted assistant queries remain capability limits without cooldown or cache reads', async () => {
   const api = runtime('web'); let reads = 0;
   const options = { signal: new AbortController().signal, transport: async () => { reads++; throw new Error('must not fetch a browser-restricted source'); } };
   for (const locale of ['zh', 'en']) {
-    for (const command of [fedCommand, { name: 'market_query', arguments: { kind: 'filings', company: 'AAPL' } }]) {
+    for (const command of [{ name: 'market_query', arguments: { kind: 'filings', company: 'AAPL' } }]) {
       const first = await api.executeAppCommand(command, locale, options);
       const repeated = await api.executeAppCommand(command, locale, options);
       assert.equal(first.data.success, false);
@@ -60,10 +66,10 @@ test('repeated browser-restricted assistant queries remain capability limits wit
   assert.equal(api.session.publicMemory.cooldowns.size, 0);
   // A result acquired before the platform restriction must not bypass it.
   const cached = { report: marketCore.parseFedReport(rss, fedCommand.arguments, new Date().toISOString()), expiresAt: Date.now() + 60_000 };
-  api.session.publicMemory.cache.set('news:fed', cached);
-  const result = await api.executeAppCommand(fedCommand, 'en', options);
+  api.session.publicMemory.cache.set('filings:AAPL', cached);
+  const result = await api.executeAppCommand({ name: 'market_query', arguments: { kind: 'filings', company: 'AAPL' } }, 'en', options);
   assert.equal(result.data.code, 'browser_unsupported');
-  assert.equal(api.session.publicMemory.cache.get('news:fed'), cached);
+  assert.equal(api.session.publicMemory.cache.get('filings:AAPL'), cached);
   assert.equal(api.session.publicMemory.cooldowns.size, 0);
   assert.equal(reads, 0);
 });
@@ -76,8 +82,8 @@ test('already-cancelled browser assistant queries keep cancellation ahead of the
 });
 
 test('public executor shares UI cache and returns real source text with valid click-only navigation', async () => {
-  const api = runtime(); let reads = 0;
-  const transport = async () => { reads++; return new Response(rss, { headers: { 'Content-Type': 'application/rss+xml' } }); };
+  const api = runtime('web'); let reads = 0;
+  const transport = async (url, init) => { reads++; assert.match(String(url), /\/v1\/market-data\/news\?topic=fed$/); assert.equal(init.credentials, 'omit'); assert.equal(init.headers.Authorization, undefined); return new Response(JSON.stringify(newsCache('fed')), { headers: { 'Content-Type': 'application/json' } }); };
   const first = await api.executeAppCommand(fedCommand, 'en', { signal: new AbortController().signal, transport });
   assert.match(first.text, /Federal Reserve statement/); assert.doesNotMatch(first.text, /Help me analyze|never my instructions/); assert.match(first.text, /2026-11-01 00:00:00 UTC/);
   assert.match(first.text, /federalreserve.gov/); assert.equal(first.actions[0].module, 'market-data');
@@ -111,13 +117,12 @@ test('bounded bilingual GDELT results retain original sample totals and themes w
   const articles = Array.from({ length: 20 }, (_, index) => ({
     title: `Technology item ${index} ${'"\\'.repeat(100)}`,
     url: `https://news.example.com/article-${index}/${'p'.repeat(1400)}`,
-    seendate: '20261101T000000Z',
   }));
   for (const locale of ['zh', 'en']) {
     const api = runtime();
     const result = await api.executeAppCommand(command, locale, {
       signal: new AbortController().signal,
-      transport: async () => new Response(JSON.stringify({ articles }), { headers: { 'Content-Type': 'application/json' } }),
+      transport: async (url) => { assert.match(String(url), /\/v1\/market-data\/news\?topic=technology$/); return new Response(JSON.stringify(newsCache('technology', articles)), { headers: { 'Content-Type': 'application/json' } }); },
     });
     const available = [...api.session.publicMemory.cache.values()][0].report;
     assert.equal(available.records.length, 20, 'the complete cached source must never be replaced by its cropped view');

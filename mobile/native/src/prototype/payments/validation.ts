@@ -55,6 +55,7 @@ const statuses = ['creating', 'awaiting_payment', 'confirming', 'awaiting_credit
 /** This proves only this particular command never created a provider payment.
  * Availability of the owner's checkout slot is a separate server-owned decision. */
 export const trustedUnsubmittedProof = (order: PaymentOrder): boolean => order.status === 'failed' && order.error_code === 'not_created' && order.terminal && order.evidence_version === 0 && order.credited_transaction_id === null && order.checkout_url === null;
+export const trustedRefundedProof = (order: PaymentOrder): boolean => order.refund_status === 'refunded' && uuid(order.refund_id) && date(order.refunded_at) && minor(order.refund_version) && order.refund_version > 0 && order.terminal && order.evidence_version > 0;
 export function decodeOrder(v: unknown): PaymentOrder {
   decodeQuote(v);
   if (!object(v) || !uuid(v.payment_id) || !uuid(v.client_request_id) || !str(v.status, 40) || !statuses.includes(v.status) ||
@@ -62,10 +63,22 @@ export function decodeOrder(v: unknown): PaymentOrder {
     !['checkout_detached', 'terminal', 'safe_to_start_new', 'can_detach_checkout'].every(k => bool(v[k])) || !minor(v.poll_after_seconds) ||
     !date(v.created_at) || !date(v.updated_at) || !textOrNull(v.error_code) || !(v.credited_transaction_id === null || uuid(v.credited_transaction_id)) || !minor(v.evidence_version)) return invalid();
   if (v.status === 'credited' && (!uuid(v.credited_transaction_id) || v.evidence_version < 1 || !v.terminal)) return invalid();
+  const refundFields = ['refund_id', 'refund_status', 'refunded_at', 'refund_version'];
+  if (refundFields.some(k => Object.hasOwn(v, k))) {
+    if (!refundFields.every(k => Object.hasOwn(v, k)) || !(v.refund_id === null || uuid(v.refund_id)) ||
+      !(v.refund_status === null || ['requested', 'approved_external', 'evidence_pending', 'evidence_rejected', 'unknown', 'refunded'].includes(String(v.refund_status))) ||
+      !(v.refund_version === null || (minor(v.refund_version) && v.refund_version > 0)) || ((v.refund_id === null) !== (v.refund_version === null)) ||
+      !(v.refunded_at === null || date(v.refunded_at)) || ((v.refund_id === null) !== (v.refund_status === null)) ||
+      ((v.refund_status === 'refunded') !== (v.refunded_at !== null))) return invalid();
+  }
   return v as PaymentOrder;
 }
 export function decodeWallet(v: unknown): PaymentWallet {
   if (!object(v) || v.currency !== 'HKD' || !minor(v.balance_minor) || !date(v.updated_at)) return invalid();
+  if (Object.hasOwn(v, 'frozen_minor') || Object.hasOwn(v, 'available_minor')) {
+    if (!minor(v.frozen_minor) || !minor(v.available_minor) || v.frozen_minor > v.balance_minor ||
+      BigInt(v.frozen_minor) + BigInt(v.available_minor) !== BigInt(v.balance_minor)) return invalid();
+  }
   return v as PaymentWallet;
 }
 export function decodeOrders(v: unknown): PaymentOrdersPage {
@@ -80,8 +93,12 @@ export function decodeDetach(v: unknown): PaymentDetachResponse {
 export function decodeLedger(v: unknown): PaymentLedgerPage {
   if (!object(v) || !Array.isArray(v.items) || v.items.length > 100 || !(v.next_cursor === null || str(v.next_cursor, 4096))) return invalid();
   const items = v.items.map(item => {
-    if (!object(item) || !uuid(item.transaction_id) || !uuid(item.payment_id) || !minor(item.amount_minor) || !minor(item.balance_after_minor) || !date(item.created_at)) return invalid();
-    return { transaction_id: item.transaction_id, payment_id: item.payment_id, amount_minor: item.amount_minor, balance_after_minor: item.balance_after_minor, created_at: item.created_at };
+    if (!object(item) || !uuid(item.transaction_id) || !uuid(item.payment_id) || typeof item.amount_minor !== 'number' || !Number.isSafeInteger(item.amount_minor) || item.amount_minor === 0 || !minor(item.balance_after_minor) || !date(item.created_at)) return invalid();
+    if (item.amount_minor < 0 && (item.kind !== 'refund_reversal' || !uuid(item.refund_id))) return invalid();
+    if (item.kind !== undefined && !['credit', 'refund_reversal'].includes(String(item.kind))) return invalid();
+    if (item.amount_minor > 0 && (item.kind === 'refund_reversal' || (item.refund_id !== undefined && item.refund_id !== null))) return invalid();
+    return { transaction_id: item.transaction_id, payment_id: item.payment_id, amount_minor: item.amount_minor, balance_after_minor: item.balance_after_minor, created_at: item.created_at,
+      ...(item.kind !== undefined ? { kind: item.kind as 'credit' | 'refund_reversal', refund_id: item.refund_id as string | null } : {}) };
   });
   return { items, next_cursor: v.next_cursor };
 }

@@ -29,7 +29,7 @@ function nodes(tree, result = []) {
 const buttonName = node => typeof node.type === 'function' && node.type.name === 'Button' ? node.props.label : null;
 
 /** Runs actual TSX actions and React state/effect transitions, not native layout or transport. */
-function harness({ locale = 'zh', analyze = async () => true, result = report(), market = {}, props = {}, platform = 'ios' } = {}) {
+function harness({ locale = 'zh', analyze = async () => true, result = report(), market = {}, props = {}, platform = 'ios', selectedTopic = 'fed' } = {}) {
   const slots = [], analyses = [], historyLoads = [], openedUrls = [];
   let cursor = 0, tree, effects = [], dirty = true, mounted = true, writesAfterUnmount = 0;
   let currentProps = { active: true, signedIn: true, conversations: [{ id: 'history-fixture', title: 'Existing research' }],
@@ -68,7 +68,7 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
     'lucide-react-native': { ExternalLink: 'ExternalLink', MessageSquare: 'MessageSquare' },
     '../design': design, './core': core, '../company-research/page': { CompanyResearchPanel: 'CompanyResearchPanel' },
     './use-market-data': { useMarketData(selected) {
-      return { report: core.marketQueryKey(selected) === 'news:fed' ? result : null, phase: 'ready', stale: false, fromCache: false,
+      return { report: result && core.marketQueryKey(selected) === core.marketQueryKey(result.query) ? result : null, phase: 'ready', stale: false, fromCache: false,
         coolingDown: false, nextAllowedAt: null, run: noop, cancel: noop, ...market };
     } },
   };
@@ -101,20 +101,46 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
   };
   const sheet = () => render().find(node => node.type === 'Sheet' && node.props.title === (locale === 'zh' ? '选择对话' : 'Choose a chat'));
   render(); press(locale === 'zh' ? '新闻热点' : 'News themes');
+  if (selectedTopic === 'fed') press(locale === 'zh' ? '美联储' : 'Federal Reserve');
   return { render, button, press, sheet, analyses, historyLoads, openedUrls, get writesAfterUnmount() { return writesAfterUnmount; },
     async flush() { for (let i = 0; i < 10; i++) { await Promise.resolve(); if (mounted && dirty) render(); } },
     unmount() { mounted = false; slots.forEach(slot => slot.cleanup?.()); },
   };
 }
 
-test('Web Fed selection explains direct-read limits and offers a real official page without a retry action', () => {
+test('Web Fed selection reads Q cache instead of asking the user to switch platforms', () => {
   const h = harness({ locale: 'en', platform: 'web', result: null, market: { phase: 'idle' } });
   const all = h.render();
-  assert.ok(all.some(node => String(node.props.children).includes('does not allow direct cross-origin browser reads')));
-  assert.ok(!all.some(node => ['Query public data', 'Retry query'].includes(buttonName(node))));
-  h.press('View official source');
-  assert.ok(h.render().some(node => node.props.children === 'https://www.federalreserve.gov/newsevents/pressreleases.htm'));
+  assert.ok(!all.some(node => String(node.props.children).includes('does not allow direct cross-origin browser reads')));
+  assert.ok(all.some(node => buttonName(node) === 'Query public data'));
+  assert.ok(all.some(node => String(node.props.children).includes('shared cache')));
   assert.equal(h.analyses.length, 0);
+});
+
+function centralCache(status = 'partial') {
+  return core.parseNewsCache({ version: 1, topic: 'central_banks', server_time: '2026-11-05T02:00:00Z', status,
+    records: status === 'unavailable' ? [] : [{ title: 'Official policy announcement', url: 'https://www.federalreserve.gov/newsevents/pressreleases/a.htm', source_id: 'fed', publisher: 'Federal Reserve', published_at: '2026-10-28T18:00:00Z', indexed_at: null }],
+    sources: [
+      { id: 'fed', name: 'Federal Reserve', url: 'https://www.federalreserve.gov/feeds/press_monetary.xml', status: status === 'unavailable' ? 'unavailable' : 'ready', last_checked_at: '2026-11-05T01:59:00Z', last_success_at: status === 'unavailable' ? null : '2026-11-05T01:59:00Z', retry_at: '2026-11-05T02:14:00Z', error_code: status === 'unavailable' ? 'network' : null },
+      { id: 'ecb', name: 'European Central Bank', url: 'https://www.ecb.europa.eu/rss/press.html', status: status === 'ready' ? 'ready' : 'unavailable', last_checked_at: '2026-11-05T01:59:00Z', last_success_at: status === 'ready' ? '2026-11-05T01:59:00Z' : null, retry_at: '2026-11-05T02:04:00Z', error_code: status === 'ready' ? null : 'timeout' },
+    ] }, { kind: 'news', topic: 'central_banks' });
+}
+test('partial central-bank results show each source status and explicit collection time', () => {
+  for (const locale of ['zh', 'en']) {
+    const h = harness({ locale, result: centralCache(), selectedTopic: 'central_banks' });
+    const all = h.render();
+    assert.ok(all.some(node => node.props.children === (locale === 'zh' ? '已取得部分来源' : 'Some sources available')));
+    assert.ok(all.some(node => node.props.children === (locale === 'zh' ? '各来源采集状态' : 'Provider collection status')));
+    assert.ok(all.some(node => String(node.props.children).includes(locale === 'zh' ? '不代表全网' : 'not global')));
+    assert.ok(h.button(locale === 'zh' ? '用于对话' : 'Use in chat'));
+  }
+});
+test('unavailable cache does not claim there is no news or offer AI handoff', () => {
+  const h = harness({ locale: 'en', result: centralCache('unavailable'), selectedTopic: 'central_banks' });
+  const all = h.render();
+  assert.ok(all.some(node => node.props.children === 'No available news cache'));
+  assert.ok(all.some(node => String(node.props.children).includes('A failed read does not mean there is no news')));
+  assert.ok(all.filter(node => buttonName(node) === 'Use in chat').every(node => node.props.disabled));
 });
 
 test('the result header pairs Use in chat with its source before all records, with native-sized buttons', () => {
@@ -234,5 +260,21 @@ test('older or failed-refresh results retain their original source and timestamp
     const [draft] = h.analyses[0];
     assert.equal(draft, core.buildResearchDraft({ ...report(), freshness: 'stale' }, 'zh'));
     assert.ok(draft.includes('2026-11-01 03:30:00 UTC'));
+  }
+});
+
+test('news cache handoff preserves last server collection status while marking failed, cancelled or expired views stale', async () => {
+  for (const locale of ['zh', 'en']) for (const market of [{ stale: true }, { phase: 'error', error: new core.MarketDataError('network') }, { phase: 'cancelled' }]) {
+    const result = centralCache('ready');
+    const h = harness({ locale, result, market, selectedTopic: 'central_banks' });
+    h.press(locale === 'zh' ? '用于对话' : 'Use in chat');
+    h.press(locale === 'zh' ? '新建小Q对话' : 'New chat with Q');
+    await h.flush();
+    const [draft] = h.analyses[0];
+    assert.match(draft, locale === 'zh' ? /采集状态：ready/ : /Collection status: ready/);
+    assert.match(draft, locale === 'zh' ? /此结果已标记为旧结果或需刷新/ : /this result is marked as older or needing refresh/);
+    assert.match(draft, locale === 'zh' ? /不代表本次刷新成功/ : /does not mean the current refresh succeeded/);
+    assert.equal(result.newsCache.status, 'ready', 'client staleness must not rewrite the recorded server status');
+    assert.equal(result.newsCache.serverTime, '2026-11-05T02:00:00.000Z');
   }
 });

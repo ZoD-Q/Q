@@ -13,8 +13,8 @@ export default defineConfig({
     launchOptions: !process.env.CI && process.env.Q_ADMIN_BROWSER_PATH ? { executablePath: process.env.Q_ADMIN_BROWSER_PATH } : undefined,
   },
   webServer: process.env.Q_ADMIN_TEST_URL ? undefined : {
-    command: 'npm run preview -- --port 4173 --strictPort',
+    command: 'node scripts/e2e-preview.mjs',
     url: 'http://127.0.0.1:4173/q-admin/',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
   },
 });

@@ -194,10 +194,10 @@ def insert_include(text, protocol):
     return text[:offset] + f'\n    include {target}; # Q static demo only\n' + text[offset:]
 
 
-def security_headers(cache):
+def security_headers(cache, connections="'none'"):
     # Defining the complete set here deliberately prevents inheritance of another app's CSP.
     cache_always = '' if 'immutable' in cache else ' always'
-    return f'''add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; media-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'" always;
+    return f'''add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; media-src 'self'; connect-src {connections}; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'" always;
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy no-referrer always;
@@ -223,6 +223,16 @@ location ^~ /q-admin/ {{
 location = /q-admin {{
     {headers}
     return 308 /q-admin/$is_args$args;
+}}
+location = /q-admin/wallet-payments {{
+    root {root};
+    try_files /q-admin/index.html =404;
+    {security_headers('no-store', "'self'")}
+}}
+location ^~ /q-admin/wallet-payments/ {{
+    root {root};
+    try_files /q-admin/index.html =404;
+    {security_headers('no-store', "'self'")}
 }}
 location = /q-admin/version.json {{
     root {root};

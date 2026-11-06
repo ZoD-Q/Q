@@ -64,7 +64,7 @@ pub async fn claim(pool: &sqlx::PgPool, runtime: &PaymentRuntime) -> ApiResult<O
         let job:Option<(i64,)> =sqlx::query_as("SELECT epoch FROM payment_jobs WHERE payment_id=$1 AND next_attempt_at<=clock_timestamp() AND (leased_until IS NULL OR leased_until<=clock_timestamp()) FOR UPDATE")
  .bind(id).fetch_optional(&mut *tx).await?;
         let Some((epoch,)) = job else { continue };
-        if order.verified_at.is_some() || order.resolved {
+        if order.verified_at.is_some() || order.resolved || order.refund_id.is_some() {
             sqlx::query("DELETE FROM payment_jobs WHERE payment_id=$1")
                 .bind(id)
                 .execute(&mut *tx)
@@ -169,6 +169,7 @@ pub async fn finalize(
     if order.version != claim.order.version
         || order.verified_at.is_some()
         || order.status == "credited"
+        || order.refund_id.is_some()
     {
         sqlx::query("UPDATE payment_jobs SET token=NULL,leased_until=NULL,captured_version=NULL,next_attempt_at=clock_timestamp() WHERE payment_id=$1 AND epoch=$2 AND token=$3")
  .bind(order.id).bind(claim.epoch).bind(claim.token).execute(&mut *tx).await?;

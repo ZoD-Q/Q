@@ -157,10 +157,10 @@ impl Harness {
         h.maker_token = maker_token;
         h.checker = checker;
         h.checker_token = checker_token;
-        h.configure();
+        h.configure().await;
         h
     }
-    fn configure(&mut self) {
+    async fn configure(&mut self) {
         let config = QixiangConfig::new(
             "1001".into(),
             "fixture-secret".into(),
@@ -193,6 +193,12 @@ impl Harness {
         self.state.payments = Some(Arc::new(
             PaymentRuntime::new(client, "1001".into(), policy).unwrap(),
         ));
+        xiaoq_backend::payments::operator::sync_operator_policy(
+            &self.pool,
+            self.state.payments.as_deref().unwrap(),
+        )
+        .await
+        .unwrap();
         self.router = app(self.state.clone(), vec![]);
     }
     async fn request(
@@ -773,6 +779,8 @@ async fn policy_change_invalidates_unused_quote_but_missing_configuration_preser
     let unused = h.quote().await;
     let mut policy = h.state.payments.as_ref().unwrap().policy.clone();
     policy.rate.rate_cny_per_100_hkd = "92".into();
+    // A public rate refresh preserves accepted quotes; changing the business fee does not.
+    policy.fee_basis_points += 1;
     let config = QixiangConfig::new(
         "1001".into(),
         "fixture-secret".into(),
@@ -1228,7 +1236,7 @@ async fn expired_quote_persists_original_key_no_create_receipt_without_provider_
         .0,
         StatusCode::CONFLICT
     );
-    h.configure();
+    h.configure().await;
     let new = h.order().await;
     assert_eq!(new["status"], "creating");
     assert_ne!(new["payment_id"], first.1["payment_id"]);
@@ -1362,7 +1370,7 @@ async fn actual_router_payment_responses_match_concrete_openapi_schemas() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_payment_contract("PaymentCapabilities", &caps, &mut samples);
-    h.configure();
+    h.configure().await;
     for (route, schema) in [
         ("capabilities", "PaymentCapabilities"),
         ("wallet", "PaymentWallet"),
