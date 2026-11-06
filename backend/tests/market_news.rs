@@ -282,7 +282,13 @@ async fn completion_waiting_on_a_lock_rechecks_wall_clock_after_the_wait() {
 #[ignore = "requires dedicated PostgreSQL; no real upstream"]
 async fn gdelt_backoff_is_global_durable_and_honors_retry_after() {
     let h = Harness::new().await;
-    let retry = Utc::now() + Duration::hours(2);
+    // HTTP-date has whole-second precision. Use the database clock so this
+    // fixture also shares the scheduler's time reference.
+    let retry: chrono::DateTime<Utc> =
+        sqlx::query_scalar("SELECT date_trunc('second', clock_timestamp()) + interval '2 hours'")
+            .fetch_one(&h.pool)
+            .await
+            .unwrap();
     let lease = market_data::claim(&h.pool, Source::GdeltMarkets)
         .await
         .unwrap()
@@ -315,7 +321,7 @@ async fn gdelt_backoff_is_global_durable_and_honors_retry_after() {
         .await
         .unwrap();
     assert_eq!(report.status, "unavailable");
-    assert!(report.sources[0].retry_at >= retry);
+    assert_eq!(report.sources[0].retry_at, retry);
     assert_eq!(
         report.sources[0].error_code.as_deref(),
         Some("rate_limited")
