@@ -1,48 +1,41 @@
-# 小Q管理工作台（静态演示原型）
+# 小Q管理工作台
 
-React + TypeScript + Vite 独立网页，浏览器路由与资源前缀均为 `/q-admin/`。默认白底青蓝，支持深色、暖色、中英文和窄屏。39个页面、81条明确虚构的样例记录，覆盖8个产品领域。Mandow/hera是同等演示视角，不是实际管理员授权。
+React、TypeScript、Vite 管理前端，正式入口 `/q-admin/`。所有业务记录来自 Q 服务端；使用 Q 登录后，服务端必须确认 maker/checker 操作权限。普通 Q 账号不获得操作员数据。界面统一黑底、青色正文与操作、红色错误与危险提示，支持中英文、桌面和375px窄屏。
 
-## 运行与验证
+## 已接功能
 
-Node 24，从仓库根执行：
+| 路径 | 数据与行为 |
+| --- | --- |
+| `/q-admin/`、`/q-admin/wallet-payments` | 正式登录；登录后进入支付队列 |
+| `/q-admin/wallet-payments/orders` | 五个支付队列、按订单编号查询、双人审批、退款与凭证历史、原请求恢复 |
+| `/q-admin/wallet-payments/settlements` | 结算/储备材料、分页、独立核材、原材料重核和计算历史 |
+| `/q-admin/wallet-payments/fx` | 服务端参考汇率、时效/暂停、候选与人工激活、原激活恢复 |
+| `/q-admin/wallet-payments/audit` | 支付域审计分页及付款订单筛选，保留服务器事件时间 |
+
+未实现管理接口的历史地址只显示未接入页，不进入正式导航；没有平台总量、全局搜索、演示账号/金额、伪操作员或场景切换。列表只说明当前查询范围、页码和浏览器接收时间，不用当前页条数冒充全量。加载、读取失败、无权限、成功空结果和旧结果分别展示。已删除演示业务组件、目录及彩色形象资产；不提供直接数据库访问。
+
+## 本地开发与验证
+
+使用Node 24，从仓库根执行：
 
 ```sh
 npm --prefix web ci
 npm --prefix web run dev
-# http://127.0.0.1:5173/q-admin/
 npm --prefix web run typecheck
 npm --prefix web run lint
 npm --prefix web test
 npm --prefix web run build
-cd web && npx playwright install chromium && npm run test:e2e
+npm --prefix web run test:e2e
+bash -n web/deploy/deploy.sh web/deploy/remote.sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'
 ```
 
-Playwright验证生产构建，默认自动启动4173端口的预览服务。设置 `Q_ADMIN_TEST_URL=https://8.163.108.216/q-admin/` 可针对公开演示版本运行相同交互测试；测试只操作虚构数据，不调用业务服务。发布脚本另有20项Python标准库测试：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s web/deploy -p 'test_*.py'`。
+普通本地/裸IP页面只显示官方安全入口，不能收集凭据。显式隔离联调需同时提供`VITE_Q_LOCAL_API_TEST=1`、回环`VITE_Q_API_URL`，且页面也必须位于回环地址；服务端CORS仍须预先允许该来源。生产构建脚本强制清除联调变量。不要把浏览器写操作测试指向生产；Playwright使用单独输出与拦截的回环接口。`Q_NGINX_BIN`可指定本地Nginx执行真实路由测试；缺少Nginx时跳过项不是验收通过。CI已提供Nginx。
 
-本地可用 `Q_ADMIN_BROWSER_PATH` 指向已有的 Chromium 可执行文件；需在验收记录中写明实际版本。CI忽略该覆盖，始终使用锁定Playwright对应的浏览器。
+令牌只存在内存，刷新需重新登录。退出、401、页面离开和BFCache恢复均清除敏感表单。待确认写入仅按API来源+账号保存最小恢复引用；原文件和备注不持久化。不明结果先查原记录，不生成新请求替代。参见[钱包工作区](docs/wallet-payments.md)。
 
-2026-11-03 本地回归：修复快速清空列表搜索后切换状态时，旧 URL 参数被恢复的问题。保留同一事件轮次的连续操作并断言 URL；定向重复 10/10、单测 17/17、完整浏览器检查 17/17（含 375px 窄屏）通过，类型、lint 与构建通过。该记录不代表远端 CI 或部署状态。
+## 发布与证据
 
-## 能力与边界
+新制品`version.json`使用`mode: admin`；须先更新服务器受信Web helper，保留受控旧版回退。正式HTML（根、深链和历史地址）统一`connect-src 'self'`与`no-store`，不会开放第三方连接；缺失静态资源返回404。详情见[发布说明](docs/deployment.md)、[设计记录](docs/design.md)与[本轮验收](docs/formal-admin-2026-11-06.md)。
 
-- 用户与会话、AI问题、视频原任务查询、目录展示、内容举报申诉、分阶段退款、配置版本均有可点击流程；每次变更记录操作者和理由。
-- 数据和操作记录只存当前页面内存，刷新/重置恢复初态；不使用业务API、数据库、分析埋点、WebSocket或浏览器持久化，不提供真实登录、凭据输入、支付或资金修改。
-- 公共目录撤下不影响个人连接；未知视频/退款沿原引用查询；配置回退不撤销已发生的业务；模拟QDC只读且不能兑换。
-- 能力基础标签仅说明对应产品底层，页面中的服务状态、用量与金额始终是虚构演示。
-- `domain.ts`管理状态转换，`catalog.ts`管理双语样例，`selectors.ts`统一首页与待办口径；UI复用详情、状态、列表、时间线和确认表单。
-
-## 发布
-
-详细流程见[部署与回退](docs/deployment.md)。仅发布验证通过的同一提交制品，由Nginx提供静态文件，不运行Vite开发服务器。`version.json`记录SHA、构建时间、流水线与构建时工作区是否干净；脏构建只能本地预览，不能发布。
-
-新增依赖用途：React Router用于深层链接与返回；Lucide提供一致图标；Vite提供静态构建；Playwright测试真实浏览器交互；tsx运行类型化纯逻辑测试。没有新增业务后端、UI组件库或状态库。字体为系统字体，原有小Q形象随制品提供。
-
-设计依据见[设计记录](docs/design.md)。开发前阅读[根规范](../AGENTS.md)、[Web补充规范](AGENTS.md)及[插件规范](../backend/docs/plugin-integration.md)。
-
-`public/privacy.html` 为公测隐私与社区说明源文件，计划由 Q API 域名的 `/privacy` 独立提供；它尚未部署，不能把管理网页构建成功视为该地址已可访问。安装位置、CSP 与发布顺序见[公测记录](../backend/deploy/PUBLIC-BETA.md)。
-
-2026-10-22 银行插件源码同步：隐私页说明按 Q 账号保存模拟 HKD 账户与流水，注销清除银行模拟备注、保留最小不可变分录；QDC 原有保留规则不变。该说明不代表已连接真实银行或已发布新版隐私页。本地 `typecheck`、`lint`、17 项逻辑测试、`build` 与 17 项 Playwright 验收通过。
-
-## 真实钱包支付工作区
-
-用户授权新增 `/q-admin/wallet-payments`，入口与演示页分离，复用Q登录后核实服务端角色，提供订单双审、退款、结算凭证与汇率状态。其余页面仍为虚构演示。接口及隐私边界、本地验收开关和部署前条件见[钱包后台说明](docs/wallet-payments.md)。本轮源码不代表已部署或实账验收。
+本轮以GitLab已审核main `e1ecb427`为基线，与GitHub main `e044537`代码树一致。源码完成、隔离验收与正式部署是不同状态；用户已授权提交PR/MR供人工审核；本轮尚未发布，远端检查以对应提交的PR/MR结果为准。`public/privacy.html`为独立`/privacy`部署源，正文和脚本保持原样；后台Vite关闭public目录复制，该文件不进入`/q-admin/`制品。未修改线上隐私页。

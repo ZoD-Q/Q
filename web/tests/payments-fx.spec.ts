@@ -21,7 +21,7 @@ function fx(): FxStatus {
   };
 }
 
-async function fixture(page: Page, options: { status?: FxStatus; outcome?: 'success' | 'unknown-matched' | 'unknown-changed' } = {}) {
+async function fixture(page: Page, options: { status?: FxStatus; outcome?: 'success' | 'unknown-matched' | 'unknown-changed' | 'unknown-old-generation' | 'unknown-wrong-evidence' | 'wrong-receipt-generation' | 'wrong-receipt-snapshot' } = {}) {
   let status = options.status ?? fx();
   let owner = actor;
   const activations: unknown[] = [];
@@ -41,10 +41,11 @@ async function fixture(page: Page, options: { status?: FxStatus; outcome?: 'succ
     if (url.pathname === '/v1/payments/fx/status' && request.method() === 'GET') return send(status);
     if (url.pathname === '/v1/payments/fx/activations' && request.method() === 'POST') {
       activations.push(request.postDataJSON());
-      if (options.outcome !== 'unknown-changed') {
-        status = { ...status, state: 'ready', hold_reason: null, candidate: null, alerts: { within_24h: false, within_6h: false, stale: false, held: false }, current: { ...fx().current!, snapshot_id: candidateId, evidence_sha256: evidence, rate_cny_per_100_hkd: '95.00000000' } };
-      } else status = { ...status, generation: 8 };
-      return options.outcome?.startsWith('unknown') ? send({}, 503) : send({ activation_id: activationId, snapshot_id: candidateId, generation: 7, activated_at: at });
+      status = { ...status, generation: 8, state: 'ready', hold_reason: null, candidate: null, alerts: { within_24h: false, within_6h: false, stale: false, held: false }, current: { ...fx().current!, snapshot_id: candidateId, evidence_sha256: evidence, rate_cny_per_100_hkd: '95.00000000' } };
+      if (options.outcome === 'unknown-changed') status = { ...status, generation: 9 };
+      if (options.outcome === 'unknown-old-generation') status = { ...status, generation: 7 };
+      if (options.outcome === 'unknown-wrong-evidence') status = { ...status, current: { ...status.current!, evidence_sha256: 'd'.repeat(64) } };
+      return options.outcome?.startsWith('unknown') ? send({}, 503) : send({ activation_id: activationId, snapshot_id: options.outcome === 'wrong-receipt-snapshot' ? activeId : candidateId, generation: options.outcome === 'wrong-receipt-generation' ? 7 : 8, activated_at: at });
     }
     unexpected.push(`${request.method()} ${url.pathname}`); return route.abort();
   });
@@ -56,7 +57,7 @@ async function login(page: Page, handle = 'maker') {
   await page.getByLabel('密码', { exact: true }).fill('fixture-only-not-a-secret');
   await page.getByRole('button', { name: '登录并验证角色', exact: true }).click();
   await expect(page.getByRole('button', { name: '退出 / 切换账号', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '汇率状态', exact: true }).click();
+  await page.getByRole('link', { name: '汇率状态', exact: true }).click();
   await expect(page.getByRole('heading', { name: '参考汇率与证据', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /查询当前状态|查询待确认激活/ })).toBeEnabled();
 }
@@ -129,11 +130,37 @@ test('unconfigured and disallowed FX candidates cannot be activated', async ({ p
   expect(f.activations).toEqual([]); expect(f.unexpected).toEqual([]);
 });
 
-test('server-disallowed candidate stays read-only in all themes at 375px', async ({ page }) => {
+test('server-disallowed candidate stays read-only at 375px', async ({ page }) => {
   const initial = fx(); initial.candidate!.manual_activation_allowed = false;
   const f = await fixture(page, { status: initial }); await page.setViewportSize({ width: 375, height: 812 }); await page.goto('wallet-payments'); await login(page);
   await expect(page.getByText(/该候选当前不可人工激活/)).toBeVisible();
   await expect(page.getByRole('button', { name: '核对并激活此候选' })).toHaveCount(0);
-  for (const theme of ['light', 'dark', 'warm']) { await page.getByRole('combobox', { name: '外观主题' }).selectOption(theme); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
+  await expect(page.getByRole('combobox', { name: '外观主题' })).toHaveCount(0); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(f.activations).toEqual([]); expect(f.unexpected).toEqual([]);
 });
+
+
+for (const outcome of ['unknown-old-generation', 'unknown-wrong-evidence'] as const) {
+  test(`FX recovery retains the original request for ${outcome} despite a matching snapshot ID`, async ({ page }) => {
+    const f = await fixture(page, { outcome }); await page.goto('wallet-payments'); await login(page); await confirmActivation(page);
+    await expect(page.getByRole('button', { name: '查询待确认激活' })).toBeVisible();
+    await expect.poll(() => f.activations.length).toBe(1);
+    await page.reload(); await login(page);
+    await page.getByRole('button', { name: '查询待确认激活' }).click();
+    await expect(page.getByText(/当前状态仍不能确认原激活结果/)).toBeVisible();
+    await expect(page.getByRole('button', { name: '查询待确认激活' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '核对并激活此候选' })).toHaveCount(0);
+    expect(f.activations).toHaveLength(1); expect(f.unexpected).toEqual([]);
+  });
+}
+for (const outcome of ['wrong-receipt-generation', 'wrong-receipt-snapshot'] as const) {
+  test(`FX rejects ${outcome} before clearing recovery and accepts the exact N+1 state by query`, async ({ page }) => {
+    const f = await fixture(page, { outcome }); await page.goto('wallet-payments'); await login(page); await confirmActivation(page);
+    await expect(page.getByRole('button', { name: '查询待确认激活' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '服务端已返回激活回执' })).toHaveCount(0);
+    await page.getByRole('button', { name: '查询待确认激活' }).click();
+    await expect(page.getByText(/已核实目标状态/)).toBeVisible();
+    await expect(page.getByRole('button', { name: '查询待确认激活' })).toHaveCount(0);
+    expect(f.activations).toHaveLength(1); expect(f.unexpected).toEqual([]);
+  });
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small standard-library helpers for Q's explicit static demo release.
+"""Small standard-library helpers for Q's explicit admin frontend release.
 
 No business API, database, cloud SDK, or credential discovery belongs here.
 """
@@ -30,6 +30,7 @@ CONFIGS = {
 MAX_BYTES = 100 * 1024 * 1024
 MAX_FILES = 4096
 SHA = re.compile(r'[0-9a-f]{40}')
+RELEASE_MODES = ('admin', 'demo')  # Keep archived demo releases available for rollback.
 TRANSACTION = re.compile(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{40}-[0-9]+')
 EXTENSIONS = {'.html', '.js', '.css', '.json', '.svg', '.png', '.jpg', '.jpeg',
               '.webp', '.avif', '.gif', '.ico', '.woff', '.woff2', '.ttf',
@@ -63,7 +64,7 @@ def safe_asset_name(name):
 def validate_version(data, sha, pipeline_id):
     version = json.loads(data)
     require(version.get('sha') == sha and SHA.fullmatch(sha), 'version.json SHA mismatch')
-    require(version.get('mode') == 'demo', 'Only mode=demo may be published')
+    require(version.get('mode') in RELEASE_MODES, 'Unsupported frontend release mode')
     require(version.get('sourceDirty') is False, 'Build must record sourceDirty=false')
     built_at = version.get('builtAt')
     require(isinstance(built_at, str), 'version.json must record builtAt')
@@ -95,9 +96,9 @@ def package(repo, dist, sha, pipeline_id, output):
         require(total <= MAX_BYTES and len(files) < MAX_FILES, 'Artifact exceeds size/file budget')
         files[name] = data
     require('index.html' in files and 'version.json' in files, 'Missing index.html/version.json')
-    validate_version(files['version.json'], sha, pipeline_id)
+    version = validate_version(files['version.json'], sha, pipeline_id)
     require(b'/q-admin/' in files['index.html'], 'Build must use the /q-admin/ asset base')
-    manifest = {'sha': sha, 'pipelineId': pipeline_id, 'mode': 'demo',
+    manifest = {'sha': sha, 'pipelineId': pipeline_id, 'mode': version['mode'],
                 'files': {name: digest(data) for name, data in files.items()}}
     with tarfile.open(output, 'w:gz') as archive:
         for name, data in [('release.json', json.dumps(manifest, sort_keys=True).encode()),
@@ -132,12 +133,13 @@ def inspect_archive(archive_path, sha, pipeline_id):
     require('release.json' in files, 'Missing release manifest')
     manifest = json.loads(files['release.json'])
     require(manifest.get('sha') == sha and manifest.get('pipelineId') == pipeline_id
-            and manifest.get('mode') == 'demo', 'Release manifest identity mismatch')
+            and manifest.get('mode') in RELEASE_MODES, 'Release manifest identity mismatch')
     actual = {name[len('public/q-admin/'):]: digest(data) for name, data in files.items()
               if name != 'release.json'}
     require(actual == manifest.get('files'), 'Release file hashes do not match')
     require('index.html' in actual and 'version.json' in actual, 'Incomplete public files')
-    validate_version(files['public/q-admin/version.json'], sha, pipeline_id)
+    version = validate_version(files['public/q-admin/version.json'], sha, pipeline_id)
+    require(version['mode'] == manifest['mode'], 'Release mode does not match version.json')
     return files
 
 
@@ -191,7 +193,7 @@ def insert_include(text, protocol):
     block = text[tokens[index][1]:tokens[end - 1][2]]
     require('/q-admin' not in block, 'Existing /q-admin configuration requires manual review')
     offset = tokens[index + 1][2]
-    return text[:offset] + f'\n    include {target}; # Q static demo only\n' + text[offset:]
+    return text[:offset] + f'\n    include {target}; # Q admin frontend only\n' + text[offset:]
 
 
 def security_headers(cache, connections="'none'"):
@@ -208,7 +210,7 @@ def security_headers(cache, connections="'none'"):
 def snippet(protocol):
     headers = security_headers('no-store')
     if protocol == 'http':
-        return f'''# Managed Q static demo. No other route is changed.
+        return f'''# Managed Q admin frontend. No other route is changed.
 location = /q-admin {{
     {headers}
     return 308 https://8.163.108.216/q-admin/$is_args$args;
@@ -219,20 +221,12 @@ location ^~ /q-admin/ {{
 }}
 '''
     root = str(BASE / 'current/public')
-    return f'''# Managed Q static demo. Files are public/q-admin/... inside each release.
+    return f'''# Managed Q admin frontend. Files are public/q-admin/... inside each release.
 location = /q-admin {{
     {headers}
+    # TLS may terminate at the trusted load balancer before this HTTP hop.
+    absolute_redirect off;
     return 308 /q-admin/$is_args$args;
-}}
-location = /q-admin/wallet-payments {{
-    root {root};
-    try_files /q-admin/index.html =404;
-    {security_headers('no-store', "'self'")}
-}}
-location ^~ /q-admin/wallet-payments/ {{
-    root {root};
-    try_files /q-admin/index.html =404;
-    {security_headers('no-store', "'self'")}
 }}
 location = /q-admin/version.json {{
     root {root};
@@ -248,10 +242,15 @@ location ^~ /q-admin/ {{
     root {root};
     index index.html;
     try_files $uri /q-admin/index.html;
-    {security_headers('no-cache')}
+    {security_headers('no-store', "'self'")}
+    # Both direct HTML loads and SPA fallbacks retain the document's API policy.
+    location ~* \\.html$ {{
+        try_files $uri =404;
+    }}
     # A missing file must not masquerade as the SPA document.
     location ~ \\.[^/]+$ {{
         try_files $uri =404;
+        {security_headers('no-store')}
     }}
 }}
 '''

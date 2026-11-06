@@ -56,7 +56,7 @@ async function login(page: Page, user = 'maker') {
   await page.getByLabel('账号', { exact: true }).fill(user);
   await page.getByLabel('密码', { exact: true }).fill('fixture-password');
   await page.getByRole('button', { name: '登录并验证角色', exact: true }).click();
-  await page.getByRole('button', { name: '结算与储备凭证', exact: true }).click();
+  await page.getByRole('link', { name: '结算与储备凭证', exact: true }).click();
   await expect(page.getByRole('heading', { name: '结算与原始凭证', exact: true })).toBeVisible();
 }
 async function importEvidence(page: Page, normalized = mapping) {

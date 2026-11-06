@@ -8,7 +8,7 @@ if (process.env.CI_COMMIT_SHA && process.env.CI_COMMIT_SHA !== sha) {
 }
 writeFileSync(new URL('../dist/version.json', import.meta.url), JSON.stringify({
   sha,
-  mode: 'demo',
+  mode: 'admin',
   sourceDirty: git('status', '--porcelain').length > 0,
   builtAt: new Date().toISOString(),
   pipelineId: process.env.CI_PIPELINE_ID ?? null,

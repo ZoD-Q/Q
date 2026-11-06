@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAdmin } from '../state';
 import { PaymentError } from './api';
+import { localExecutionTime } from './execution-time';
 import { usePayments } from './session';
 import { parseRefund } from './types';
 import { PaymentConfirm } from './controls';
@@ -263,7 +264,7 @@ function RefundPanelSession({ paymentId, payerId, onChanged }: Props) {
         body.notes = notes.trim();
       }
       if (kind === 'evidence') {
-        const time = Date.parse(executedAt);
+        const time = localExecutionTime(executedAt);
         const serverNow = serverClock.current.time + performance.now() - serverClock.current.started;
         if (!upload || !validText(externalReference, 200) || !Number.isFinite(time) || !Number.isFinite(serverNow) || !context?.paidAt || !refund.approved_at || time < Date.parse(context.paidAt) || time < Date.parse(refund.approved_at) || time > serverNow) {
           setError(t('请提供有效凭证、最多 200 字节的外部流水号，以及原付款与退款批准之后、当前服务端时间之前的执行时间。', 'Provide evidence, an external reference within 200 bytes, and an execution time after both the original payment and refund approval, and before current server time.')); return;
@@ -430,7 +431,7 @@ function RefundPanelSession({ paymentId, payerId, onChanged }: Props) {
             <label className="field">{t('凭证文件（最多 128 KiB）', 'Evidence file (up to 128 KiB)')}<input ref={fileInput} type="file" onChange={(event) => void chooseFile(event.target.files?.[0])}/></label>
             {upload && <p>{upload.name} · {upload.size} bytes<br/><code className="pay-hash">SHA-256 {upload.hash}</code></p>}
             <label className="field">{t('外部退款流水（最多 200 字节）', 'External refund reference (up to 200 bytes)')}<input value={externalReference} maxLength={200} onChange={(event) => setExternalReference(event.target.value)}/></label>
-            <label className="field">{t('实际执行时间（本机时区）', 'Actual execution time (device time zone)')}<input type="datetime-local" value={executedAt} onChange={(event) => setExecutedAt(event.target.value)}/></label>
+            <label className="field">{t('实际执行时间（本机时区）', 'Actual execution time (device time zone)')}<input type="text" autoComplete="off" spellCheck={false} placeholder="YYYY-MM-DDTHH:mm:ss.SSS" aria-describedby="refund-time-format" value={executedAt} onChange={(event) => setExecutedAt(event.target.value)}/><small id="refund-time-format">{t('按本机时区输入，格式 YYYY-MM-DDTHH:mm:ss.SSS。', 'Enter device-local time as YYYY-MM-DDTHH:mm:ss.SSS.')}</small></label>
           </fieldset>{actionButton('evidence')}
         </>}
         {refund.evidence_sha256 && <button type="button" className="button secondary" disabled={busy} onClick={() => void download()}>{t('下载原凭证核对', 'Download original evidence')}</button>}
