@@ -15,14 +15,14 @@ import deploy_tools as deploy
 
 
 class ReleaseTests(unittest.TestCase):
-    def test_payment_connect_policy_is_confined_to_exact_wallet_documents(self):
+    def test_admin_connect_policy_is_same_origin_and_not_added_to_static_responses(self):
         https = deploy.snippet('https')
-        self.assertIn('location = /q-admin/wallet-payments {', https)
-        self.assertIn('location ^~ /q-admin/wallet-payments/ {', https)
-        self.assertNotIn('location ^~ /q-admin/wallet-payments {', https)
-        self.assertEqual(https.count("connect-src 'self';"), 2)
-        self.assertIn("connect-src 'none'", deploy.security_headers('no-cache'))
+        self.assertNotIn('location = /q-admin/wallet-payments {', https)
+        self.assertEqual(https.count("connect-src 'self';"), 1)
+        self.assertIn("connect-src 'none'", deploy.security_headers('no-store'))
         self.assertNotIn("connect-src 'self'", deploy.snippet('http'))
+        self.assertNotIn('connect-src https:', https)
+        self.assertNotIn('connect-src *', https)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -41,7 +41,7 @@ class ReleaseTests(unittest.TestCase):
         (self.dist / 'assets').mkdir(parents=True)
         (self.dist / 'index.html').write_text('<script src="/q-admin/assets/index-abc123.js"></script>')
         (self.dist / 'assets/index-abc123.js').write_text('console.log("demo")')
-        self.version = {'sha': self.sha, 'mode': 'demo', 'sourceDirty': False,
+        self.version = {'sha': self.sha, 'mode': 'admin', 'sourceDirty': False,
                         'builtAt': '2026-10-19T12:00:00Z', 'pipelineId': '123'}
         self.write_version()
         self.archive = self.root / 'release.tar.gz'
@@ -79,6 +79,36 @@ class ReleaseTests(unittest.TestCase):
         self.package()
         files = deploy.inspect_archive(self.archive, self.sha, '123')
         self.assertEqual(files['public/q-admin/index.html'], (self.dist / 'index.html').read_bytes())
+        self.assertEqual(json.loads(files['release.json'])['mode'], 'admin')
+
+    def test_legacy_demo_archive_is_still_valid(self):
+        self.version['mode'] = 'demo'
+        self.write_version()
+        self.package()
+        files = deploy.inspect_archive(self.archive, self.sha, '123')
+        self.assertEqual(json.loads(files['release.json'])['mode'], 'demo')
+
+    def test_unknown_release_mode_is_rejected(self):
+        for mode in ('production', '', None):
+            with self.subTest(mode=mode):
+                self.version['mode'] = mode
+                self.write_version()
+                with self.assertRaisesRegex(ValueError, 'release mode'):
+                    self.package()
+
+    def test_manifest_cannot_claim_a_different_valid_release_mode(self):
+        self.package()
+        files = deploy.inspect_archive(self.archive, self.sha, '123')
+        manifest = json.loads(files['release.json'])
+        manifest['mode'] = 'demo'
+        files['release.json'] = json.dumps(manifest).encode()
+        with tarfile.open(self.archive, 'w:gz') as archive:
+            for name, data in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        with self.assertRaisesRegex(ValueError, 'mode does not match'):
+            deploy.inspect_archive(self.archive, self.sha, '123')
 
     def test_validate_only_entrypoint_does_not_use_ssh(self):
         scripts = self.repo / 'web/deploy'
@@ -161,7 +191,7 @@ class ReleaseTests(unittest.TestCase):
     def test_server_selection_preserves_other_servers(self):
         text = '# server { ignored }\nserver { listen 80; server_name 8.163.108.216; location / { return 200 "}"; } }\nserver { listen 443 ssl; server_name preview.example; }\n'
         result = deploy.insert_include(text, 'http')
-        marker = f'\n    include {deploy.SNIPPETS}/http.conf; # Q static demo only\n'
+        marker = f'\n    include {deploy.SNIPPETS}/http.conf; # Q admin frontend only\n'
         self.assertEqual(result.replace(marker, ''), text)
         self.assertEqual(deploy.insert_include(result, 'http'), result)
         with self.assertRaises(ValueError):
@@ -182,6 +212,10 @@ class ReleaseTests(unittest.TestCase):
         old_sha = '1' * 40
         old = deploy.BASE / 'releases' / old_sha
         old.mkdir()
+        old_version = old / 'public/q-admin/version.json'
+        old_version.parent.mkdir(parents=True)
+        archived_demo = json.dumps({**self.version, 'sha': old_sha, 'mode': 'demo'}).encode()
+        old_version.write_bytes(archived_demo)
         state_file = deploy.state_path(self.transaction)
         state = json.loads(state_file.read_text())
         state['previous'] = str(old)
@@ -190,6 +224,7 @@ class ReleaseTests(unittest.TestCase):
         deploy.activate(self.transaction)
         deploy.restore(self.transaction)
         self.assertEqual(deploy.current_target(), str(old))
+        self.assertEqual(old_version.read_bytes(), archived_demo)
 
     def test_restore_preserves_concurrent_configuration_edit(self):
         self.prepare()

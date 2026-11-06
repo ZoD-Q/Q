@@ -140,42 +140,33 @@ test('unknown approval only resolves when checker, proposal and both evidence ve
   expect(f.unexpected).toEqual([]);
 });
 
-test('crossing demo and payment surfaces loads a new document with the correct CSP', async ({ page }) => {
+test('root and payment deep links load authenticated documents with consistent CSP', async ({ page }) => {
   const f = await fixture(page);
   const documents: string[] = [];
   await page.route('**/q-admin/**', async (route) => {
-    const request = route.request();
-    if (request.resourceType() !== 'document') return route.fallback();
-    const url = new URL(request.url());
-    if (!['localhost', '127.0.0.1'].includes(url.hostname)) return route.abort();
-    documents.push(url.pathname);
+    if (route.request().resourceType() !== 'document') return route.fallback();
+    documents.push(new URL(route.request().url()).pathname);
     const response = await route.fetch();
-    const connections = url.pathname === '/q-admin/wallet-payments' || url.pathname.startsWith('/q-admin/wallet-payments/') ? "'self' http://127.0.0.1:18789" : "'none'";
-    await route.fulfill({ response, headers: { ...response.headers(), 'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src ${connections}; form-action 'none'; base-uri 'self'` } });
+    await route.fulfill({ response, headers: { ...response.headers(), 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self' http://127.0.0.1:18789; form-action 'none'; base-uri 'self'" } });
   });
-  await page.goto('./');
+  await page.goto('./'); await login(page);
   const initialCount = documents.length;
-  await page.getByRole('link', { name: '钱包支付 · 真实工作区', exact: true }).click();
+  await page.getByRole('link', { name: '支付审核与退款', exact: true }).click();
+  await expect(page).toHaveURL(/wallet-payments\/orders$/);
+  expect(documents.length).toBe(initialCount);
+  await page.reload();
   await expect(page.getByRole('button', { name: '登录并验证角色', exact: true })).toBeVisible();
-  expect(documents.length).toBe(initialCount + 1);
-  expect(documents.at(-1)).toBe('/q-admin/wallet-payments');
   await login(page);
-  await page.getByRole('link', { name: '返回演示后台', exact: true }).click();
-  await expect(page.getByText('演示原型', { exact: true })).toBeVisible();
-  expect(documents.length).toBe(initialCount + 2);
-  expect(documents.at(-1)).toBe('/q-admin/');
-  // The destination document must regain connect-src 'none', not retain the
-  // authenticated workspace's wider policy after a client-side route change.
-  const blocked = await page.evaluate(async () => { try { await fetch('http://127.0.0.1:18789/v1/payments/fx/status'); return false; } catch { return true; } });
-  expect(blocked).toBe(true);
-  expect(f.posts()).toBe(0); expect(f.unexpected).toEqual([]);
+  expect(documents.at(-1)).toBe('/q-admin/wallet-payments/orders');
+  const blocked = await page.evaluate(async () => { try { await fetch('https://example.invalid/v1/probe'); return false; } catch { return true; } });
+  expect(blocked).toBe(true); expect(f.posts()).toBe(0); expect(f.unexpected).toEqual([]);
 });
 
 test('pagehide synchronously removes protected file forms and persisted pageshow returns to clean sign-in', async ({ page }) => {
   const f = await fixture(page);
   await page.route(/^http:\/\/127\.0\.0\.1:18789\/v1\/payments\/operator\/settlements(?:\?.*)?$/, (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [], next_cursor: null }), headers: { 'Access-Control-Allow-Origin': '*' } }));
   await page.goto('wallet-payments'); await login(page);
-  await page.getByRole('button', { name: '结算与储备凭证', exact: true }).click();
+  await page.getByRole('link', { name: '结算与储备凭证', exact: true }).click();
   await page.getByLabel('资料来源名称', { exact: true }).fill('private-file-form-marker');
   await page.getByLabel('规范化 JSON 文件', { exact: true }).setInputFiles({ name: 'private-mapping.json', mimeType: 'application/json', buffer: Buffer.from('{"private":"not-submitted"}') });
   const immediate = await page.evaluate(() => {
@@ -227,10 +218,10 @@ test('late 401 from a pre-pagehide request cannot expire a newly authenticated s
   expect(f.posts()).toBe(0); expect(f.unexpected).toEqual([]);
 });
 
-test('browser back from the demo never restores the authenticated payment document', async ({ page }) => {
+test('browser back from an unavailable page never restores the authenticated payment document', async ({ page }) => {
   const f = await fixture(page); await page.goto('wallet-payments'); await login(page); await find(page, first);
-  await page.getByRole('link', { name: '返回演示后台', exact: true }).click();
-  await expect(page.getByText('演示原型', { exact: true })).toBeVisible();
+  await page.goto('accounts');
+  await expect(page.getByRole('heading', { name: '此模块尚未接入正式后台', exact: true })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('button', { name: '登录并验证角色', exact: true })).toBeVisible();
   await expect(page.locator('article.pay-detail')).toHaveCount(0);
@@ -252,10 +243,10 @@ test('production bundle on the public IP refuses credentials and offers only the
   });
   // Every request to this address is fulfilled from local production files above.
   await page.goto('https://8.163.108.216/q-admin/wallet-payments');
-  await expect(page.getByRole('heading', { name: '请打开小Q官方钱包后台', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '请使用小Q官方后台', exact: true })).toBeVisible();
   await expect(page.locator('input[type=password]')).toHaveCount(0);
   await expect(page.getByLabel('账号', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '登录并验证角色', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: '打开官方钱包后台', exact: true })).toHaveAttribute('href', 'https://q.kaicloudpay.com/q-admin/wallet-payments');
+  await expect(page.getByRole('link', { name: '打开官方后台', exact: true })).toHaveAttribute('href', 'https://q.kaicloudpay.com/q-admin/');
   expect(unexpected).toEqual([]);
 });
