@@ -39,3 +39,9 @@
 ## 独立 review
 
 只读review后修复并复核：推荐抢占最后额度（现预留四次正文调用）、通用模块名称误推荐、多轮澄清的短参数漏召回、失效卡片的错误恢复指引，以及Web标识符存储说明。最新复核无未解决阻断。最终GitHub/GitLab流水线须以实际推送提交为准，人工审核与合并仍由维护者执行；本任务不部署或自动合并。
+
+## 已完成的远端检查
+
+功能提交 `596d0125680977c12bcffe6bc95d9220830e873a` 的 [GitHub push 检查](https://github.com/ZoD-Q/Q/actions/runs/42449513339)、[GitHub PR 检查](https://github.com/ZoD-Q/Q/actions/runs/42450264324)与[GitLab分支流水线 #12268](https://gitlab.kai.com/KAI/oD/ZoD/Q/-/pipelines/12268)已实际通过，包含 PostgreSQL 17/18 矩阵。GitLab的人工打包作业没有运行，不属于本次必要验证，也未执行部署。
+
+GitHub审核入口为 [PR #12](https://github.com/ZoD-Q/Q/pull/12)。后续文档提交的状态以相应审核页最新检查为准，不将上述旧提交结果自动视为后续提交通过。
