@@ -2,6 +2,8 @@
 
 这套流程面向现有 `8.163.108.216` 内部联调服务器，环境名为 `staging/api` 与 `staging/admin`，不是生产就绪声明。开发者推送 `Mandow` / `hera`，检查通过后人工审核并合并 MR；main 自动检查、打包，再人工点击需要更新的组件。Agent 不合并 MR，不启用自动合并。
 
+2026-11-08现场结果：受信接收器及六个helper已安装，摘要与当次已审核main一致。管理网页作业62233真实发布成功；API作业62232通过readiness后传输超时，核对无激活后使用同一CI制品完成经授权的运维备用发布。API手工回执与CI失败保留，主线流水线整体不记为成功。完整证据见[公开研究发布记录](RESEARCH-2026-11-08.md)；本文下方10月的安装/接线状态均为当日历史。
+
 ## 发布与结果
 
 1. main 上 `source-check`、`web-check`、`mobile-check`、`backend-check`（PostgreSQL 17/18）及 `deploy-check` 必须通过。
@@ -9,7 +11,7 @@
 3. 在 Pipeline 点击 `deploy-staging-api` 或 `deploy-staging-admin`。两个任务共享资源锁，不能并发。main 前进后旧流水线会被拒绝；必须重新验证新 main。未点击的任务显示 blocked/waiting，不是测试失败。
 4. 成功前必须核验服务健康与实际版本。API 同时核对运行容器 image ID 和 `/proc/1/exe` 摘要；管理网页核对 release 目标、文件摘要及 HTTPS smoke。GitLab Environments 显示对应提交、作业和部署结果，作业保留不含凭据的 receipt 制品 30 天。
 
-管理网页地址为 `https://8.163.108.216/q-admin/`。API 公网入口为 `https://q.kaicloudpay.com`，经 HTTPS 负载均衡与专属 Nginx 转发至内部网关；`127.0.0.1:18787` 仅供服务器内部运维，不作为 GitLab 外部入口。当前实际发布版本与公测准备状态见 [部署状态](STATUS.md)。
+正式管理网页地址为 `https://q.kaicloudpay.com/q-admin/`，真实登录仅允许官方同源。CI environment URL保留的 `https://8.163.108.216/q-admin/` 是运维兼容入口，不作为真实登录地址。API公网入口为 `https://q.kaicloudpay.com`，经HTTPS负载均衡与专属Nginx转发至内部网关；`127.0.0.1:18787`仅供服务器内部运维。当前实际发布版本与公测准备状态见[部署状态](STATUS.md)。
 
 打包使用固定的 `cargo-zigbuild 0.23.4` 与 `ziglang 0.17.0`，仅安装 [工具清单](release-tools.requirements.txt) 中校验过的官方 Linux ARM64/x86_64 wheels，不增加业务运行依赖。更新工具版本时须同步哈希，并在实际 Runner 重新构建、核对下载的制品。`.2.36` 是构建目标设置，不能替代实际动态依赖与运行兼容性验收。用 [cargo-zigbuild 官方方式](https://github.com/rust-cross/cargo-zigbuild#specify-glibc-version) 显式指定目标，避免把 Runner 标签或宿主 `uname` 当作产物架构证明。
 
