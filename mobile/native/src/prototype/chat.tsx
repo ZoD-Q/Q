@@ -59,17 +59,20 @@ import { FinanceTaskSheet } from './finance-agent/panel';
 import { FinanceResultCard } from './finance-agent/result-card';
 import { FinanceAdSettings } from './finance-ads';
 import { APP_MODULES, createAppNavigationAction, type AppNavigationAction } from './app-assistant/core';
+import { RecommendationCards } from './recommendations/cards';
+import { recommendationError, recommendationTurnKey, recommendationUnderAnswer } from './recommendations/core';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
 export function QGlyph({ size = 48 }: { size?: number }) {
   return <QCompanion size={size} showBadge={false} />;
 }
-export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData, onOpenAppAction }: {
+export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData, onOpenAppAction, onSelectRecommendation }: {
   controller: ChatController;
   onOpenPlugins: () => void;
   onOpenFinancialService: (category: 'installments' | 'insurance' | 'finance') => void;
   onOpenMarketData: () => void;
   onOpenAppAction?: (action: AppNavigationAction) => void;
+  onSelectRecommendation?: (recordId: string, candidateId: string, continueExisting?: boolean) => void;
 }) {
   const { conversation, draft, setDraft, model, setModel, think, setThink } = controller;
   const { colors, text, phone, locale } = useDesign();
@@ -389,6 +392,14 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
               gap: 28,
             }}
           >
+            {controller.pendingRecommendation && (controller.pendingRecommendation.sourceConversationId === conversation?.id || controller.pendingRecommendation.targetConversationId === conversation?.id) ? <View testID="recommendation-continuation" style={{ backgroundColor: colors.soft, borderRadius: 18, padding: 16, gap: 8 }}>
+              <Type size={13} muted>{controller.pendingRecommendation.targetConversationId === conversation?.id ? text('从原对话继续', 'Continued from your chat') : controller.pendingRecommendation.targetConversationId ? text('这次需求已转入专属对话。', 'This request has its own conversation.') : text('原问题已保留，完成连接或授权后可继续。', 'Your request is saved. Continue after connecting or authorizing.')}</Type>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {controller.pendingRecommendation.targetConversationId === conversation?.id ? <Action kind="ghost" label={text('返回原对话', 'Back to original chat')} disabled={controller.busy || Boolean(controller.recommendationBusy)} onPress={controller.openRecommendationSource} style={{ minHeight: 48 }} /> : null}
+                {onSelectRecommendation && (controller.pendingRecommendation.sourceConversationId === conversation?.id || controller.canContinueRecommendation) ? <Action label={controller.pendingRecommendation.sourceConversationId === conversation?.id && controller.pendingRecommendation.targetConversationId ? text('打开专属对话', 'Open dedicated chat') : text('继续原问题', 'Continue original request')} disabled={controller.busy || controller.historyBusy || Boolean(controller.recommendationBusy)} onPress={() => { const pending = controller.pendingRecommendation!; onSelectRecommendation(pending.recordId, pending.candidateId, pending.sourceConversationId !== conversation?.id || !pending.targetConversationId); }} style={{ minHeight: 48 }} /> : null}
+              </View>
+              {controller.recommendationError?.recordId === controller.pendingRecommendation.recordId ? <Type size={13} color={colors.danger}>{recommendationError(controller.recommendationError.code, text)}</Type> : null}
+            </View> : null}
             {conversation!.messages.map((message) => toolResultIsAnswered(conversation!, message.id) && message.toolProposalId && controller.session && conversation?.plugin
               ? <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} mediaOnly /> : (
               <Reveal
@@ -421,6 +432,12 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
                 {onOpenAppAction && controller.appActions?.[message.id]?.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {controller.appActions[message.id].map((action, index) => <Action key={`${action.module}:${index}`} kind="secondary" label={action.label} disabled={controller.busy || controller.historyBusy} onPress={() => onOpenAppAction(action)} />)}
                 </View> : null}
+                {onSelectRecommendation && (() => {
+                  const record = recommendationUnderAnswer(conversation!, message.id, controller.recommendations ?? {});
+                  return record ? <RecommendationCards record={record} actions={controller.appActions?.[message.id]} coveredModules={controller.recommendationCoverage?.[recommendationTurnKey(record.conversation_id, record.source_message_id)]} busyId={controller.recommendationBusy?.recordId === record.id ? controller.recommendationBusy.candidateId : null}
+                    disabled={controller.busy || controller.historyBusy || controller.authBusy || Boolean(controller.recommendationBusy)} error={controller.recommendationError?.recordId === record.id ? controller.recommendationError.code : ''}
+                    onSelect={candidate => onSelectRecommendation(record.id, candidate.id)} /> : null;
+                })()}
                 {localOnly && message.financeResult ? <FinanceResultCard result={message.financeResult} /> : null}
                 {message.toolProposalId && controller.session && conversation?.plugin && <ChatProposal key={`${controller.session.token}:${message.toolProposalId}`} id={message.toolProposalId} token={controller.session.token} connectionId={conversation.plugin.id} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onContinue={message.id === conversation.messages.at(-1)?.id && !controller.busy ? () => { void controller.resumeTool(message.id, message.toolProposalId!); } : undefined} />}
                 {message.id === conversation?.messages.at(-1)?.id && message.id === controller.toolResumeTarget?.messageId && message.toolProposalId
@@ -434,6 +451,8 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
                   ? <Action kind="ghost" icon={RotateCcw} label={controller.canResumeAppResult?.(message.id) ? text('继续解释已取得资料', 'Explain the saved results') : text("重试回答", "Retry answer")} onPress={() => { if (controller.canResumeAppResult?.(message.id)) void controller.resumeAppResult(message.id); else controller.retry(); }} disabled={controller.busy || controller.authBusy || controller.historyBusy} style={{ alignSelf: "flex-start" }} /> : null}
               </Reveal>
             ))}
+            {controller.recommendationCursor || controller.recommendationHistoryError ? <Action kind="ghost" label={controller.recommendationHistoryError ? text('重试同步推荐', 'Retry loading recommendations') : text('显示更早的推荐', 'Earlier recommendations')}
+              disabled={controller.busy || controller.historyBusy || Boolean(controller.recommendationBusy)} onPress={() => { void controller.loadRecommendations(!controller.recommendationHistoryError); }} style={{ alignSelf: 'flex-start', minHeight: 48 }} /> : null}
           </ScrollView>
       ) : (
         <ScrollView
@@ -572,8 +591,8 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
       {controller.authOpen ? <ChatAuthSheet controller={controller} /> : null}
       <Sheet visible={controller.aiConsentOpen} title={text('使用 DeepSeek 对话', 'Chat with DeepSeek')} onClose={controller.cancelAiSharing}>
         <Type>{text(
-          '为了生成回答，小Q会将你发送的文字和本次对话所需的上下文，通过小Q服务器交给第三方 DeepSeek 处理。使用插件续答时，还会发送所选插件的工具说明、参数及相关文字结果。',
-          'To generate a reply, Q sends your text and the relevant conversation context through its server to the third-party provider DeepSeek. Plugin conversations also share the selected tool descriptions, arguments, and relevant text results.',
+          '为了生成回答，小Q会将你发送的文字和本次对话所需的上下文，通过小Q服务器交给第三方 DeepSeek 处理。启用服务推荐时，还会提供候选服务的用途与连接状态，不包含凭据或插件私有结果。使用插件续答时，会发送所选插件的工具说明、参数及相关文字结果。',
+          'To generate a reply, Q sends your text and relevant conversation context through its server to the third-party provider DeepSeek. When service recommendations are enabled, candidate purposes and connection readiness are also shared, without credentials or private plugin results. Plugin conversations share the selected tool descriptions, arguments, and relevant text results.',
         )}</Type>
         <Type muted size={13}>{text(
           '同意仅对本次登录会话有效。你可以在设置中撤回，停止当前响应；已经发送给服务方的内容无法撤回。不必同意也能使用账号和好友功能。',

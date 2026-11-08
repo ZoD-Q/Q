@@ -14,6 +14,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 const core = await import('../plugin-host/core.ts');
 const workbench = await import('../api-workbench/core.ts');
 const appAssistant = await import('../app-assistant/core.ts');
+const recommendations = await import('../recommendations/core.ts');
 test.after(() => resolver.deregister());
 
 const noop = () => {};
@@ -26,7 +27,7 @@ const icons = Object.fromEntries(['ArrowUp', 'ArrowLeft', 'Check', 'ChevronDown'
 function component(path, imports) {
   const source = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const module = { exports: {} };
-  const common = { react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react-native': icons, './app-assistant/core': appAssistant };
+  const common = { react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react-native': icons, './app-assistant/core': appAssistant, './recommendations/cards': { RecommendationCards: 'RecommendationCards' }, './recommendations/core': recommendations };
   runInNewContext(source, { module, exports: module.exports, process: { env: { EXPO_OS: 'ios' } }, require: name => {
     const provided = { ...common, ...imports };
     assert.ok(name in provided, `Unmocked component dependency: ${name}`);

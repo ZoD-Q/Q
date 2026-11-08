@@ -235,3 +235,53 @@ The authenticated `GET /v1/plugins/financial/providers` returns six fixed profil
 Connections retain `remote_mcp` with optional `financial_provider_id`; external Card metadata cannot select profiles. iFinD uses the official combined nine-tool service, excluding Kuaicha/Fazhi. Massive exposes search_endpoints and stateless call_api only, excluding query_data and forbidding store_as/api_key/credential-like arguments before preparation and execution. Alpha/Twelve expose explicitly selected research tools; tool schemas always come from runtime discovery. All third-party calls retain proposal/confirmation, stored invocation and bounded continuation; `readOnlyHint` grants no automatic execution.
 
 This isolated compatibility path supports MCP 2025-03-26/2025-06-18/2025-11-25 initialization sessions with a total 30-second catalog/call timeout, bounded bodies/pagination/schemas and no business retries. Unsupported resources/prompts return typed unsupported errors. Ordinary Card/Catalog services retain the 2026 baseline. Twelve uses CIMD; only fixed Massive/Alpha profiles allow public PKCE dynamic registration at their verified official issuers/endpoints. API-key storage needs encryption alone; OAuth still needs public Q hosting. Vendor entitlements and actual business validation remain separate from fixture coverage.
+
+# Natural-language recommendations (version 1)
+
+Discovery adds optional `recommendations_version: 0 | 1` to `GET /v1/ai/status`.
+`Q_AI_RECOMMENDATIONS` defaults to false. Clients must see version 1 before using
+these authenticated, account-owned endpoints. Responses are `Cache-Control: no-store`.
+
+- `POST /v1/ai/recommendations`: `conversation_id`, saved `source_message_id`, UUID
+  `request_id`, `locale: zh | en`. The server extracts the saved question and at most
+  two complete ordinary preceding rounds, never accepts client-supplied ranking
+  context, and binds their content digest. Private tool results are excluded.
+  Exact service requests use rules; other requests recall at most 12 candidates
+  and make at most one bounded Flash choice. Result has zero to three server-owned
+  candidates. Five-second total budget; saturation/failure preserves the main answer.
+- `GET /v1/ai/recommendations?conversation_id=…&limit=20&cursor=…`: restore cards
+  with stable descending creation-time/UUID pagination. Limit 1–20. No model or
+  tool calls. Each source conversation retains up to 100 records; cards expire
+  after seven days. Source deletion/account erasure cascades recommendations.
+- `POST /v1/ai/recommendations/{id}/select` with `candidate_id`: check current
+  source digest, ownership, access, capability version and connection revision.
+  Return `conversation`, `connect`, `authorize`, `review` or `navigate` plus current
+  server metadata. A dedicated target is created transactionally with the same
+  account lock and quota as history. It returns an `AiConversation` with its CAS
+  revision. `(recommendation, candidate)` is unique; replay returns the current
+  target without overwriting later messages. A deleted target cannot be recreated
+  through the same card. The endpoint itself never executes a business tool.
+
+The client may continue automatically only after a known first creation. Lost
+responses, repeated selections and reloaded history require explicit continuation
+of an untouched user turn. Pending connect/auth/review selections retain only
+identifiers and must call select again after setup; saved cards are never credentials.
+Navigation is restricted to existing module identifiers. Existing write/payment/tool
+confirmation is unchanged. Selection is not a new authorization grant.
+
+Stable recommendation conflicts include `RECOMMENDATION_PENDING`,
+`RECOMMENDATION_REQUEST_REUSED`, `RECOMMENDATION_SOURCE_UNAVAILABLE`, and
+`RECOMMENDATION_STALE`. `RECOMMENDATION_REQUEST_LIMIT` (409) caps the accepted
+request aliases for one source at 32; recover with GET instead of new request IDs.
+`RECOMMENDATIONS_DISABLED` and `RECOMMENDATION_NOT_FOUND` are 404. Disabled functionality and unavailable records are not
+found; source ownership is never disclosed. Deadline expiry uses
+`RECOMMENDATION_TIMEOUT`. Existing auth, rate, history-quota and validation errors
+retain their meanings. Same request ID with changed source content/locale conflicts;
+another request ID for the same source digest returns the saved result.
+
+A service-instance generation gate and a separately cancellable ranking slot keep
+recommendations low priority. The ranking slot shares upstream concurrency and
+per-user request quota with normal chat; normal chat preempts ranking. Dynamic
+sources are owned MCP connections and fixed host catalogs. Anonymous Card storage
+is not proof of public-index consent and does not make a personal service public.
+See [client behavior and validation](../../mobile/docs/plugin-recommendations.md).

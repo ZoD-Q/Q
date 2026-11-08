@@ -8067,6 +8067,172 @@
           }
         ]
       }
+    },
+    "/v1/ai/recommendations": {
+      "post": {
+        "operationId": "createAiRecommendation",
+        "tags": [
+          "ai"
+        ],
+        "description": "Recommend against a saved user message in an owned conversation. Server reads at most two completed preceding ordinary rounds and binds a content digest; no client supplied context or plugin results. Deterministic exact match or one low-priority Flash choice from at most 12 candidates, returning 0–3. Total processing budget five seconds with exact-match fallback; does not delay the normal chat. Same request and source digest replay the existing result. No tool execution.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped result; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRecommendation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiRecommendationRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listAiRecommendations",
+        "tags": [
+          "ai"
+        ],
+        "description": "Recover saved cards without generating answers or running business calls. Newest-first stable created_at/UUID pagination; source deletion cascades records. Card state is not authority.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped result; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRecommendationPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/ai/recommendations/{id}/select": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "selectAiRecommendation",
+        "tags": [
+          "ai"
+        ],
+        "description": "Recheck account ownership, saved source digest, access, connection revision and capability version. A ready plugin atomically creates or reuses one dedicated conversation per recommendation/candidate and returns its CAS revision. Pending connection/authorization/review opens existing setup; call selection again after returning. Navigation returns only a known module. This endpoint never executes tools. Repeated selection and lost responses restore the existing target and must not auto-repeat its task.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped result; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRecommendationSelection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiRecommendationSelectRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8764,6 +8930,14 @@
               1
             ],
             "description": "Optional discovery flag for global public company search and covered annual financial research."
+          },
+          "recommendations_version": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "1 enables version-1 account-scoped recommendations; 0 or absence disables them. Controlled by the server Q_AI_RECOMMENDATIONS flag, off by default."
           }
         }
       },
@@ -14412,6 +14586,244 @@
           "items",
           "next_cursor"
         ]
+      },
+      "AiRecommendationCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "description",
+          "reason",
+          "kind",
+          "access",
+          "connection_id",
+          "connection_revision",
+          "module",
+          "provider_id",
+          "bank_id",
+          "capability_version",
+          "price_note"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "plugin",
+              "module"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "connect",
+              "authorize",
+              "review",
+              "unavailable"
+            ]
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "connection_revision": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "module": {
+            "type": "string",
+            "nullable": true
+          },
+          "provider_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "capability_version": {
+            "type": "string"
+          },
+          "price_note": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "description": "Server-owned display metadata, never authorization. Tool instructions, credentials and private results are omitted. Revalidate access and capability version on selection."
+      },
+      "AiRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "conversation_id",
+          "source_message_id",
+          "status",
+          "candidates",
+          "catalog_version",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_message_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "skipped"
+            ]
+          },
+          "candidates": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/AiRecommendationCandidate"
+            }
+          },
+          "catalog_version": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiRecommendationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversation_id",
+          "source_message_id",
+          "request_id",
+          "locale"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_message_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "zh",
+              "en"
+            ]
+          }
+        }
+      },
+      "AiRecommendationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/AiRecommendation"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
+      "AiRecommendationSelectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id"
+        ],
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "AiRecommendationSelection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "candidate",
+          "conversation",
+          "created"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "connect",
+              "authorize",
+              "review",
+              "navigate"
+            ]
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/AiRecommendationCandidate"
+          },
+          "conversation": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiConversation"
+              }
+            ],
+            "nullable": true
+          },
+          "created": {
+            "type": "boolean",
+            "description": "Only the first successful dedicated-conversation creation is true. Replays restore its existing snapshot without rewriting messages or executing the task."
+          }
+        }
       }
     }
   }

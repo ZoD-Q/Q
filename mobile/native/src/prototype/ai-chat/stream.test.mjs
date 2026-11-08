@@ -459,3 +459,9 @@ test('company tools require independent discovered capability and request opt-in
     assert.equal(fake.stats.calls, 0);
   }
 });
+
+test('recommendations negotiate independently, with off and future versions leaving chat available', () => {
+  assert.equal(decodeAiStatus({ configured: true, models: [], recommendations_version: 1 }).recommendations_version, 1);
+  for (const version of [undefined, 0, 2]) assert.equal(decodeAiStatus({ configured: true, models: [], recommendations_version: version }).recommendations_version, undefined);
+  for (const version of [-1, '1', null, true, 1.5]) assert.throws(() => decodeAiStatus({ configured: true, models: [], recommendations_version: version }));
+});

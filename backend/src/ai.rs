@@ -2,6 +2,7 @@
 //! a separate explicit confirmation executes them. Each response body owns its request.
 mod app_turn;
 mod plugin_turn;
+mod recommendation_rank;
 use app_turn::AppContext;
 use plugin_turn::{PluginTurn, ProposedCall};
 use std::{
@@ -179,6 +180,7 @@ pub struct AiStatus {
     automatic_readonly_tools: bool,
     app_tools_version: u8,
     company_research_version: u8,
+    recommendations_version: u8,
     models: [ModelInfo; 2],
 }
 pub async fn status(State(state): State<AppState>) -> Json<AiStatus> {
@@ -187,6 +189,7 @@ pub async fn status(State(state): State<AppState>) -> Json<AiStatus> {
         automatic_readonly_tools: true,
         app_tools_version: app_turn::VERSION,
         company_research_version: 1,
+        recommendations_version: u8::from(state.recommendations_enabled),
         models: [
             ModelInfo {
                 id: ChatModel::Flash,
@@ -205,6 +208,7 @@ pub struct AiRuntime {
     authorization: HeaderValue,
     endpoint: Url,
     admissions: Arc<Mutex<Admissions>>,
+    upstream_slots: Arc<tokio::sync::Semaphore>,
     total_timeout: Duration,
     idle_timeout: Duration,
 }
@@ -255,6 +259,7 @@ impl AiRuntime {
             authorization,
             endpoint,
             admissions: Arc::new(Mutex::new(Admissions::default())),
+            upstream_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             total_timeout,
             idle_timeout,
         })
@@ -318,6 +323,13 @@ impl AiRuntime {
         let stream: EventStream = Box::pin(async_stream::stream! {
             // No spawned task: dropping the HTTP body drops this future, upstream and permit.
             let permit = permit;
+            // A preempted recommendation must release its socket before a fourth
+            // chat starts an upstream request. The shared semaphore also covers
+            // the short interval between cancellation and the rank future dropping.
+            let Ok(Ok(upstream_slot)) = timeout_at(deadline, self.upstream_slots.clone().acquire_owned()).await else {
+                yield Ok(event("error", json!({"code":"AI_TIMEOUT","message":"AI capacity timed out."})));
+                return;
+            };
             let mut upstream = None;
             let mut terminal = Err(StreamFailure::Upstream);
             let mut proposed = None;
@@ -380,6 +392,7 @@ impl AiRuntime {
             }
             // Release the provider socket and admission before yielding the terminal event.
             drop(upstream);
+            drop(upstream_slot);
             match terminal {
                 Ok((finish_reason, usage)) => {
                     if finish_reason == "tool_calls" {
@@ -448,6 +461,7 @@ pub async fn chat(
 struct Admissions {
     users: HashMap<Uuid, UserWindow>,
     active: usize,
+    recommendation: Option<Arc<tokio::sync::Notify>>,
 }
 struct UserWindow {
     started: Instant,
@@ -491,6 +505,12 @@ impl Admissions {
         }
         user.requests += 1;
         user.active = true;
+        // Ordinary chat takes precedence over a cancellable recommendation.
+        if self.active >= 3
+            && let Some(cancel) = &self.recommendation
+        {
+            cancel.notify_one();
+        }
         self.active += 1;
         Ok(())
     }
