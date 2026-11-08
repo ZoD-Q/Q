@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import Svg, { G, Line, Rect, Text as SvgText } from 'react-native-svg';
 import { ArrowUpRight, Eye, EyeOff, Sparkles } from 'lucide-react-native';
-import { Action, Choice, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
+import { Action, Choice, Input, Page, Row, Sheet, Tag, Type, useDesign } from '../design';
 import {
   DEMO_NOTE, DEPOSIT_MV, DISCLAIMER, EQUITY_UNITS, FUND_MV, HOLD_COST, HOLD_MV, HOLD_PNL, holdings, marketFunds, fundCats,
   shelfItems, SIM_START_NAV, trustedExternalUrl, savingsGoal, marketMood, featuredProducts,
@@ -110,6 +110,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const [shelfRisk, setShelfRisk] = useState<ShelfRiskGroup | 'all'>('all');
   const [shelfTerm, setShelfTerm] = useState<'all' | 'live' | 'short' | 'long'>('all');
   const [aiLog, setAiLog] = useState<[string, string][]>([]);
+  const [aiInput, setAiInput] = useState('');
   const [outbound, setOutbound] = useState<{ title: string; url: string } | null>(null);
   const [linkError, setLinkError] = useState(false);
   const [riskSheet, setRiskSheet] = useState(false);
@@ -142,14 +143,29 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   };
   const gotoOutbound = (title: string, url: string) => { setLinkError(false); setOutbound({ title, url }); };
   const aiAnswer = (question: string): string => {
-    if (/风险/.test(question)) return text('当前组合以 R1–R2 资产为主（货币类约占一半），整体风险等级约 R2（中低）。近一年最大回撤 -0.8%，波动较低。', 'The portfolio is dominated by R1–R2 assets; overall risk is about R2 (low-medium) with a -0.8% max drawdown over the past year.');
-    if (/收益|怎么样/.test(question)) return text(`近 30 日收益 +¥1,086.75；今日权益部分收益 ${pnl >= 0 ? '+' : ''}${money(pnl)}（实时模拟）。`, `Last 30 days +¥1,086.75; today's equity P&L is ${pnl >= 0 ? '+' : ''}${money(pnl)} (simulated, live).`);
-    if (/到期/.test(question)) return text('3 个月定存（演示）¥35,000 将于 2027-02-14 到期，其余持仓为活期或开放式，无近期到期安排。', 'The demo 3-month deposit (¥35,000) matures on 2027-02-14; other holdings are liquid or open-ended.');
-    if (/四笔钱|分配|怎么分/.test(question)) return text('一般性框架：活钱管流动性（货币类）、稳健理财打底（短债/存款）、长期投资追求增长（均衡类）、保险保障兜底风险。你的当前分布可看总览页的持仓速览与分布数据；该框架仅为公开知识整理，不构成投资建议。', 'A common framework: liquid cash for liquidity, stable assets as the base, long-term funds for growth, and insurance as protection. See the mix on the overview. Public knowledge only — not investment advice.');
-    if (/保障|保险/.test(question)) return text('保障是第四笔钱。建议先在「保障」页按方向核对目录（重疾/医疗/意外是常用自查起点），再前往承保公司官方渠道投保；小Q不代办投保、不收款，以下内容不构成投保建议。', 'Protection is the fourth pocket. Start by verifying the catalogue on the Protection tab (critical illness, medical and accident are common starting points), then apply on insurers\' official channels. Q places no applications; this is not insurance advice.');
-    if (/配|稳/.test(question)) return text('一般性信息：货币类流动性好、收益较低；债券类波动略高。稳健组合通常以货币与短债为基础。具体配置需结合你的目标与风险承受能力，不构成投资建议。', 'General information only: money-market assets trade liquidity for yield, bond funds add some volatility. Stable portfolios usually build on cash and short-duration bonds. This is not investment advice.');
-    if (/回撤/.test(question)) return text('最大回撤是区间内从最高点到其后最低点的最大跌幅，用于衡量下行风险。你的组合近一年最大回撤为 -0.8%（模拟数据）。', 'Max drawdown is the largest peak-to-trough decline in a period, measuring downside risk. Your portfolio shows -0.8% over the past year (simulated).');
-    return text('（演示）正式版本将接入小Q对话能力，基于模拟账本与公开知识作答，不构成投资建议。', '(Demo) The full version will connect Q chat, answering from the demo ledger and public knowledge. Not investment advice.');
+    const has = (...words: string[]) => words.some(word => question.includes(word));
+    const overviewLine = () => text(`当前概览：总资产 ${money(totalNow)} · 今日${pnl >= 0 ? '+' : ''}${money(pnl)} · 组合 R2（模拟）。`, `Overview: total ${money(totalNow)}, today ${pnl >= 0 ? '+' : ''}${money(pnl)}, portfolio R2 (simulated).`);
+    if (has('你好', '在吗', '你是谁', 'hi', 'hello', '您好')) return text('我是小Q，你的理财助手。可以问我收益、持仓、风险、到期、四笔钱配置、保障规划，也可以问理财知识（比如「什么是最大回撤」「定投是什么」）。以下回答均为信息整理，不构成投资建议。', 'I am Q, your wealth assistant. Ask me about returns, holdings, risk, maturities, the four-pocket framework or protection, or concepts like max drawdown. Information only — not investment advice.');
+    if (has('谢谢', '感谢', 'thanks')) return text('不客气！有其他理财问题随时问我。', 'You are welcome!');
+    if (has('总资产', '多少钱', '资产多少', '身家', '净资产')) return text(`总资产 ${money(totalNow)}（实时模拟）：基金约 ${money(FUND_MV + pnl * 0.6)}、存款 ${money(DEPOSIT_MV)}。点「总览」可看分布明细。`, `Total ${money(totalNow)} (live demo): funds about ${money(FUND_MV + pnl * 0.6)}, deposits ${money(DEPOSIT_MV)}. See the overview for the breakdown.`);
+    if (has('收益', '赚', '亏', '盈利', '涨了', '表现')) return text(`今日权益 ${pnl >= 0 ? '+' : ''}${money(pnl)}；近 7 日 +¥312.40、近 30 日 +¥1,086.75、累计 +¥4,281.53（模拟）。历史不代表未来表现。`, `Today ${pnl >= 0 ? '+' : ''}${money(pnl)}; last 7 days +¥312.40, last 30 days +¥1,086.75 (simulated). Past performance does not predict the future.`);
+    if (has('持仓', '持有什么', '买了什么', '仓位')) return text(`你持有 ${holdings.length} 笔（模拟）：` + holdings.map(item => `${item.name} ${money(item.mv)}`).join('、') + '。点「持仓」页可看全字段与官方办理入口。', `${holdings.length} demo positions; see the Holdings tab for details and official channels.`);
+    if (has('到期')) return text('3 个月定存（演示）¥35,000 将于 2027-02-14 到期，其余持仓为活期或开放式，无近期到期安排。', 'The demo deposit (¥35,000) matures on 2027-02-14; other holdings are liquid or open-ended.');
+    if (has('风险', '稳不稳', '稳吗', '波动')) return text('组合以 R1–R2 资产为主（货币类约占一半），整体约 R2（中低）；近一年最大回撤 -0.8%，波动率 2.1%（模拟）。风险匹配自评 R2。', 'Dominated by R1–R2 assets; overall about R2 with -0.8% max drawdown (simulated). Matches your self-assessed R2.');
+    if (has('定投', '每月投')) return text('定投是固定时间、固定金额投入的方式，可平滑买入成本（公开知识）。演示中你的旅行基金目标按每月 ¥2,000 定投，进度 68%。是否定投需结合你的现金流与目标，不构成投资建议。', 'Dollar-cost averaging spreads entry prices (public knowledge). Your demo travel goal invests ¥2,000 monthly at 68%. Not investment advice.');
+    if (has('四笔钱', '怎么分', '分配', '配置')) return text('一般性框架：活钱管流动性（货币类）、稳健理财打底（短债/存款）、长期投资追求增长（均衡类）、保险保障兜底风险。你的当前分布可看总览页的持仓速览与分布数据；该框架仅为公开知识整理，不构成投资建议。', 'A common framework: liquid cash for liquidity, stable assets as the base, long-term funds for growth, and insurance as protection. See the mix on the overview. Public knowledge only — not investment advice.');
+    if (has('保障', '保险', '重疾', '医疗险', '意外险')) return text('保障是第四笔钱。建议先在「保障」页按方向核对目录（重疾/医疗/意外是常用自查起点），再前往承保公司官方渠道投保；小Q不代办投保、不收款，以下内容不构成投保建议。', 'Protection is the fourth pocket. Start by verifying the catalogue on the Protection tab (critical illness, medical and accident are common starting points), then apply on insurers\' official channels. Q places no applications; this is not insurance advice.');
+    if (has('货币', '现金宝', '活期理财', '零钱')) return text('货币类基金主要投资短期货币工具，流动性好、波动低，适合放活钱；货币基金不是银行存款，不保证收益（公开知识）。你持有的 000009、003003 属于此类，「基金」页有更多列举。', 'Money market funds invest in short-term instruments — liquid, low volatility, not deposits (public knowledge). Your 000009 and 003003 belong here; more listings on the Funds tab.');
+    if (has('债券', '债基', '短债')) return text('债券基金主要投资债券，波动通常高于货币类、低于股票类（公开知识）。你的组合中「稳健短债（示例）」属于此类，R2。', 'Bond funds sit between money-market and equity volatility (public knowledge). Your demo short-bond entry is R2.');
+    if (has('指数', 'etf', '沪深300', '股票', '偏股')) return text('指数基金跟踪特定指数（如沪深300），费率通常较低、波动较大，属 R4（公开知识）。「基金」页的指数类条目为列举示例，非推荐；购买前需完成正式风险测评。', 'Index funds track an index with lower fees and higher volatility (R4, public knowledge). Fund tab entries are listings, not recommendations.');
+    if (has('qdii', '港股', '海外', '美元')) return text('QDII 基金投资境外市场（如恒生指数成分），除市场波动外还含汇率风险（公开知识）。申购与赎回时效一般更长，具体以产品文件为准。', 'QDII funds invest overseas and add currency risk; settlement times are longer (public knowledge).');
+    if (has('买什么', '推荐', '哪个好', '值得买')) return text('小Q不做产品推荐（合规红线）。我可以帮你看组合风险、收益、到期安排，或在「基金」页按类别浏览公开资料列举——选择需结合你的目标与风险承受能力。', 'Q makes no product recommendations. I can show your risk, returns and maturities, or the fund listings — choices are yours.');
+    if (has('基准', '业绩基准', '年化')) return text('业绩基准是产品设立时参考的收益目标区间，不代表承诺收益；年化收益率是把区间收益折算成一年的口径（公开知识）。列表里的数字均为基准区间，历史不代表未来。', 'A benchmark is a reference range, not a promise; annualized figures are annualized windows (public knowledge).');
+    if (has('回撤')) return text('最大回撤是区间内从最高点到其后最低点的最大跌幅，用于衡量下行风险。你的组合近一年最大回撤为 -0.8%（模拟数据）。', 'Max drawdown is the largest peak-to-trough decline in a period, measuring downside risk. Your portfolio shows -0.8% over the past year (simulated).');
+    if (has('费率', '手续费', '费用', '申购费')) return text('费率以各产品法律文件与销售渠道公示为准，小Q不固化费率数字。一般来说货币类费率最低，指数类低于主动管理类（公开知识）。', 'Fees follow each product\'s documents; Q does not fix rates. Money-market fees are usually lowest (public knowledge).');
+    if (has('赎回', '卖出', '取出', '提现')) return text('赎回在基金管理人直销或持牌销售机构完成，小Q不代办交易。货币类通常 T+1 到账，定存需到期支取（公开知识，具体以产品文件为准）。', 'Redemptions happen via the manager or licensed distributors; Q places no trades.');
+    if (has('温度', '市场', '行情')) return text(`市场温度 62°（中性偏暖，模拟指标，非官方数据）。可在「行情数据」按次查询币种快照与公司公告（¥0.05 起）。`, `Mood 62° (neutral-warm, simulated). Use the data service for per-use quotes and filings from ¥0.05.`);
+    return `${overviewLine()} ${text('我暂时没完全理解这个问题。我擅长回答：收益、持仓、风险、到期、四笔钱、保障规划，以及理财知识（最大回撤、定投、业绩基准、货币基金、ETF、QDII 等）。', 'I did not fully follow that. I am good with returns, holdings, risk, maturities, four-pocket allocation, protection and concepts like max drawdown.')}`;
   };
   const ask = (question: string) => { if (question.trim()) setAiLog(current => [...current, [question.trim(), aiAnswer(question.trim())] as [string, string]].slice(-8)); };
 
@@ -370,8 +386,10 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
       {aiLog.length ? aiLog.map(([question, answer], index) => <View key={index} style={{ gap: 6 }}>
         <View style={{ alignSelf: 'flex-end', backgroundColor: colors.accentBg, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, maxWidth: '88%' }}><Type size={13}>{question}</Type></View>
         <View style={{ alignSelf: 'flex-start', backgroundColor: colors.soft, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, maxWidth: '92%' }}><Type size={13} selectable>{answer}</Type></View>
-      </View>) : <Type muted>{text('选择下面的问题开始；回答基于模拟账本与公开知识整理。', 'Pick a question below; answers come from the demo ledger and public knowledge.')}</Type>}
+      </View>) : <Type muted>{text('在下面输入问题，或点快捷问题；回答基于模拟账本与公开知识整理。', 'Type a question below or tap a shortcut; answers come from the demo ledger and public knowledge.')}</Type>}
     </View>
+    <Input label={text('问小Q · 理财助手', 'Ask Q · wealth assistant')} placeholder={text('输入理财问题，如「我的组合稳吗」', 'Type a question, e.g. "is my portfolio stable?"')} value={aiInput} onChangeText={setAiInput} />
+    <Action label={text('发送', 'Send')} disabled={!aiInput.trim()} onPress={() => { ask(aiInput); setAiInput(''); }} />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
       {[[text('我的组合风险有多高？', 'How risky is my portfolio?'), text('当前组合以 R1–R2 资产为主（货币类约占一半），整体风险等级约 R2（中低）。近一年最大回撤 -0.8%，波动较低。', 'Dominated by R1–R2 assets; overall about R2 (low-medium), max drawdown -0.8% over the past year.')],
       [text('这个月收益怎么样？', 'How are returns this month?'), text(`近 30 日收益 +¥1,086.75；今日权益部分收益 ${pnl >= 0 ? '+' : ''}${money(pnl)}（实时模拟）。`, `Last 30 days +¥1,086.75; today ${pnl >= 0 ? '+' : ''}${money(pnl)} (simulated, live).`)],
