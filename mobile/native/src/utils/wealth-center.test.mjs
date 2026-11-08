@@ -16,12 +16,18 @@ test('simulated market steps are deterministic, bounded and respect the rolling 
   const seeded = core.seedCandles(30, catalog.SIM_START_NAV, rng);
   assert.equal(seeded.candles.length, 30);
   for (const candle of seeded.candles) {
-    assert.ok(candle.h >= Math.max(candle.o, candle.c) && candle.l <= Math.min(candle.o, candle.c));
+    assert.ok(candle.h >= Math.max(candle.o, candle.c) && candle.l <= Math.min(candle.o, candle.c), 'OHLC bounds');
     assert.ok(candle.c > 0);
+    assert.ok(Number.isInteger(candle.vol) && candle.vol >= 10 && candle.vol <= 100, 'simulated volume in range');
   }
   const next = core.nextCandle(seeded.price, rng);
   assert.equal(next.candle.o, seeded.price);
   assert.equal(next.candle.c, next.price);
+  assert.ok(next.candle.vol >= 10 && next.candle.vol <= 100);
+  const forecast = core.predictCandles(next.price, 20, rng);
+  assert.equal(forecast.length, 20);
+  assert.equal(forecast[0].o, next.price);
+  for (const candle of forecast) assert.ok(candle.c > 0 && Number.isInteger(candle.vol), 'forecast candle valid');
   const window = core.sliceWindow(seeded.candles.concat(next.candle, next.candle), 26);
   assert.equal(window.length, 26);
   const bounds = core.windowBounds(window);

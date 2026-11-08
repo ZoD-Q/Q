@@ -15,6 +15,19 @@ export function seedCandles(count = 30, start = 1.039, rng: () => number = Math.
   for (let i = 0; i < count; i++) { const step = nextCandle(price, rng); candles.push(step.candle); price = step.price; }
   return { candles, price };
 }
+// Simulated forward projection for the AI-forecast demo. Clearly labelled in the UI as a simulated
+// forecast — never a real prediction, promise or investment advice.
+export function predictCandles(price: number, count: number, rng: () => number = Math.random): Candle[] {
+  const candles: Candle[] = [];
+  let p = price;
+  for (let i = 0; i < count; i++) {
+    const o = p;
+    const c = o * (1 + (rng() - 0.47) * 0.0012);
+    candles.push({ o, c, h: Math.max(o, c) * (1 + rng() * 0.0004), l: Math.min(o, c) * (1 - rng() * 0.0004), vol: 10 + Math.round(rng() * 40) });
+    p = c;
+  }
+  return candles;
+}
 export function sliceWindow(candles: readonly Candle[], size = 26): Candle[] {
   return candles.slice(-size);
 }

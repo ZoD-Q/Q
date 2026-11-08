@@ -9,7 +9,7 @@ import {
   type Copy, type FeaturedProduct, type MarketFund, type ShelfItem, type ShelfRiskGroup, type WealthHolding,
 } from './catalog';
 import {
-  filterFunds, filterShelf, nextCandle, RISK_LABEL, seedCandles, sliceWindow, todayPct, todayPnl, windowBounds, type Candle,
+  filterFunds, filterShelf, nextCandle, predictCandles, RISK_LABEL, seedCandles, sliceWindow, todayPct, todayPnl, windowBounds, type Candle,
 } from './core';
 import {
   insuranceTypes, groups as insuranceGroups, groupInsurers, trustedOutboundUrl as trustedInsuranceOutbound,
@@ -30,67 +30,80 @@ const shelfRisks: readonly { id: ShelfRiskGroup | 'all'; title: Copy }[] = [
 const shelfTerms: readonly { id: 'all' | 'live' | 'short' | 'long'; title: Copy }[] = [
   { id: 'all', title: ['全部期限', 'All terms'] }, { id: 'live', title: ['活期', 'Liquid'] }, { id: 'short', title: ['短期', 'Short'] }, { id: 'long', title: ['长期', 'Long'] },
 ];
-const chartPeriods: readonly { id: string; title: Copy; count: number }[] = [
-  { id: '1w', title: ['1周', '1W'], count: 8 },
-  { id: '1m', title: ['1月', '1M'], count: 30 },
-  { id: '3m', title: ['3月', '3M'], count: 66 },
-  { id: '1y', title: ['1年', '1Y'], count: 120 },
+const chartHorizons: readonly { id: string; title: Copy; horizon: number }[] = [
+  { id: '1h', title: ['未来1小时', 'Next 1h'], horizon: 20 },
+  { id: '3h', title: ['未来3小时', 'Next 3h'], horizon: 60 },
 ];
+const HISTORY_COUNT = 40;
 const UP_RED = '#c73a3a', DOWN_GREEN = '#1e8a5e';
 const money = (value: number) => `¥${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const clock = () => new Date().toTimeString().slice(0, 8);
 
-function CandleChart({ candles, price, count = 26 }: { candles: Candle[]; price: number; count?: number }) {
+function CandleChart({ candles, price, count = HISTORY_COUNT, horizon = 0, chartKey = '' }: { candles: Candle[]; price: number; count?: number; horizon?: number; chartKey?: string }) {
+  const [selected, setSelected] = useState<number | null>(null);
+  useEffect(() => { setSelected(null); }, [count, horizon, chartKey]);
   const { text } = useDesign();
-  const shown = sliceWindow(candles, count);
+  const history = sliceWindow(candles, count);
+  const predicted = useMemo(() => predictCandles(price, horizon, Math.random), [price.toFixed(6), horizon]);
+  const all = [...history, ...predicted];
   let min = Infinity, max = -Infinity, maxVol = 0;
-  for (const candle of shown) { if (candle.l < min) min = candle.l; if (candle.h > max) max = candle.h; if (candle.vol > maxVol) maxVol = candle.vol; }
+  for (const candle of all) { if (candle.l < min) min = candle.l; if (candle.h > max) max = candle.h; if (candle.vol > maxVol) maxVol = candle.vol; }
   const span = max - min || 1;
   const W = 280, padT = 8, priceH = 84, volTop = priceH + 14, volH = 34;
   const H = volTop + volH + 6;
   const y = (value: number) => padT + (max - value) / span * (priceH - padT);
-  const step = W / shown.length, bw = Math.max(2.5, step * 0.6);
+  const step = W / all.length, bw = Math.max(2, step * 0.62);
   const upColor = '#0ecb81', downColor = '#f6465d';
-  const last = shown[shown.length - 1] ?? { o: price, c: price, h: price, l: price, vol: 0 };
-  const lastUp = last.c >= last.o;
+  const sel = selected === null || selected >= all.length ? history.length - 1 : selected;
+  const selCandle = all[sel];
+  const selIsPred = sel >= history.length;
+  const selLabel = selIsPred ? text(`预测 +${(sel - history.length + 1) * 3} 分钟`, `Forecast +${(sel - history.length + 1) * 3} min`) : text(`T-${history.length - 1 - sel} 分钟`, `T-${history.length - 1 - sel} min`);
   const lastY = y(price);
+  const lastUp = price >= history[history.length - 1].o;
   const gridY = [padT + (priceH - padT) * 0.2, padT + (priceH - padT) * 0.5, padT + (priceH - padT) * 0.8];
   const gridPrices = gridY.map(gridValue => (max - (gridValue - padT) / (priceH - padT) * span).toFixed(4));
   return (
     <View style={{ backgroundColor: '#171b26', borderRadius: 12, padding: 8, gap: 4 }}>
       <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
-        <Type size={10} style={{ color: '#d1d4dc' }}>开 <Type weight="600" style={{ color: last.c >= last.o ? upColor : downColor }}>{last.o.toFixed(4)}</Type></Type>
-        <Type size={10} style={{ color: '#d1d4dc' }}>高 <Type weight="600" style={{ color: upColor }}>{last.h.toFixed(4)}</Type></Type>
-        <Type size={10} style={{ color: '#d1d4dc' }}>低 <Type weight="600" style={{ color: downColor }}>{last.l.toFixed(4)}</Type></Type>
-        <Type size={10} style={{ color: '#d1d4dc' }}>收 <Type weight="600" style={{ color: last.c >= last.o ? upColor : downColor }}>{last.c.toFixed(4)}</Type></Type>
-        <Type size={10} style={{ color: '#d1d4dc' }}>量 <Type weight="600" style={{ color: '#848e9c' }}>{last.vol}M</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>{selLabel} · {text('开', 'O')} <Type weight="600" style={{ color: selCandle.c >= selCandle.o ? upColor : downColor }}>{selCandle.o.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>{text('高', 'H')} <Type weight="600" style={{ color: upColor }}>{selCandle.h.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>{text('低', 'L')} <Type weight="600" style={{ color: downColor }}>{selCandle.l.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>{text('收', 'C')} <Type weight="600" style={{ color: selCandle.c >= selCandle.o ? upColor : downColor }}>{selCandle.c.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>{text('量', 'VOL')} <Type weight="600" style={{ color: '#848e9c' }}>{selCandle.vol}M</Type></Type>
       </View>
-      <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H + 10} accessibilityRole="image" accessibilityLabel="组合基金部分净值K线与成交量，模拟行情实时更新">
+      <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H + 10} accessibilityRole="image" accessibilityLabel="净值K线与成交量，含AI模拟预测区">
+        <Rect x={(history.length * step).toFixed(1)} y={padT} width={(all.length * step - history.length * step).toFixed(1)} height={H - padT - 4} fill="#3b82f6" opacity={0.08} />
         {gridY.map((gridValue, index) => <Line key={`g${index}`} x1={0} y1={gridValue} x2={W - 46} y2={gridValue} stroke="#2a2e39" strokeWidth={0.6} />)}
         {gridPrices.map((gridPrice, index) => <SvgText key={`p${index}`} x={W - 44} y={gridY[index] + 3} fontSize={7.5} fill="#848e9c">{gridPrice}</SvgText>)}
-        {shown.map((candle, index) => {
+        <Line x1={history.length * step} y1={padT} x2={history.length * step} y2={volTop + volH} stroke="#3b82f6" strokeWidth={0.8} strokeDasharray="3 3" />
+        {all.map((candle, index) => {
           const cx = index * step + step / 2;
-          const bullish = candle.c >= candle.o;
-          const color = bullish ? upColor : downColor;
+          const isPred = index >= history.length;
+          const color = candle.c >= candle.o ? upColor : downColor;
           const yO = y(candle.o), yC = y(candle.c);
           const top = Math.min(yO, yC), height = Math.max(1, Math.abs(yO - yC));
           const volH2 = Math.max(1.5, candle.vol / (maxVol || 1) * volH);
           return (
-            <G key={index}>
+            <G key={index} opacity={isPred ? 0.45 : 1}>
               <Line x1={cx} y1={y(candle.h)} x2={cx} y2={y(candle.l)} stroke={color} strokeWidth={0.9} />
               <Rect x={cx - bw / 2} y={top} width={bw} height={height} fill={color} />
               <Rect x={cx - bw / 2} y={volTop + volH - volH2} width={bw} height={volH2} fill={color} opacity={0.55} />
             </G>
           );
         })}
+        {selected !== null && selected < all.length ? <Line x1={selected * step + step / 2} y1={padT} x2={selected * step + step / 2} y2={volTop + volH} stroke="#f0b90b" strokeWidth={0.7} /> : null}
         <Line x1={0} y1={lastY} x2={W - 46} y2={lastY} stroke={lastUp ? upColor : downColor} strokeWidth={0.7} strokeDasharray="4 3" />
         <Rect x={W - 44} y={Math.max(2, lastY - 8)} width={44} height={16} fill={lastUp ? upColor : downColor} rx={2} />
         <SvgText x={W - 22} y={Math.max(12, lastY + 3.5)} textAnchor="middle" fontSize={9} fontWeight={700} fill="#ffffff">{price.toFixed(4)}</SvgText>
         <Line x1={0} y1={volTop - 6} x2={W} y2={volTop - 6} stroke="#2a2e39" strokeWidth={0.6} />
         <SvgText x={2} y={volTop + 8} fontSize={7.5} fill="#848e9c">VOL</SvgText>
       </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Type size={9} style={{ color: '#848e9c' }}>{text('VOL 成交量（模拟）', 'VOL volume (simulated)')}</Type>
+      {all.map((candle, index) => (
+        <Pressable key={`hit${index}`} accessibilityRole="button" accessibilityLabel={text(`选中第 ${index + 1} 根蜡烛`, `Select candle ${index + 1}`)} onPress={() => setSelected(index)}
+          style={{ position: 'absolute', left: (index * (280 / all.length)).toString() + '%', top: 30, width: `${100 / all.length}%`, height: H - 30 }} />
+      ))}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <Type size={9} style={{ color: '#848e9c' }}>{text('蓝色区 = AI 模拟预测（每根≈3分钟）· 点击蜡烛看数据', 'Blue zone = AI simulated forecast (~3 min per candle) · tap a candle')}</Type>
         <Type size={9} style={{ color: '#848e9c' }}>{text('币安风格 · 绿涨红跌', 'Binance style · green up')}</Type>
       </View>
     </View>
@@ -144,7 +157,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const [expandedInsurance, setExpandedInsurance] = useState<string | null>(null);
   const [switches, setSwitches] = useState({ advisory: true, market: true, usage: false });
   const [hideAssets, setHideAssets] = useState(false);
-  const [chartPeriod, setChartPeriod] = useState('1m');
+  const [chartHorizon, setChartHorizon] = useState(20);
   const [detail, setDetail] = useState<FeaturedProduct | null>(null);
   const detailRef = useRef<FeaturedProduct | null>(null);
   detailRef.current = detail;
@@ -196,9 +209,10 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   };
   const ask = (question: string) => { if (question.trim()) setAiLog(current => [...current, [question.trim(), aiAnswer(question.trim())] as [string, string]].slice(-8)); };
 
-  const chartCount = chartPeriods.find(item => item.id === chartPeriod)!.count;
-  const periodFirst = market.current!.candles.slice(-chartCount)[0]?.o ?? price;
-  const periodChange = periodFirst > 0 ? (price / periodFirst - 1) * 100 : 0;
+  const chartHorizonTitle = chartHorizons.find(item => item.horizon === chartHorizon)!.title;
+  const predCandles = useMemo(() => predictCandles(price, chartHorizon, Math.random), [price.toFixed(6), chartHorizon]);
+  const predEnd = predCandles[predCandles.length - 1].c;
+  const predChange = (predEnd / price - 1) * 100;
   const quickEntries: { key: string; icon: string; title: Copy; onPress: () => void }[] = [
     { key: 'cash', icon: '💰', title: ['现金宝', 'Cash'], onPress: () => openDetail(featuredProducts[0]) },
     { key: 'funds', icon: '📈', title: ['基金', 'Funds'], onPress: () => setPage('funds') },
@@ -251,7 +265,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
           <Type weight="600" size={14}>{text('净值走势 · 实时（模拟）', 'NAV candles · live (demo)')}</Type>
           <Type size={10} muted>{clock()}</Type>
         </View>
-        <CandleChart candles={detailCandles} price={detailPrice} count={30} />
+        <CandleChart candles={detailCandles} price={detailPrice} count={30} chartKey={item.name} />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18 }}>
           <View><Type size={11} muted>{text('当前净值', 'NAV')}</Type><Type selectable weight="600">{detailPrice.toFixed(4)}</Type></View>
           <View><Type size={11} muted>{text('区间涨跌', 'Period change')}</Type><Type selectable weight="600" style={{ color: detailChange >= 0 ? UP_RED : DOWN_GREEN }}>{detailChange >= 0 ? '+' : ''}{detailChange.toFixed(2)}%</Type></View>
@@ -299,13 +313,13 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
         <Type size={10} muted>{text('标的：基金部分 · 红涨绿跌', 'Fund part · red up, green down')}</Type>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-        {chartPeriods.map(item => <Choice key={item.id} label={text(item.title[0], item.title[1])} selected={chartPeriod === item.id} onPress={() => setChartPeriod(item.id)} />)}
+        {chartHorizons.map(item => <Choice key={item.id} label={text(item.title[0], item.title[1])} selected={chartHorizon === item.horizon} onPress={() => setChartHorizon(item.horizon)} />)}
       </View>
-      <CandleChart candles={market.current!.candles} price={price} count={chartCount} />
+      <CandleChart candles={market.current!.candles} price={price} count={HISTORY_COUNT} horizon={chartHorizon} chartKey={`ov-${chartHorizon}`} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18 }}>
         <View><Type size={11} muted>{text('当前净值', 'NAV')}</Type><Type selectable weight="600">{price.toFixed(4)}</Type></View>
         <View><Type size={11} muted>{text('今日涨跌', 'Change today')}</Type><Type selectable weight="600" style={{ color: pct >= 0 ? UP_RED : DOWN_GREEN }}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</Type></View>
-        <View><Type size={11} muted>{text(`${chartPeriods.find(item => item.id === chartPeriod)!.title[0]}涨跌`, 'Period change')}</Type><Type selectable weight="600" style={{ color: periodChange >= 0 ? UP_RED : DOWN_GREEN }}>{periodChange >= 0 ? '+' : ''}{periodChange.toFixed(2)}%</Type></View>
+        <View><Type size={11} muted>{text(`AI 预测 · 未来${chartHorizonTitle[0].replace('未来', '')}`, `AI forecast · ${chartHorizonTitle[1]}`)}</Type><Type selectable weight="600" style={{ color: predChange >= 0 ? UP_RED : DOWN_GREEN }}>{predChange >= 0 ? '+' : ''}{predChange.toFixed(2)}%</Type></View>
       </View>
     </View>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -352,7 +366,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
         <Type size={10} muted>{clock()}</Type>
       </View>
       <Type size={11} muted selectable>{text('标的：持仓中的基金部分（易方达 000009 · 华夏 003003 · 稳健短债示例 · 均衡混合示例，约 ¥105,990）· 模拟行情 · 每根约 1 分钟 · 虚线 = 当前净值', 'Underlying: the fund part of your holdings (E Fund 000009, ChinaAMC 003003 and demo entries, about ¥105,990). Simulated ticks, one candle ≈ 1 minute; dashed line = current NAV.')}</Type>
-      <CandleChart candles={market.current!.candles} price={price} />
+      <CandleChart candles={market.current!.candles} price={price} count={HISTORY_COUNT} horizon={chartHorizon} chartKey={`perf-${chartHorizon}`} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 20 }}>
         <View><Type size={11} muted>{text('当前净值', 'Current NAV')}</Type><Type selectable weight="600">{price.toFixed(4)}</Type></View>
         <View><Type size={11} muted>{text('今日涨跌', "Today's change")}</Type><Type selectable weight="600" color={pct >= 0 ? colors.ink : colors.danger}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</Type></View>
