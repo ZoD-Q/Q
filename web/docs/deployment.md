@@ -1,6 +1,6 @@
 # 小Q正式后台静态制品发布
 
-本文件描述待审核源码的发布条件，不是已执行发布记录。正式入口为`https://q.kaicloudpay.com/q-admin/`，页面复用同域Q身份和操作员API。裸IP或非官方来源只显示官方安全入口。业务后端继续独立运行，前端不连接数据库。
+本文件描述发布条件；已执行结果见[2026-11-08发布记录](../../backend/deploy/RESEARCH-2026-11-08.md)。正式入口为`https://q.kaicloudpay.com/q-admin/`，页面复用同域Q身份和操作员API。裸IP或非官方来源只显示官方安全入口。业务后端继续独立运行，前端不连接数据库。
 
 ## 版本与兼容
 
@@ -8,9 +8,9 @@ Vite路径前缀为`/q-admin/`。新`version.json`写入实际源码SHA、`mode:
 
 发布工具接受已验证的旧`demo`制品用于受控历史回退，但不会把demo与admin清单混用。旧发布目录和备份不覆盖；回退仍检查实际current目标、配置摘要、事务身份和制品文件。不能用允许旧模式绕过人工审核与最新提交检查。
 
-## 必须先更新受信helper
+## 受信helper版本门禁
 
-服务器上固定的受信`web/deploy/deploy_tools.py`须由有权限的运维先更新至审核过的本版，再发布admin制品。旧helper只允许demo，也只在wallet路径允许连接；直接切换新页面会导致根登录受CSP阻止。仓库合并不会自动更新受信helper。保留旧helper/配置备份和旧静态事务，安装helper与发布制品分别记录版本与校验和。本轮没有修改服务器。
+部署前核对固定受信`web/deploy/deploy_tools.py`的实际摘要及能力；只有版本不支持admin或根登录同源CSP时，才由有权限的运维先更新审核过的helper。旧helper只允许demo，也只在wallet路径允许连接。仓库合并不会自动更新它，安装与制品发布须分别记录。2026-11-08现场helper与已审核main完全一致，无需重复安装；管理网页作业62233成功。旧helper/配置备份和旧静态事务保留。
 
 ## Nginx文档与静态资源边界
 
@@ -23,7 +23,7 @@ Vite路径前缀为`/q-admin/`。新`version.json`写入实际源码SHA、`mode:
 
 先完成Web typecheck/lint/test/build/test:e2e、Shell语法和Python发布检查。设置`Q_NGINX_BIN`后运行真实隔离Nginx路由验收，核对官方域名/旧IP、根/深链/刷新、no-store、同源CSP、重定向及静态404；未运行项目不能记为通过。本地HTTP路由测试不代表公网TLS握手验证。
 
-按[GitLab部署流程](../../backend/deploy/gitlab-cd.md)和根分支规则：开发分支提交/推送→对应最新提交自动检查→人工审核合入main→受保护main人工发布。新CI配置须看两端实际结果；本轮只本地检查，不宣称远端已运行。默认发布使用同一GitLab流水线Web制品与受限接收器，并核对成功receipt及公网实际版本。
+按[GitLab部署流程](../../backend/deploy/gitlab-cd.md)和根分支规则：开发分支提交/推送→对应最新提交自动检查→人工审核合入main→受保护main人工发布。新CI配置须看两端实际结果。默认发布使用同一GitLab流水线Web制品与受限接收器，并核对成功receipt及公网实际版本；某次部署成功不替代后续提交的检查。
 
 个人SSH脚本只保留为另行明确的运维备用接口，不能作为直接发布开发分支或跳过CI的授权。任何失败/未知先核对目标、receipt和静态事务，再按既定流程恢复；不盲目重试、不删除失败记录、不覆盖不同制品。操作前保持共享发布锁，参见主部署说明。
 
