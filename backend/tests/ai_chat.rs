@@ -167,7 +167,7 @@ async fn authenticated_streaming_is_isolated_and_status_exposes_only_public_meta
     let status = read_json(h.request("GET", "/v1/ai/status", None, None).await).await;
     assert_eq!(
         status,
-        json!({"configured":true,"automatic_readonly_tools":true,"app_tools_version":1,"company_research_version":1,"filing_research_version":1,"models":[{"id":"deepseek-flash","name":"DeepSeek Flash"},{"id":"deepseek-v4-pro","name":"DeepSeek Pro"}]})
+        json!({"configured":true,"automatic_readonly_tools":true,"app_tools_version":1,"company_research_version":1,"filing_research_version":1,"recommendations_version":0,"models":[{"id":"deepseek-flash","name":"DeepSeek Flash"},{"id":"deepseek-v4-pro","name":"DeepSeek Pro"}]})
     );
     let anonymous = h
         .request("POST", "/v1/ai/chat", None, Some(request_body("anonymous")))
@@ -254,7 +254,8 @@ async fn authenticated_streaming_is_isolated_and_status_exposes_only_public_meta
     assert_eq!(status["configured"], false);
     assert_eq!(status["company_research_version"], 1);
     assert_eq!(status["filing_research_version"], 1);
-    assert_eq!(status.as_object().unwrap().len(), 6);
+    assert_eq!(status["recommendations_version"], 0);
+    assert_eq!(status.as_object().unwrap().len(), 7);
     h.finish().await;
 }
 

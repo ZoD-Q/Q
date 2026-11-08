@@ -30,7 +30,7 @@ pub(crate) struct Provider {
     pub tools: &'static [&'static str],
     pub initial: &'static str,
 }
-const PROVIDERS: &[Provider] = &[
+pub(crate) const PROVIDERS: &[Provider] = &[
     Provider {
         id: "ifind",
         name: "同花顺 iFinD",

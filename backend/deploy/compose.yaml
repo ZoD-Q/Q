@@ -55,6 +55,7 @@ services:
       Q_PAYMENT_FX_AUTO_REFRESH: ${Q_PAYMENT_FX_AUTO_REFRESH:-0}
       Q_TRUSTED_PROXY_IPS: ${Q_GATEWAY_APPLICATION_IP:?set the verified fixed gateway IP}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      Q_AI_RECOMMENDATIONS: ${Q_AI_RECOMMENDATIONS:-false}
       Q_CORS_ORIGINS: ${Q_CORS_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081}
       RUST_LOG: xiaoq_backend=info
     depends_on:

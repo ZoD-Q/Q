@@ -52,7 +52,7 @@ function textLength(value: unknown, max: number): number | null {
   return length;
 }
 
-export function decodeAiStatus(value: unknown): { configured: boolean; models: { id: Model; name: string }[]; automatic_readonly_tools?: boolean; app_tools_version?: 1; company_research_version?: 1; filing_research_version?: 1 } {
+export function decodeAiStatus(value: unknown): { configured: boolean; models: { id: Model; name: string }[]; automatic_readonly_tools?: boolean; app_tools_version?: 1; company_research_version?: 1; filing_research_version?: 1; recommendations_version?: 1 } {
   if (!record(value) || typeof value.configured !== "boolean" || !Array.isArray(value.models) || value.models.length > MODELS.length) return invalidResponse();
   const ids = new Set<string>();
   const models = value.models.map(item => {
@@ -64,7 +64,8 @@ export function decodeAiStatus(value: unknown): { configured: boolean; models: {
   if (value.app_tools_version !== undefined && value.app_tools_version !== 1) return invalidResponse();
   if (value.company_research_version !== undefined && (value.company_research_version !== 1 || value.app_tools_version !== 1)) return invalidResponse();
   if (value.filing_research_version !== undefined && (value.filing_research_version !== 1 || value.app_tools_version !== 1)) return invalidResponse();
-  return { configured: value.configured, models, ...(value.company_research_version === 1 ? { company_research_version: 1 as const } : {}), ...(value.filing_research_version === 1 ? { filing_research_version: 1 as const } : {}), ...(value.app_tools_version === 1 ? { app_tools_version: 1 as const } : {}), ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
+  if (value.recommendations_version !== undefined && (!Number.isSafeInteger(value.recommendations_version) || Number(value.recommendations_version) < 0)) return invalidResponse();
+  return { configured: value.configured, models, ...(value.recommendations_version === 1 ? { recommendations_version: 1 as const } : {}), ...(value.company_research_version === 1 ? { company_research_version: 1 as const } : {}), ...(value.filing_research_version === 1 ? { filing_research_version: 1 as const } : {}), ...(value.app_tools_version === 1 ? { app_tools_version: 1 as const } : {}), ...(value.automatic_readonly_tools === undefined ? {} : { automatic_readonly_tools: value.automatic_readonly_tools }) };
 }
 
 function validateRequest(value: ChatRequest): ChatRequest {

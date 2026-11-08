@@ -11,7 +11,7 @@ const source=ts.transpileModule(readFileSync(new URL('./page.tsx',import.meta.ur
 const id='11111111-1111-4111-8111-111111111111', attemptId='22222222-2222-4222-8222-222222222222';
 const saved=(provider,ready=false)=>({id,revision:1,title:'Provider',name:provider,description:'Public provider',version:'1',card_url:core.FINANCIAL_PROVIDERS[provider].home,endpoint_url:'https://service.example/mcp',connection_kind:'remote_mcp',builtin_service_id:null,financial_provider_id:['fred','tavily'].includes(provider)?null:provider,research_provider_id:['fred','tavily'].includes(provider)?provider:null,status:ready?'ready':'auth_required',auth_status:ready?'authorized':'required',pending_update:false,last_error_code:null,created_at:'2026-11-02',updated_at:'2026-11-02'});
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return{promise,resolve};};
-function harness({override,initial={},configured=true,legacy=false}={}){
+function harness({override,initial={},configured=true,legacy=false,initialProviderId}={}){
  let slots=[],cursor=0,effects=[],dirty=true,tree,mounted=true,writesAfterUnmount=0,owner='owner-a',active=true;const calls=[],selected=[],opened=[],connections={...initial};let background;
  const appState={currentState:'active',addEventListener(_,cb){background=cb;return{remove(){}};}};
  const react={
@@ -41,7 +41,7 @@ function harness({override,initial={},configured=true,legacy=false}={}){
  }}};
  const module={exports:{}};runInNewContext(source,{module,exports:module.exports,AbortController,URL,require:name=>{assert.ok(name in imports,name);return imports[name];}});
  function nodes(value,result=[]){if(Array.isArray(value))value.forEach(v=>nodes(v,result));else if(value&&typeof value==='object'){if(value.type==='Sheet'&&!value.props.visible)return result;result.push(value);nodes(value.props?.children,result);nodes(value.props?.action,result);}return result;}
- function render(){let loops=0;while(dirty){assert.ok(loops++<12);dirty=false;cursor=0;tree=module.exports.FinancialPluginCatalog({token:owner,active,onSelect:value=>selected.push(value)});effects.splice(0).forEach(effect=>effect());}return nodes(tree);}
+ function render(){let loops=0;while(dirty){assert.ok(loops++<12);dirty=false;cursor=0;tree=module.exports.FinancialPluginCatalog({token:owner,active,initialProviderId,onSelect:value=>selected.push(value)});effects.splice(0).forEach(effect=>effect());}return nodes(tree);}
  function press(label){const node=render().find(n=>n.type==='Action'&&n.props.label===label);assert.ok(node,label);assert.equal(!!node.props.disabled,false,label);node.props.onPress();render();}
  return{calls,selected,opened,connections,render,press,get writesAfterUnmount(){return writesAfterUnmount;},
   async flush(){for(let i=0;i<40;i++){await Promise.resolve();render();}},
@@ -61,6 +61,13 @@ test('eight providers render without business queries; anonymous add and explici
  assert.equal(h.calls.filter(c=>c.path.endsWith('/tools')).length,0);
  h.press('Use in chat');await h.flush();assert.equal(h.selected.length,1);assert.equal(h.selected[0].financial_provider_id,'coingecko');
  assert.equal(h.calls.some(c=>c.path.includes('invocation')),false);
+});
+test('recommended provider opens its existing authorization flow without adding or calling it automatically',async()=>{
+ const h=harness({initialProviderId:'ifind'});h.render();await h.flush();
+ assert.equal(h.render().find(n=>n.type==='Page').props.title,'iFinD');
+ assert.equal(h.calls.length,1);assert.equal(h.calls[0].path,'/v1/plugins/financial/providers?catalog_version=2');assert.equal(h.selected.length,0);
+ assert.ok(h.render().some(n=>n.type==='Action'&&n.props.label==='Add financial plugin'));
+ const invalid=harness({initialProviderId:'unrecognized-provider'});invalid.render();await invalid.flush();assert.equal(invalid.render().filter(n=>n.type==='Pressable').length,8);
 });
 test('personal keys stay masked and are cleared at submission, closing and background',async()=>{
  const h=harness({initial:{ifind:saved('ifind')}});h.render();await h.flush();h.choose('iFinD');h.press('Configure personal key');h.enter('fixture-key');

@@ -8,7 +8,7 @@ import { WorkbenchError } from '../api-workbench/core';
 import { BANKS } from './catalog';
 import { bankingError, connectBanks, fetchBankWallet, type BankWallet } from './client';
 
-export function BankPluginCatalog({ token, onSelect }: { token: string; onSelect: (connection: PluginConnection) => void }) {
+export function BankPluginCatalog({ token, onSelect, initialBankId }: { token: string; onSelect: (connection: PluginConnection) => void; initialBankId?: string | null }) {
   const { colors, text } = useDesign();
   const [wallet, setWallet] = useState<BankWallet | null>(null);
   const [busy, setBusy] = useState<string | null>('load');
@@ -37,7 +37,7 @@ export function BankPluginCatalog({ token, onSelect }: { token: string; onSelect
     {!!error && <Type color={colors.danger}>{bankingError(error, text)}</Type>}
     <Action kind="ghost" icon={RefreshCw} label={text('刷新银行插件', 'Refresh bank plugins')} disabled={!!busy} onPress={() => { void run('load', async signal => { const value = await fetchBankWallet(token, signal); if (!signal.aborted) setWallet(value); }); }} />
     {busy === 'load' && <ActivityIndicator color={colors.accent} />}
-    {BANKS.map(bank => {
+    {[...BANKS].sort((a, b) => Number(b.id === initialBankId) - Number(a.id === initialBankId)).map(bank => {
       const account = wallet?.accounts.find(item => item.bank_id === bank.id);
       return <View key={bank.id} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.line }}>
         <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: colors.soft, alignItems: 'center', justifyContent: 'center' }}><Landmark size={22} color={bank.color} /></View>

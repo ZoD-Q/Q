@@ -19,9 +19,11 @@ import { getBank } from '../banking/catalog';
 import { decodeBankWallet } from '../banking/client';
 import { appendLocalFinanceTurn, financialAiTitle, isFinancialAiConversation, localFinanceHelp, type LocalFinanceTurn } from '../finance-agent/conversation';
 import { FINANCIAL_AI_GUIDANCE, respondToFinanceText } from '../finance-agent/intent';
+import { canContinueRecommendation, completedRecommendationModule, decodeRecommendation, decodeRecommendationPage, decodeSelection, mergeRecommendations, recommendationTurnKey, type PendingRecommendation, type Recommendation, type RecommendationMap, type RecommendationSelection } from '../recommendations/core';
+import { readPendingRecommendation, savePendingRecommendation } from '../recommendations/pending';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number; automaticInvocationId?: string; appToolAttempted?: boolean };
-type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean; appResume?: AppResume };
+type ConsentRequest = { conversation: Conversation; messages: ChatMessage[]; invocationIds: string[]; clearDraft: boolean; appResume?: AppResume; recommendationHandoff?: boolean };
 type AppResume = { messageId: string; token: string; conversationId: string; messages: ChatMessage[]; context: AppToolContext[]; text: string; actions: AppNavigationAction[] };
 const guidanceFor = (prompt: string) => {
   const full = `${FINANCIAL_AI_GUIDANCE}\n\n${CAPABILITY_GUIDANCE}`;
@@ -31,7 +33,7 @@ type ToolResumeTarget = { conversationId: string; messageId: string; invocationI
 const errorCode = (error: unknown) => error instanceof ChatError || error instanceof WorkbenchError ? error.code
   : error instanceof Error && ['EMPTY_MESSAGE', 'MESSAGE_TOO_LONG', 'FINANCE_MESSAGE_TOO_LONG', 'LOCAL_FINANCE_PRIVATE'].includes(error.message) ? error.message : 'REQUEST_FAILED';
 
-export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
+export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh', recommendationsVisible = visible) {
   const [session, setSession] = useState<AuthResponse | null>(null);
   const sessionRef = useRef<AuthResponse | null>(null);
   const [statusSnapshot, setStatusSnapshot] = useState(initialAiStatus);
@@ -91,6 +93,35 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   const continuedInvocations = useRef(new Set<string>());
   const authLock = useRef(false);
   const pendingAuth = useRef<{ version: number; result: AuthResponse } | null>(null);
+  const [recommendations, setRecommendations] = useState<RecommendationMap>({});
+  const [recommendationCoverage, setRecommendationCoverage] = useState<Record<string, string[]>>({});
+  const recommendationsRef = useRef<RecommendationMap>({});
+  const [recommendationError, setRecommendationError] = useState<{ recordId: string; code: string } | null>(null);
+  const [recommendationBusy, setRecommendationBusy] = useState<{ recordId: string; candidateId: string } | null>(null);
+  const [recommendationCursor, setRecommendationCursor] = useState<string | null>(null);
+  const [recommendationHistoryError, setRecommendationHistoryError] = useState(false);
+  const [pendingRecommendation, setPendingRecommendation] = useState<PendingRecommendation | null>(null);
+  const pendingRecommendationRef = useRef<PendingRecommendation | null>(null);
+  const recommendationRequest = useRef<AbortController | null>(null);
+  const recommendationLoad = useRef<AbortController | null>(null);
+  const recommendationSelection = useRef<AbortController | null>(null);
+  const recommendationAttempts = useRef(new Map<string, string>());
+  const recommendationDrafts = useRef(new Map<string, string>());
+  const recommendationEpoch = useRef(0);
+  const rememberRecommendations = (values: Recommendation[]) => {
+    recommendationsRef.current = mergeRecommendations(recommendationsRef.current, values);
+    setRecommendations(recommendationsRef.current);
+  };
+  const rememberPendingRecommendation = (value: PendingRecommendation | null) => {
+    pendingRecommendationRef.current = value; setPendingRecommendation(value);
+  };
+  const stopRecommendations = () => {
+    recommendationEpoch.current++;
+    recommendationRequest.current?.abort(); recommendationRequest.current = null;
+    recommendationLoad.current?.abort(); recommendationLoad.current = null;
+    recommendationSelection.current?.abort(); recommendationSelection.current = null;
+    if (mounted.current) setRecommendationBusy(null);
+  };
 
   const updateItems = (update: (current: Conversation[]) => Conversation[]) => {
     list.current = update(list.current);
@@ -160,13 +191,17 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     }
     finally { if (mounted.current && epoch === historyEpoch.current) setHistoryBusy(false); }
   };
-  const select = (id: string | null) => { selectionRevision.current++; activeIdRef.current = id; setActiveId(id); };
+  const select = (id: string | null) => {
+    if (activeIdRef.current !== id) { stopRecommendations(); setRecommendationCursor(null); setRecommendationHistoryError(false); }
+    selectionRevision.current++; activeIdRef.current = id; setActiveId(id);
+  };
   const updateAnswer = (request: ActiveRequest, update: (message: ChatMessage) => ChatMessage) => {
     updateItems(current => current.map(conversation => conversation.id !== request.conversationId ? conversation : {
       ...conversation, messages: conversation.messages.map(message => message.id === request.assistantId ? update(message) : message),
     }));
   };
   const stop = () => {
+    stopRecommendations();
     if (continuation.current) {
       const { conversationId, messageId, invocationId } = continuation.current;
       if (mounted.current) setToolResumeTarget({ conversationId, messageId, invocationId });
@@ -195,6 +230,8 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     return generation.current;
   };
   const clearPrivateState = () => {
+    recommendationsRef.current = {}; setRecommendations({}); setRecommendationCoverage({}); recommendationAttempts.current.clear(); recommendationDrafts.current.clear();
+    rememberPendingRecommendation(null); setRecommendationError(null); setRecommendationCursor(null); setRecommendationHistoryError(false);
     setToolResumeTarget(null);
     continuedInvocations.current.clear();
     appContinuations.current.clear(); setAppActions({}); setAppResumeIds([]);
@@ -268,7 +305,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     // Market pages can be visible while this hook's chat surface is hidden.
     // Their transfers still stop when the app leaves the foreground.
     const subscription = AppState.addEventListener('change', state => {
-      if (state !== 'active') { researchRequest.current?.abort(); inflight.current?.controller.abort(); }
+      if (state !== 'active') { researchRequest.current?.abort(); inflight.current?.controller.abort(); stopRecommendations(); }
     });
     return () => subscription.remove();
   }, []);
@@ -350,7 +387,60 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
   const rememberAppActions = (messageId: string, actions: AppNavigationAction[], previousId?: string) => {
     setAppActions(value => Object.fromEntries([...Object.entries(value).filter(([id]) => id !== messageId && id !== previousId), [messageId, actions]].slice(-100)));
   };
-  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false, continuationKey?: string, appResume?: AppResume) => {
+  const loadRecommendations = async (more = false) => {
+    const account = sessionRef.current, id = activeIdRef.current;
+    if (!account || !id || !recommendationsVisible || AppState.currentState !== 'active' || status?.recommendations_version !== 1
+      || inflight.current || historyCapabilities.current.get(account.token) !== 'cloud' || list.current.find(item => item.id === id)?.localOnly) return;
+    recommendationLoad.current?.abort();
+    const controller = new AbortController(), epoch = recommendationEpoch.current;
+    recommendationLoad.current = controller;
+    const current = () => mounted.current && !controller.signal.aborted && epoch === recommendationEpoch.current
+      && activeIdRef.current === id && sessionRef.current?.token === account.token && AppState.currentState === 'active';
+    try {
+      const page = await workbenchRequest({ baseUrl: API_URL, path: `/v1/ai/recommendations?conversation_id=${id}&limit=20${more && recommendationCursor ? `&cursor=${encodeURIComponent(recommendationCursor)}` : ''}`,
+        token: account.token, signal: controller.signal, timeoutMs: 5000, decode: decodeRecommendationPage, transport: expoFetch });
+      if (page.items.some(item => item.conversation_id !== id)) throw new WorkbenchError('INVALID_RESPONSE');
+      if (!current()) return;
+      rememberRecommendations(page.items); setRecommendationCursor(page.next_cursor); setRecommendationHistoryError(false);
+    } catch { if (current()) setRecommendationHistoryError(true); }
+    finally { if (recommendationLoad.current === controller) recommendationLoad.current = null; }
+  };
+  const createRecommendations = (account: AuthResponse, conversation: Conversation, source: ChatMessage) => {
+    if (!recommendationsVisible || status?.recommendations_version !== 1 || !hasAiConsent(account.token) || historyCapabilities.current.get(account.token) !== 'cloud'
+      || AppState.currentState !== 'active' || conversation.localOnly || conversation.messages.some(message => message.localFinance || message.financeResult)) return;
+    const key = `${conversation.id}:${source.id}`;
+    if (recommendationAttempts.current.has(key) || Object.values(recommendationsRef.current).some(item => item.conversation_id === conversation.id && item.source_message_id === source.id)) return;
+    const requestId = randomUUID();
+    recommendationAttempts.current.set(key, requestId);
+    while (recommendationAttempts.current.size > 100) recommendationAttempts.current.delete(recommendationAttempts.current.keys().next().value!);
+    recommendationRequest.current?.abort();
+    const controller = new AbortController(), epoch = recommendationEpoch.current;
+    recommendationRequest.current = controller;
+    void workbenchRequest({ baseUrl: API_URL, path: '/v1/ai/recommendations', token: account.token, method: 'POST',
+      body: { conversation_id: conversation.id, source_message_id: source.id, request_id: requestId, locale }, signal: controller.signal,
+      timeoutMs: 5000, decode: decodeRecommendation, transport: expoFetch }).then(result => {
+      if (result.conversation_id !== conversation.id || result.source_message_id !== source.id) return;
+      if (!mounted.current || controller.signal.aborted || epoch !== recommendationEpoch.current || sessionRef.current?.token !== account.token
+        || activeIdRef.current !== conversation.id || AppState.currentState !== 'active' || !hasAiConsent(account.token)
+        || list.current.find(item => item.id === conversation.id)?.messages.find(message => message.id === source.id)?.content !== source.content) return;
+      rememberRecommendations([result]);
+    }).catch(() => { /* Low priority discovery never changes the answer or its retry state. */ })
+      .finally(() => { if (recommendationRequest.current === controller) recommendationRequest.current = null; });
+  };
+  const restoreRecommendations = useEffectEvent(() => { if (!recommendationsVisible || status?.recommendations_version !== 1) stopRecommendations(); else void loadRecommendations(); });
+  useEffect(() => {
+    // The feature version may arrive after history hydration. Restoring cards never runs a task.
+    restoreRecommendations();
+  }, [activeId, recommendationsVisible, status?.recommendations_version, historyBusy, phase]);
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    void readPendingRecommendation(session.user.id).then(value => {
+      if (!cancelled && mounted.current && sessionRef.current?.token === session.token && !pendingRecommendationRef.current) rememberPendingRecommendation(value);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [session]);
+  const start = (conversation: Conversation, baseMessages: ChatMessage[], invocationIds: string[] = [], clearDraft = false, continuationKey?: string, appResume?: AppResume, recommendationHandoff = false) => {
     if (conversation.localOnly || baseMessages.some(message => message.localFinance || message.financeResult)) {
       setMessageError('LOCAL_FINANCE_PRIVATE'); return false;
     }
@@ -365,20 +455,21 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
       context = buildContext(baseMessages.slice(0, lastUser + 1), !conversation.plugin ? guidanceFor(baseMessages[lastUser]?.content ?? '') : '');
     }
     catch (error) { setMessageError(errorCode(error)); return false; }
-    if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft, ...(appResume ? { appResume } : {}) })) {
+    if (!consentGate.request(authenticated.token, generation.current, { conversation, messages: baseMessages, invocationIds, clearDraft, ...(appResume ? { appResume } : {}), recommendationHandoff })) {
       setAiConsentOpen(true);
       return false;
     }
     const request: ActiveRequest = { id: randomUUID(), conversationId: conversation.id, assistantId: randomUUID(), controller: new AbortController(), generation: generation.current };
     if (writers.current.get(authenticated.token)?.hasPending(conversation.id)) { setHistoryError('HISTORY_SAVE_PENDING'); return false; }
     const selectedPlugin = conversation.plugin;
-    const appEnabled = !selectedPlugin && !think && status.app_tools_version === 1;
+    const requestThinking = !selectedPlugin && !recommendationHandoff && think;
+    const appEnabled = !selectedPlugin && !requestThinking && status.app_tools_version === 1;
     const companyEnabled = appEnabled && status.company_research_version === 1;
     const filingEnabled = appEnabled && status.filing_research_version === 1;
     if (appResume && appResume.context.some(item => item.name === 'company_filings' || item.name === 'company_filing') && !filingEnabled) { setMessageError('APP_RESULT_RELOAD'); return false; }
     if (appResume && appResume.context.some(item => item.name === 'company_search' || item.name === 'company_research') && !companyEnabled) { setMessageError('APP_RESULT_RELOAD'); return false; }
     if (appResume && (!appEnabled || appResume.token !== authenticated.token || appResume.conversationId !== conversation.id)) { setMessageError('APP_RESULT_RELOAD'); return false; }
-    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: appResume?.text ?? '', status: 'pending', model, thinking: selectedPlugin ? false : think, contextLimited: context.limited, toolInvocationIds: invocationIds };
+    const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: appResume?.text ?? '', status: 'pending', model, thinking: requestThinking, contextLimited: context.limited, toolInvocationIds: invocationIds };
     inflight.current = request;
     if (appResume) {
       request.appToolAttempted = true;
@@ -397,6 +488,10 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
         return;
       }
       if (!current()) return;
+      // Both requests start only after the user turn is durable. Discovery has its own
+      // cancellation and budget, so a slow card cannot delay the streaming answer.
+      const source = baseMessages.findLast(message => message.role === 'user');
+      if (source && !invocationIds.length && !continuationKey && !appResume && !recommendationHandoff) createRecommendations(authenticated, next, source);
       if (continuationKey) { continuedInvocations.current.add(continuationKey); setToolResumeTarget(null); }
       const appContext: AppToolContext[] = appResume ? [...appResume.context] : [];
       const seen = new Set(appContext.map(item => JSON.stringify({ name: item.name, arguments: item.arguments })));
@@ -413,7 +508,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
           if (!current()) return;
           let appCall: AppCommand | null = null;
           const outgoing = fitChatRequestHistory({
-            model, thinking: selectedPlugin ? false : think, messages: context.messages,
+            model, thinking: requestThinking, messages: context.messages,
             ...(appEnabled ? { app_tools_version: 1 as const, ...(companyEnabled ? { company_research_version: 1 as const } : {}), ...(filingEnabled ? { filing_research_version: 1 as const } : {}), app_context: appContext, ...(finalOnly ? { app_final_only: true } : {}) } : {}),
             ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds, ...(status.automatic_readonly_tools === true ? { automatic_readonly_tools: true } : {}) } : {}),
           });
@@ -460,6 +555,11 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
             result = await executeAppCommand(command, locale, { signal: request.controller.signal, transport: expoFetch });
           }
           if (!current()) return;
+          const coveredModule = completedRecommendationModule(command, result);
+          if (source && coveredModule) {
+            const key = recommendationTurnKey(conversation.id, source.id);
+            setRecommendationCoverage(previous => Object.fromEntries([...Object.entries(previous).filter(([id]) => id !== key), [key, [...new Set([...(previous[key] ?? []), coveredModule])]]].slice(-100)));
+          }
           const encoded = appResultContext(result);
           if (appContext.reduce((total, item) => total + Array.from(item.result).length, 0) + Array.from(encoded).length > 24000) throw new ChatError('RESPONSE_TOO_LARGE');
           appContext.push({ ...command, result: encoded });
@@ -657,7 +757,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     const pending = consentGate.approve(sessionRef.current?.token ?? '', generation.current);
     setAiConsentOpen(false);
     if (!pending || !mounted.current) return;
-    if (start(pending.conversation, pending.messages, pending.invocationIds, false, undefined, pending.appResume) && pending.clearDraft
+    if (start(pending.conversation, pending.messages, pending.invocationIds, false, undefined, pending.appResume, pending.recommendationHandoff) && pending.clearDraft
       && draft.trim() === pending.messages.at(-1)?.content) setDraft('');
   };
   const newConversation = () => { cancelAiSharing(); stop(); setToolResumeTarget(null); select(null); setDraft(''); setMessageError(''); setFinancialAi(false); };
@@ -758,7 +858,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
         writerFor(account).discard(id, detail.revision);
       } else writerFor(account).seed(id, detail.revision, true);
       hydrated.current.add(id);
-      updateItems(current => current.map(item => item.id === id ? restoreHistory(detail) : item));
+      updateItems(current => current.some(item => item.id === id) ? current.map(item => item.id === id ? restoreHistory(detail) : item) : [restoreHistory(detail), ...current]);
       setFinancialAi(isFinancialAiConversation(detail));
       setPlugin(detail.plugin ?? null); setHistoryError('');
     } catch (error) { if (isCurrent(version) && activeIdRef.current === id) setHistoryError(errorCode(error)); }
@@ -823,6 +923,87 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     }
   };
 
+  const selectRecommendation = async (recordId: string, candidateId: string, continueExisting = false): Promise<RecommendationSelection | null> => {
+    const account = sessionRef.current;
+    const record = recommendationsRef.current[recordId], pending = pendingRecommendationRef.current;
+    const sourceId = record?.conversation_id ?? (pending?.recordId === recordId && pending.candidateId === candidateId ? pending.sourceConversationId : null);
+    if (!account || !recommendationsVisible || AppState.currentState !== 'active' || status?.recommendations_version !== 1 || !sourceId
+      || (record && !record.candidates.some(candidate => candidate.id === candidateId))
+      || (activeIdRef.current !== sourceId && activeIdRef.current !== pending?.targetConversationId)
+      || inflight.current || continuation.current || recommendationSelection.current || historyAction.current || historyBusy || authBusy
+      || historyCapabilities.current.get(account.token) !== 'cloud') return null;
+    stopRecommendations();
+    const controller = new AbortController(), epoch = recommendationEpoch.current;
+    const selection = selectionRevision.current;
+    recommendationSelection.current = controller;
+    setRecommendationBusy({ recordId, candidateId }); setRecommendationError(null);
+    const recovery: PendingRecommendation = { recordId, candidateId, sourceConversationId: sourceId,
+      ...(pending?.recordId === recordId && pending.candidateId === candidateId && pending.targetConversationId ? { targetConversationId: pending.targetConversationId } : {}) };
+    rememberPendingRecommendation(recovery);
+    const current = () => mounted.current && !controller.signal.aborted && recommendationSelection.current === controller && epoch === recommendationEpoch.current
+      && selection === selectionRevision.current && sessionRef.current?.token === account.token && AppState.currentState === 'active';
+    try {
+      // Persist only the recovery identifiers before an action with an unknown outcome.
+      try { await savePendingRecommendation(account.user.id, recovery); } catch { throw new WorkbenchError('STORAGE_ERROR'); }
+      if (!current()) return null;
+      await writerFor(account).drain();
+      if (!current()) return null;
+      if (writerFor(account).hasPending(sourceId)) throw new WorkbenchError('HISTORY_SAVE_PENDING');
+      const result = await workbenchRequest({ baseUrl: API_URL, path: `/v1/ai/recommendations/${recordId}/select`, token: account.token,
+        method: 'POST', body: { candidate_id: candidateId }, signal: controller.signal, timeoutMs: 12000, decode: decodeSelection, transport: expoFetch });
+      if (result.candidate.id !== candidateId) throw new WorkbenchError('INVALID_RESPONSE');
+      if (!current()) return null;
+      if (record) rememberRecommendations([{ ...record, candidates: record.candidates.map(candidate => candidate.id === candidateId ? result.candidate : candidate) }]);
+      if (result.conversation) {
+        const detail = result.conversation;
+        if (detail.id === sourceId || writerFor(account).hasPending(detail.id)) throw new WorkbenchError('HISTORY_SAVE_PENDING');
+        const destination = { ...recovery, targetConversationId: detail.id };
+        await savePendingRecommendation(account.user.id, destination);
+        if (!current()) return null;
+        rememberPendingRecommendation(destination);
+        writerFor(account).seed(detail.id, detail.revision, true);
+        const restored = restoreHistory(detail);
+        hydrated.current.add(detail.id);
+        updateItems(items => items.some(item => item.id === detail.id) ? items.map(item => item.id === detail.id ? restored : item) : [restored, ...items]);
+        recommendationSelection.current = null; setRecommendationBusy(null);
+        if (activeIdRef.current !== detail.id) {
+          if (activeIdRef.current === sourceId && draftRef.current) {
+            recommendationDrafts.current.set(sourceId, draftRef.current);
+            while (recommendationDrafts.current.size > 20) recommendationDrafts.current.delete(recommendationDrafts.current.keys().next().value!);
+          }
+          setDraft('');
+        }
+        cancelAiSharing(); select(detail.id); setPlugin(restored.plugin ?? null); setFinancialAi(false); setThink(false); setMessageError('');
+        // Only a known first creation or an explicit resume can continue an untouched user turn.
+        // Existing answers/proposals always remain intact, including an interrupted request.
+        if ((result.created || continueExisting) && canContinueRecommendation(restored)) start(restored, restored.messages, [], false, undefined, undefined, true);
+      } else if (result.kind === 'navigate') {
+        await savePendingRecommendation(account.user.id, null);
+        if (!current()) return null;
+        rememberPendingRecommendation(null);
+      }
+      return result;
+    } catch (error) {
+      if (current()) setRecommendationError({ recordId, code: errorCode(error) });
+      return null;
+    } finally {
+      if (recommendationSelection.current === controller) { recommendationSelection.current = null; if (mounted.current) setRecommendationBusy(null); }
+    }
+  };
+  const recommendationQuestion = (recordId: string) => {
+    const record = recommendationsRef.current[recordId];
+    return record ? list.current.find(item => item.id === record.conversation_id)?.messages.find(message => message.id === record.source_message_id)?.content ?? '' : '';
+  };
+  const openRecommendationSource = async () => {
+    const pending = pendingRecommendationRef.current, account = sessionRef.current;
+    if (!pending || !account) return;
+    await openConversation(pending.sourceConversationId);
+    const saved = recommendationDrafts.current.get(pending.sourceConversationId);
+    if (saved && sessionRef.current?.token === account.token && activeIdRef.current === pending.sourceConversationId && !draftRef.current) {
+      setDraft(saved); recommendationDrafts.current.delete(pending.sourceConversationId);
+    }
+  };
+
   return {
     session, status, statusError, statusPhase, statusBusy, reconnect: statusMonitor.refresh,
     authBusy, authOpen, authError, authenticate, logout, closeAuth, restore,
@@ -835,6 +1016,11 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     addLocalFinance: (turn: LocalFinanceTurn) => addLocalFinance(turn), privacyEpoch,
     financialAi, newFinancialAi, prepareResearchDraft, researchBusy, appActions, appResumeIds, resumeAppResult, canResumeAppResult: (messageId: string) => appContinuations.current.has(messageId) && list.current.find(item => item.id === activeIdRef.current)?.messages.find(item => item.id === messageId)?.errorCode !== 'APP_CONTEXT_TOO_LARGE',
     plugin, selectPlugin, resumeTool,
+    recommendations: status?.recommendations_version === 1 ? recommendations : {}, recommendationCoverage, recommendationBusy, recommendationError,
+    recommendationCursor: status?.recommendations_version === 1 ? recommendationCursor : null, recommendationHistoryError: status?.recommendations_version === 1 && recommendationHistoryError, loadRecommendations,
+    pendingRecommendation: status?.recommendations_version === 1 ? pendingRecommendation : null, selectRecommendation, recommendationQuestion,
+    canContinueRecommendation: canContinueRecommendation(items.find(item => item.id === pendingRecommendation?.targetConversationId)),
+    openRecommendationSource: () => { void openRecommendationSource(); },
     aiConsentOpen, confirmAiSharing, cancelAiSharing,
   };
 }

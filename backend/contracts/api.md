@@ -135,7 +135,7 @@ Manual GET of a completed job may refresh its expiring signed media URL under th
 
 ## DeepSeek text conversations
 
-`GET /v1/ai/status` is public and returns `{configured, models:[{id,name}]}` with optional capability flags `automatic_readonly_tools` `app_tools_version:1` and `company_research_version:1`. `configured` means a server key exists, not that a paid provider request has succeeded. Allowed IDs are `deepseek-flash` and `deepseek-v4-pro`; the UI defaults to Flash. No key fragments, upstream headers or environment diagnostics are exposed.
+`GET /v1/ai/status` is public and returns `{configured, models:[{id,name}]}` with optional capability flags `automatic_readonly_tools`, `app_tools_version:1`, `company_research_version:1`, `filing_research_version:1` and, when enabled, `recommendations_version:1`. `configured` means a server key exists, not that a paid provider request has succeeded. Allowed IDs are `deepseek-flash` and `deepseek-v4-pro`; the UI defaults to Flash. No key fragments, upstream headers or environment diagnostics are exposed.
 
 `POST /v1/ai/chat` requires the existing Q Bearer session. Body is `{model,thinking,messages:[{role:"user"|"assistant",content}]}`. Unknown fields, client system/tool roles, empty messages, unsupported models, over 40 messages, over 12000 Unicode characters per message, over 24000 total characters or a non-user final message are rejected. The route body limit is 128 KiB. The server supplies the system prompt, provider address, key and output budget; clients cannot override them.
 
@@ -250,6 +250,8 @@ FRED requires authenticated dedicated routes:
 
 Queries, results, returned schemas and body text are never stored in invocation/history/cache/logs or forwarded to the model. Only fixed connection identity, encrypted authorization state/credentials and safe status codes persist. Ordinary tools, proposals, execution, AI plugin mode and history writes reject FRED with `PLUGIN_EPHEMERAL_REQUIRED`. Historical generic plugin snapshots remain saveable even if their old connection is gone. The client discards FRED form/results on background, departure, account change and unmount; explicit query is the business confirmation, with no chat handoff.
 
+Persistent recommendation candidates exclude FRED even when its connection is authorized. Selection also rejects its fixed provider identity and rechecks the owned connection before creating any conversation; stale candidate records cannot introduce a saved FRED continuation. Tavily can use the normal confirmed plugin workflow. Completed filing reads suppress duplicate market-data navigation recommendations, while failed reads do not.
+
 FRED alone uses confidential registration on fixed official endpoints, S256/state and exact issuer/resource `https://mcp.stlouisfed.org/`. Its validated secret is encrypted with the existing OAuth envelope, bound to purpose/owner/connection/revision/issuer/resource, retained through refresh, and cannot be replaced by token-response fields. Public Massive/Alpha clients still require `none`; arbitrary CIMD clients do not gain this exception. The visible temporary-mode notice includes FRED terms and non-endorsement wording. Real FRED account authorization remains separate acceptance work.
 
 ### SEC original filing research (2026-11-08 source)
@@ -263,3 +265,53 @@ Public `GET /v1/research/filings/{cik}/{accession}?offset=0` verifies the access
 Sources are fixed SEC HTTPS hosts with public DNS pinning, no proxy or redirects, no user credentials. Per-source deadline15s, catalog JSON2MiB, HTML8MiB, parse200000 nodes, extraction2000 paragraphs/500000 characters, individual paragraph8000 characters. Request lifetime35s and four concurrent admissions bound queued work; parsing has one permit. SEC-only cache has TTL5min, at most8 entries/aggregate8MiB, with shared1 request/s and429 cooldown at least60s or longer Retry-After. It never caches FRED content. Errors are `VALIDATION_ERROR`, `RESEARCH_FILING_NOT_FOUND`, `RESEARCH_SOURCE_UNAVAILABLE`, `RESEARCH_SOURCE_RATE_LIMITED`, `RESEARCH_SOURCE_TIMEOUT`, `RESEARCH_SOURCE_INVALID`, `RESEARCH_SOURCE_TOO_LARGE` and `RESEARCH_DOCUMENT_CHANGED`.
 
 `AiStatus` and `AiChatRequest` negotiate independent optional `filing_research_version:1` with `app_tools_version:1`. Only opted-in clients receive/submit `company_filings({issuerId})` and `company_filing({issuerId,accession,offset?,expectedSha256?})`. They share the existing three-result/24000-character budget, with client evidence at most8000 serialized characters per result, preserving whole paragraph citations and explicit omissions. Unsupported versions or unnegotiated contexts fail validation. Final-only continuation cannot query again. This source change is not a deployment claim.
+
+# Natural-language recommendations (version 1)
+
+Discovery adds optional `recommendations_version: 0 | 1` to `GET /v1/ai/status`.
+`Q_AI_RECOMMENDATIONS` defaults to false. Clients must see version 1 before using
+these authenticated, account-owned endpoints. Responses are `Cache-Control: no-store`.
+
+- `POST /v1/ai/recommendations`: `conversation_id`, saved `source_message_id`, UUID
+  `request_id`, `locale: zh | en`. The server extracts the saved question and at most
+  two complete ordinary preceding rounds, never accepts client-supplied ranking
+  context, and binds their content digest. Private tool results are excluded.
+  Exact service requests use rules; other requests recall at most 12 candidates
+  and make at most one bounded Flash choice. Result has zero to three server-owned
+  candidates. Five-second total budget; saturation/failure preserves the main answer.
+- `GET /v1/ai/recommendations?conversation_id=…&limit=20&cursor=…`: restore cards
+  with stable descending creation-time/UUID pagination. Limit 1–20. No model or
+  tool calls. Each source conversation retains up to 100 records; cards expire
+  after seven days. Source deletion/account erasure cascades recommendations.
+- `POST /v1/ai/recommendations/{id}/select` with `candidate_id`: check current
+  source digest, ownership, access, capability version and connection revision.
+  Return `conversation`, `connect`, `authorize`, `review` or `navigate` plus current
+  server metadata. A dedicated target is created transactionally with the same
+  account lock and quota as history. It returns an `AiConversation` with its CAS
+  revision. `(recommendation, candidate)` is unique; replay returns the current
+  target without overwriting later messages. A deleted target cannot be recreated
+  through the same card. The endpoint itself never executes a business tool.
+
+The client may continue automatically only after a known first creation. Lost
+responses, repeated selections and reloaded history require explicit continuation
+of an untouched user turn. Pending connect/auth/review selections retain only
+identifiers and must call select again after setup; saved cards are never credentials.
+Navigation is restricted to existing module identifiers. Existing write/payment/tool
+confirmation is unchanged. Selection is not a new authorization grant.
+
+Stable recommendation conflicts include `RECOMMENDATION_PENDING`,
+`RECOMMENDATION_REQUEST_REUSED`, `RECOMMENDATION_SOURCE_UNAVAILABLE`, and
+`RECOMMENDATION_STALE`. `RECOMMENDATION_REQUEST_LIMIT` (409) caps the accepted
+request aliases for one source at 32; recover with GET instead of new request IDs.
+`RECOMMENDATIONS_DISABLED` and `RECOMMENDATION_NOT_FOUND` are 404. Disabled functionality and unavailable records are not
+found; source ownership is never disclosed. Deadline expiry uses
+`RECOMMENDATION_TIMEOUT`. Existing auth, rate, history-quota and validation errors
+retain their meanings. Same request ID with changed source content/locale conflicts;
+another request ID for the same source digest returns the saved result.
+
+A service-instance generation gate and a separately cancellable ranking slot keep
+recommendations low priority. The ranking slot shares upstream concurrency and
+per-user request quota with normal chat; normal chat preempts ranking. Dynamic
+sources are owned MCP connections and fixed host catalogs. Anonymous Card storage
+is not proof of public-index consent and does not make a personal service public.
+See [client behavior and validation](../../mobile/docs/plugin-recommendations.md).

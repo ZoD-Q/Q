@@ -1744,6 +1744,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ai/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Recover saved cards without generating answers or running business calls. Newest-first stable created_at/UUID pagination; source deletion cascades records. Card state is not authority. */
+        get: operations["listAiRecommendations"];
+        put?: never;
+        /** @description Recommend against a saved user message in an owned conversation. Server reads at most two completed preceding ordinary rounds and binds a content digest; no client supplied context or plugin results. Deterministic exact match or one low-priority Flash choice from at most 12 candidates, returning 0–3. Total processing budget five seconds with exact-match fallback; does not delay the normal chat. Same request and source digest replay the existing result. No tool execution. */
+        post: operations["createAiRecommendation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/recommendations/{id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Recheck account ownership, saved source digest, access, connection revision and capability version. A ready plugin atomically creates or reuses one dedicated conversation per recommendation/candidate and returns its CAS revision. Pending connection/authorization/review opens existing setup; call selection again after returning. Navigation returns only a known module. This endpoint never executes tools. Repeated selection and lost responses restore the existing target and must not auto-repeat its task. */
+        post: operations["selectAiRecommendation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1941,6 +1978,11 @@ export interface components {
              * @enum {integer}
              */
             filing_research_version?: 1;
+            /**
+             * @description 1 enables version-1 account-scoped recommendations; 0 or absence disables them. Controlled by the server Q_AI_RECOMMENDATIONS flag, off by default.
+             * @enum {integer}
+             */
+            recommendations_version?: 0 | 1;
         };
         AiHistoryMessage: {
             /** @enum {string} */
@@ -3445,6 +3487,66 @@ export interface components {
             /** @description Extraction limit reached; separate from remaining pagination. */
             truncated: boolean;
             limitations: string[];
+        };
+        /** @description Server-owned display metadata, never authorization. Tool instructions, credentials and private results are omitted. Revalidate access and capability version on selection. */
+        AiRecommendationCandidate: {
+            id: string;
+            title: string;
+            description: string;
+            reason: string;
+            /** @enum {string} */
+            kind: "plugin" | "module";
+            /** @enum {string} */
+            access: "ready" | "connect" | "authorize" | "review" | "unavailable";
+            /** Format: uuid */
+            connection_id: string | null;
+            /** Format: int64 */
+            connection_revision: number | null;
+            module: string | null;
+            provider_id: string | null;
+            bank_id: string | null;
+            capability_version: string;
+            price_note: string | null;
+        };
+        AiRecommendation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversation_id: string;
+            source_message_id: string;
+            /** @enum {string} */
+            status: "complete" | "skipped";
+            candidates: components["schemas"]["AiRecommendationCandidate"][];
+            catalog_version: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        AiRecommendationRequest: {
+            /** Format: uuid */
+            conversation_id: string;
+            source_message_id: string;
+            /** Format: uuid */
+            request_id: string;
+            /** @enum {string} */
+            locale: "zh" | "en";
+        };
+        AiRecommendationPage: {
+            items: components["schemas"]["AiRecommendation"][];
+            /** Format: uuid */
+            next_cursor: string | null;
+        };
+        AiRecommendationSelectRequest: {
+            candidate_id: string;
+        };
+        AiRecommendationSelection: {
+            /** @enum {string} */
+            kind: "conversation" | "connect" | "authorize" | "review" | "navigate";
+            candidate: components["schemas"]["AiRecommendationCandidate"];
+            conversation: components["schemas"]["AiConversation"] | null;
+            /** @description Only the first successful dedicated-conversation creation is true. Replays restore its existing snapshot without rewriting messages or executing the task. */
+            created: boolean;
         };
     };
     responses: never;
@@ -9263,6 +9365,107 @@ export interface operations {
                 };
             };
             /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listAiRecommendations: {
+        parameters: {
+            query: {
+                conversation_id: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped result; Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRecommendationPage"];
+                };
+            };
+            /** @description Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    createAiRecommendation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiRecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner-scoped result; Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRecommendation"];
+                };
+            };
+            /** @description Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    selectAiRecommendation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiRecommendationSelectRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner-scoped result; Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRecommendationSelection"];
+                };
+            };
+            /** @description Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side. */
             default: {
                 headers: {
                     [name: string]: unknown;

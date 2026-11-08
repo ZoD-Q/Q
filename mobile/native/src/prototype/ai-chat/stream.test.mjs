@@ -486,3 +486,19 @@ test('filing tools negotiate independently and bind every page to its validated 
   const invalidPage = { name: 'company_filing', arguments: { ...commands[1].arguments, expectedSha256: undefined } };
   await expectCode(streamChat(options(fixture([frame('app_tool', invalidPage)]).transport, { request: { ...request, app_tools_version: 1, filing_research_version: 1 } })), 'INVALID_RESPONSE');
 });
+
+test('recommendations negotiate independently, with off and future versions leaving chat available', () => {
+  assert.equal(decodeAiStatus({ configured: true, models: [], recommendations_version: 1 }).recommendations_version, 1);
+  for (const version of [undefined, 0, 2]) assert.equal(decodeAiStatus({ configured: true, models: [], recommendations_version: version }).recommendations_version, undefined);
+  for (const version of [-1, '1', null, true, 1.5]) assert.throws(() => decodeAiStatus({ configured: true, models: [], recommendations_version: version }));
+});
+
+test('recommendation discovery and filing tools retain their independent compatibility flags', () => {
+  const both = { configured: true, models: [], app_tools_version: 1, company_research_version: 1, filing_research_version: 1, recommendations_version: 1 };
+  assert.equal(decodeAiStatus(both).filing_research_version, 1);
+  assert.equal(decodeAiStatus(both).recommendations_version, 1);
+  const futureRecommendations = decodeAiStatus({ ...both, recommendations_version: 2 });
+  assert.equal(futureRecommendations.recommendations_version, undefined);
+  assert.equal(futureRecommendations.filing_research_version, 1);
+  assert.equal(futureRecommendations.company_research_version, 1);
+});

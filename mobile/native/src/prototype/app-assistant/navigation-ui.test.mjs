@@ -16,6 +16,7 @@ const messages = await import('../ai-chat/messages.ts');
 const stateModel = await import('../ai-chat/state-model.ts');
 const mascot = await import('../ai-chat/mascot-state.ts');
 const plugins = await import('../plugin-host/core.ts');
+const recommendations = await import('../recommendations/core.ts');
 test.after(() => resolver.deregister());
 
 const noop = () => {};
@@ -62,6 +63,7 @@ function component(path, exportName, imports, options = {}) {
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
     'lucide-react-native': new Proxy({}, { get: (_, name) => String(name) }),
     './design': design, '../design': design,
+    './recommendations/core': recommendations, './recommendations/cards': { RecommendationCards: 'RecommendationCards' },
   };
   const module = { exports: {} };
   const source = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), {
@@ -216,4 +218,63 @@ test('shell routes validated market and social actions, rejecting malformed navi
   social.controller.busy = true;
   social.render().find(node => node.type === 'ChatPage').props.onOpenAppAction(app.createAppNavigationAction('social', 'zh'));
   assert.deepEqual(social.pushes, ['/social']);
+});
+
+test('recommendation navigation opens the selected provider and returns to the saved request without selecting another connection', async () => {
+  const h = shellHarness();
+  const candidate = { id: 'financial:ifind', title: 'iFinD', provider_id: 'ifind', connection_id: 'connection-a', bank_id: null };
+  h.controller.pendingRecommendation = { recordId: 'recommendation-a', candidateId: candidate.id, sourceConversationId: 'source-a' };
+  h.controller.selectRecommendation = async (recordId, candidateId) => { h.called.push([recordId, candidateId]); return { kind: 'authorize', candidate, conversation: null, created: false }; };
+  h.controller.openRecommendationSource = () => h.called.push('source');
+  h.controller.selectPlugin = value => h.called.push(['plugin', value.id]);
+  h.render().find(node => node.type === 'ChatPage').props.onSelectRecommendation('recommendation-a', candidate.id);
+  for (let index = 0; index < 20; index++) await Promise.resolve();
+  const host = h.render().find(node => node.type === 'PluginHostPage');
+  assert.deepEqual(host.props.recommendationTarget, candidate);
+  host.props.onSelect({ id: 'connection-a', financial_provider_id: 'ifind' });
+  assert.deepEqual(h.called, [['recommendation-a', candidate.id], 'source']);
+  assert.ok(h.render().some(node => node.type === 'ChatPage'));
+});
+
+test('module recommendation uses validated navigation and prefills supported filters without clearing the draft', async () => {
+  const h = shellHarness();
+  h.controller.selectRecommendation = async () => ({ kind: 'navigate', candidate: { module: 'insurance', title: 'Untrusted label' }, conversation: null, created: false });
+  h.controller.recommendationQuestion = () => '儿童医疗保障';
+  h.render().find(node => node.type === 'ChatPage').props.onSelectRecommendation('record', 'candidate');
+  for (let index = 0; index < 20; index++) await Promise.resolve();
+  const service = h.render().find(node => node.type === 'ServicePage');
+  assert.equal(service.props.insuranceEntry.query, '儿童医疗保障');
+  assert.equal(service.props.insuranceEntry.label, '打开保险');
+  assert.deepEqual(h.called, []); assert.equal(h.controller.draft, 'Keep draft');
+});
+
+test('a first Tavily connection returns to the recommended question using its research identity', async () => {
+  const h = shellHarness();
+  const candidate = { id: 'financial:tavily', title: 'Tavily', provider_id: 'tavily', connection_id: null, bank_id: null };
+  h.controller.pendingRecommendation = { recordId: 'record', candidateId: candidate.id, sourceConversationId: 'source' };
+  h.controller.selectRecommendation = async () => ({ kind: 'connect', candidate, conversation: null, created: false });
+  h.controller.openRecommendationSource = () => h.called.push('source');
+  h.controller.selectPlugin = value => h.called.push(['plugin', value.id]);
+  h.render().find(node => node.type === 'ChatPage').props.onSelectRecommendation('record', candidate.id);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  const host = h.render().find(node => node.type === 'PluginHostPage');
+  assert.equal(host.props.recommendationTarget.connection_id, null);
+  host.props.onSelect({ id: 'new-connection', financial_provider_id: null, research_provider_id: 'tavily' });
+  assert.deepEqual(h.called, ['source']);
+  assert.ok(h.render().some(node => node.type === 'ChatPage'));
+});
+
+test('FRED cannot enter persisted chat through a stale recommendation callback', async () => {
+  const h = shellHarness();
+  const candidate = { id: 'financial:fred', title: 'FRED', provider_id: 'fred', connection_id: 'fred-connection', bank_id: null };
+  h.controller.pendingRecommendation = { recordId: 'record', candidateId: candidate.id, sourceConversationId: 'source' };
+  h.controller.selectRecommendation = async () => ({ kind: 'connect', candidate, conversation: null, created: false });
+  h.controller.openRecommendationSource = () => h.called.push('source');
+  h.controller.selectPlugin = value => h.called.push(['plugin', value.id]);
+  h.render().find(node => node.type === 'ChatPage').props.onSelectRecommendation('record', candidate.id);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  h.render().find(node => node.type === 'PluginHostPage').props.onSelect({ id: 'fred-connection', financial_provider_id: null, research_provider_id: 'fred' });
+  assert.deepEqual(h.called, []);
+  assert.match(h.notices.at(-1), /FRED 临时研究/);
+  assert.ok(h.render().some(node => node.type === 'PluginHostPage'));
 });
