@@ -81,3 +81,11 @@ export type BankTransferReceipt = components["schemas"]["BankTransferReceipt"];
 export type BankEntry = components["schemas"]["BankEntry"];
 export type BankTransactionPage = components["schemas"]["BankTransactionPage"];
 export type BankEntryPage = components["schemas"]["BankEntryPage"];
+
+// Versioned, account-scoped natural-language capability recommendations.
+export type AiRecommendationCandidate = components['schemas']['AiRecommendationCandidate'];
+export type AiRecommendation = components['schemas']['AiRecommendation'];
+export type AiRecommendationRequest = components['schemas']['AiRecommendationRequest'];
+export type AiRecommendationPage = components['schemas']['AiRecommendationPage'];
+export type AiRecommendationSelectRequest = components['schemas']['AiRecommendationSelectRequest'];
+export type AiRecommendationSelection = components['schemas']['AiRecommendationSelection'];

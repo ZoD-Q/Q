@@ -5,12 +5,12 @@ import { Action, Input, Page, Row, Sheet, Type, useDesign } from '../design';
 import { decodeList, WorkbenchError } from '../api-workbench/core';
 import { pluginRequest } from '../plugin-host/client';
 import { connectionStatusLabel, decodeTool, type PluginConnection } from '../plugin-host/core';
-import { FINANCIAL_PROVIDERS, decodeAuthorizationAttempt, decodeFinancialAuthorization, decodeFinancialCatalog, decodeFinancialConnection, financialError, type FinancialAuthorization, type FinancialCatalog, type FinancialProviderId } from './core';
+import { FINANCIAL_PROVIDERS, decodeAuthorizationAttempt, decodeFinancialAuthorization, decodeFinancialCatalog, decodeFinancialConnection, financialError, financialProviderId, type FinancialAuthorization, type FinancialCatalog, type FinancialProviderId } from './core';
 
-export function FinancialPluginCatalog({ token, onSelect, active = true }: { token: string; active?: boolean; onSelect: (connection: PluginConnection) => void }) {
+export function FinancialPluginCatalog({ token, onSelect, active = true, initialProviderId }: { token: string; active?: boolean; onSelect: (connection: PluginConnection) => void; initialProviderId?: string | null }) {
   const { colors, text } = useDesign();
   const [catalog, setCatalog] = useState<{ owner: string; value: FinancialCatalog } | null>(null);
-  const [selected, setSelected] = useState<FinancialProviderId | null>(null);
+  const [selected, setSelected] = useState<FinancialProviderId | null>(financialProviderId(initialProviderId) ? initialProviderId : null);
   const [busy, setBusy] = useState(active);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState('');

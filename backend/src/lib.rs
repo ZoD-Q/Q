@@ -32,6 +32,7 @@ pub mod market_data;
 pub mod payments;
 pub mod plugins;
 pub mod profiles;
+pub mod recommendations;
 pub mod social;
 pub mod validation;
 pub mod video;
@@ -49,6 +50,8 @@ pub struct AppState {
     pub ai: Option<Arc<ai::AiRuntime>>,
     pub plugins: Option<Arc<plugins::PluginRuntime>>,
     pub payments: Option<Arc<payments::PaymentRuntime>>,
+    pub recommendations_enabled: bool,
+    pub recommendation_gate: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -68,6 +71,8 @@ impl AppState {
             ai: None,
             plugins: None,
             payments: None,
+            recommendations_enabled: false,
+            recommendation_gate: Arc::new(Semaphore::new(1)),
         })
     }
     fn limit_auth(&self, key: String, limit: u32) -> ApiResult<()> {
@@ -159,6 +164,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .merge(auth_routes)
         .merge(social::router())
         .merge(insurance::router())
+        .merge(recommendations::router())
         .route("/health", get(health))
         .route("/v1/auth/logout", post(identity::logout))
         .merge(

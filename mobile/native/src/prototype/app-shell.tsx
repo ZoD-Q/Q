@@ -38,6 +38,7 @@ import { useSocial } from "./social";
 import { MarketDataPage } from './market-data/page';
 import { validateAppNavigationAction, type AppNavigationAction } from './app-assistant/core';
 import { getSessionRevision } from '../services/session-store';
+import { recommendationNavigation, type RecommendationCandidate } from './recommendations/core';
 
 const serviceNavigation: {
   id: PageId;
@@ -435,11 +436,12 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   const [sidebar, setSidebar] = useState(true);
   const [drawer, setDrawer] = useState(false);
   const [pendingPluginIntent, updatePluginIntent] = useReducer(pluginEntryIntentReducer, null);
+  const [recommendationEntry, setRecommendationEntry] = useState<{ revision: number; owner: string; candidate: RecommendationCandidate } | null>(null);
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const social = useSocial();
   const active = focused && foreground;
-  const chat = useChat(active && (page === "chat" || page === "plugins" || page === "history"), locale);
+  const chat = useChat(active && (page === "chat" || page === "plugins" || page === "history"), locale, active && page === 'chat');
   const items = chat.items;
   const reduced = useReducedMotion();
   const navigate = (next: PageId, action?: AppNavigationAction) => {
@@ -449,7 +451,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
     setDrawer(false);
   };
   const openAppAction = (value: AppNavigationAction) => {
-    if (!active || chat.busy || chat.historyBusy) return;
+    if (!active || chat.busy || chat.historyBusy || chat.recommendationBusy) return;
     try {
       const action = validateAppNavigationAction(value);
       if (action.module === 'social') { setDrawer(false); router.push('/social'); }
@@ -457,6 +459,22 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
     } catch { notify(text('该入口暂不可用，请从侧栏打开。', 'This entry is unavailable. Open it from the sidebar.')); }
   };
   const entry = appEntry && appEntry.revision === getSessionRevision() && appEntry.owner === (chat.session?.user.id ?? null) ? appEntry.action : null;
+  const recommendationTarget = recommendationEntry && recommendationEntry.revision === getSessionRevision() && recommendationEntry.owner === chat.session?.user.id ? recommendationEntry.candidate : null;
+  const openRecommendation = async (recordId: string, candidateId: string, continueExisting = false) => {
+    if (!active || chat.busy || chat.historyBusy) return;
+    const result = await chat.selectRecommendation(recordId, candidateId, continueExisting);
+    if (!result) return;
+    if (result.kind === 'conversation') { navigate('chat'); return; }
+    if (result.kind === 'navigate') {
+      const action = recommendationNavigation(result.candidate, chat.recommendationQuestion(recordId), locale);
+      if (action) openAppAction(action);
+      return;
+    }
+    if (!chat.session) return;
+    setRecommendationEntry({ revision: getSessionRevision(), owner: chat.session.user.id, candidate: result.candidate });
+    navigate('plugins');
+  };
+  const returnToRecommendedQuestion = () => { chat.openRecommendationSource(); navigate('chat'); };
   const newChat = () => { chat.newConversation(); navigate("chat"); };
   const open = (id: string) => { chat.openConversation(id); navigate("chat"); };
   useEffect(() => {
@@ -573,7 +591,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         </View>
         <Reveal key={page} style={{ flex: 1 }}>
           {!active ? <View style={{ flex: 1 }} /> : page === "chat" ? (
-            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} onOpenAppAction={openAppAction} />
+            <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} onOpenAppAction={openAppAction} onSelectRecommendation={(recordId, candidateId, continueExisting) => { void openRecommendation(recordId, candidateId, continueExisting); }} />
           ) : page === 'market-data' ? (
             <MarketDataPage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} active={active} signedIn={Boolean(chat.session)} initialQuery={entry?.module === 'market-data' ? entry.marketQuery : undefined}
               conversations={chat.items.filter(item => !item.localOnly && !item.plugin && !item.messages.some(message => message.localFinance || message.financeResult)).map(item => ({ id: item.id, title: item.title }))}
@@ -594,7 +612,12 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
           ) : page === "plugin-workbench" ? (
             <PluginWorkbenchPage onBack={() => navigate("plugins")} onConnect={intent => { updatePluginIntent({ type: "received", intent }); navigate("plugins"); }} />
           ) : page === "plugins" ? (
-            <PluginHostPage active={active} chat={chat} initialIntent={pendingPluginIntent} onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => { chat.selectPlugin(connection); navigate("chat"); }} />
+            <PluginHostPage key={recommendationTarget?.id ?? 'plugins'} active={active} chat={chat} initialIntent={pendingPluginIntent} recommendationTarget={recommendationTarget}
+              onReturnToRecommendation={chat.pendingRecommendation ? returnToRecommendedQuestion : undefined}
+              onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => {
+                if (chat.pendingRecommendation && recommendationTarget && (recommendationTarget.connection_id === connection.id || (recommendationTarget.provider_id && recommendationTarget.provider_id === connection.financial_provider_id) || (recommendationTarget.bank_id && connection.builtin_service_id === `q.bank-demo.${recommendationTarget.bank_id}`))) returnToRecommendedQuestion();
+                else { chat.selectPlugin(connection); navigate("chat"); }
+              }} />
           ) : (
             <ServicePage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} page={page} insuranceEntry={entry?.module === 'insurance' ? entry : undefined} onOpenWorkbench={() => navigate("plugin-workbench")} onBankTransfer={account => {
               if (!account.connection_id) return;

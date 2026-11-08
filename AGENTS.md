@@ -10,6 +10,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 | --- | --- |
 | 当前移动端入口 | Expo 可交互前端原型，`DesignProvider` / `VideoStudioProvider` 驱动；聊天和 API 工作台按用户操作连接业务网络 |
 | AI 对话 | DeepSeek Flash / Pro 文本流式、多轮上下文、停止和重试；需要 Q 登录与服务端密钥；按 Q 账号保存和恢复云端历史的接口已部署，旧安装包仍需单独更新 |
+| 对话推荐（源码，默认关闭） | 自然语言能力匹配、账号隔离动态 MCP 目录、推荐卡与幂等承接已实现；`Q_AI_RECOMMENDATIONS` 控制启用，未部署。离线召回与模型真实质量分开验收。见 [推荐说明](mobile/docs/plugin-recommendations.md) |
 | 应用主助手 | 14模块能力说明与原生入口、保险目录、公开市场资料及公司研究工具已随2026-11-03后端部署；2026-11-04宣告主助手/公司研究版本均为1，客户端按版本协商。无跨模块私密读取或业务写入，完整真实模型工具选择与续答仍待分别验收。见 [实现与验收](mobile/docs/app-assistant.md) |
 | 插件 / 金融 | 插件支持真实 MCP 连接、受信银行只读查询自动续答、写操作确认和原生图片结果；20 家内置银行模拟插件使用独立 HKD 演示账本。六家固定金融供应商兼容、个人密钥/OAuth及聊天入口已实施，后端已部署且鉴权目录返回六项；宿主配置可用不等于受保护供应商授权或实账调用已验收，也不代表真实银行接入 |
 | 金融研究 / 广告 | 首页保留金融知识并转向公开市场资料；内置公开数据工具覆盖Chainlink 链上币种参考价、全球公司候选搜索、SEC 覆盖范围内年度财务研究和新闻样本分析，商业源未授权未连接，非已发布远程 MCP。原账单/分期成本/储蓄入口已移除，旧记录隔离保留。金融服务页广告仅演示。见 [金融数据说明](mobile/docs/market-data.md)与[公司研究范围](mobile/docs/company-research.md) |
@@ -104,7 +105,7 @@ Q 是以 AI 对话为首页、以开放插件扩展服务的应用。首页保�
 
 保留的 Web 联调客户端仅在内存保存 Bearer 令牌；localStorage 只保存不含令牌的待确认转账意图，重新登录后按发起人恢复。不能为跨重启恢复把会话令牌一并持久化。
 
-AI 已有鉴权流式代理与插件工具提案/确认/结果续答，按账号保存与恢复云端历史的接口已部署；新合入代码和已冻结安装包是否更新仍须分别核对。插件已有个人连接和调用模块；社交已有好友、私聊、阅后、亲密与应用内社交通知。开发者平台、商品/订阅订单、保险/分期/理财机构适配、公共内容、统计、推荐与跨领域推送仍是后续领域，支付模块已有的充值订单不属于这些未实现能力。详细边界见 [架构说明](mobile/docs/architecture.md)。按需要扩展模块化单体；这不是要求创建十个微服务。开发者和运营页面分别授权，不能建立绕过现有身份的第二套权限系统。
+AI 已有鉴权流式代理与插件工具提案/确认/结果续答，按账号保存与恢复云端历史的接口已部署；新合入代码和已冻结安装包是否更新仍须分别核对。插件已有个人连接和调用模块；社交已有好友、私聊、阅后、亲密与应用内社交通知。开发者平台、商品/订阅订单、保险/分期/理财机构适配、公共内容、运营统计、个性化推广与跨领域推送仍是后续领域；按当前问题触发的能力推荐已有默认关闭的源码实现，支付模块已有的充值订单不属于这些未实现能力。详细边界见 [架构说明](mobile/docs/architecture.md)。按需要扩展模块化单体；这不是要求创建十个微服务。开发者和运营页面分别授权，不能建立绕过现有身份的第二套权限系统。
 
 ## 6. UI、内容与原型真实性
 
@@ -164,7 +165,7 @@ Expo 预览通常在 `localhost:8081`；Rust API 默认 `127.0.0.1:8787`，本�
 
 社交与账号变更还需执行 `test:account`、`test:social` 和 `test:chat`；后端执行独立 PostgreSQL 库中的 `cargo test --manifest-path backend/Cargo.toml --test social -- --ignored`。修改到期/备份行为时再执行 `social_backup` 的真实 pg_dump/pg_restore 验收，使用匹配测试服务器主版本的 PostgreSQL 客户端与可创建测试数据库的专用角色。备份排除阅后正文、举报原因和证据；到期拒绝读取、后台清理与物理擦除是不同承诺。详见 [社交合同](backend/contracts/social.md)。
 
-插件工作台与连接结果逻辑运行 `npm --prefix mobile run test:plugins`；检查 URL 身份保留、关键字段、条件材料和生成地址冲突。该测试不能替代真实插件集成验收，详见 [工作台说明](mobile/docs/plugin-workbench.md)。插件后端还须运行 `cargo clippy --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings`，以及隔离 PG 下 `--all-features --test plugins -- --ignored` 和 `--all-features --test ai_plugins -- --ignored`。能力边界见 [MCP 宿主](mobile/docs/mcp-host.md)。
+插件工作台与连接结果逻辑运行 `npm --prefix mobile run test:plugins`；检查 URL 身份保留、关键字段、条件材料和生成地址冲突。该测试不能替代真实插件集成验收，详见 [工作台说明](mobile/docs/plugin-workbench.md)。插件后端还须运行 `cargo clippy --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings`，以及隔离 PG 下 `--all-features --test plugins -- --ignored` 和 `--all-features --test ai_plugins -- --ignored`。能力边界见 [MCP 宿主](mobile/docs/mcp-host.md)。推荐后端还需隔离 PG 下 `--all-features --test recommendations -- --ignored`；客户端编排和卡片测试已纳入 `test:chat`。
 
 一次提交涉及多个范围时，执行对应检查的并集；依赖、锁文件、构建脚本或测试配置变化按受影响的客户端或后端范围验证。测试后若继续修改受检内容，须重新运行受影响的检查。交付及 MR 中记录实际运行的命令、结果、未覆盖的平台和阻碍，不得把未执行的测试写为通过。
 

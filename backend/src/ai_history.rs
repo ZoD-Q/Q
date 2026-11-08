@@ -280,6 +280,8 @@ pub async fn save(
     }
     let row=sqlx::query_as::<_,Saved>("INSERT INTO ai_conversations(user_id,id,revision,request_id,expected_revision,snapshot) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,id) DO UPDATE SET revision=EXCLUDED.revision,request_id=EXCLUDED.request_id,expected_revision=EXCLUDED.expected_revision,snapshot=EXCLUDED.snapshot,updated_at=now() RETURNING *")
         .bind(auth.user_id).bind(id).bind(request.expected_revision+1).bind(request.request_id).bind(request.expected_revision).bind(snapshot).fetch_one(&mut *tx).await?;
+    crate::recommendations::metrics::observe_history(&mut tx, auth.user_id, id, &row.snapshot)
+        .await?;
     tx.commit().await?;
     Ok(Json(row.response()))
 }
