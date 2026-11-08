@@ -459,3 +459,30 @@ test('company tools require independent discovered capability and request opt-in
     assert.equal(fake.stats.calls, 0);
   }
 });
+
+test('filing tools negotiate independently and bind every page to its validated source hash', async () => {
+  const status = decodeAiStatus({ configured: true, models: [], app_tools_version: 1, filing_research_version: 1 });
+  assert.equal(status.filing_research_version, 1);
+  assert.equal(status.company_research_version, undefined);
+  assert.equal(decodeAiStatus({ configured: true, models: [] }).filing_research_version, undefined);
+  for (const value of [0, 2, null, true]) assert.throws(() => decodeAiStatus({ configured: true, models: [], app_tools_version: 1, filing_research_version: value }));
+  assert.throws(() => decodeAiStatus({ configured: true, models: [], filing_research_version: 1 }));
+  const commands = [{ name: 'company_filings', arguments: { issuerId: 'sec:0000320193' } }, { name: 'company_filing', arguments: { issuerId: 'sec:0000320193', accession: '0001140361-26-015711', offset: 80, expectedSha256: 'a'.repeat(64) } }];
+  for (const command of commands) {
+    const fake = fixture([frame('app_tool', command), done({ finish_reason: 'tool_calls' })]); const events = [];
+    await streamChat(options(fake.transport, { request: { ...request, app_tools_version: 1, filing_research_version: 1 }, onEvent: event => events.push(event) }));
+    assert.deepEqual(events[0], { type: 'app_tool', ...command });
+    assert.equal(JSON.parse(fake.stats.init.body).filing_research_version, 1);
+    await expectCode(streamChat(options(fixture([frame('app_tool', command)]).transport, { request: { ...request, app_tools_version: 1, company_research_version: 1 } })), 'INVALID_RESPONSE');
+    const context = { ...command, result: 'Public filing evidence [p000080] source and hash' };
+    const noOptIn = fixture([answer(), done()]);
+    await expectCode(streamChat(options(noOptIn.transport, { request: { ...request, app_tools_version: 1, app_context: [context] } })), 'VALIDATION_ERROR');
+    assert.equal(noOptIn.stats.calls, 0);
+    const resumed = fixture([answer(), done()]);
+    await streamChat(options(resumed.transport, { request: { ...request, app_tools_version: 1, filing_research_version: 1, app_context: [context], app_final_only: true } }));
+    assert.deepEqual(JSON.parse(resumed.stats.init.body).app_context, [context]);
+    await expectCode(streamChat(options(fixture([frame('app_tool', command)]).transport, { request: { ...request, app_tools_version: 1, filing_research_version: 1, app_context: [context], app_final_only: true } })), 'INVALID_RESPONSE');
+  }
+  const invalidPage = { name: 'company_filing', arguments: { ...commands[1].arguments, expectedSha256: undefined } };
+  await expectCode(streamChat(options(fixture([frame('app_tool', invalidPage)]).transport, { request: { ...request, app_tools_version: 1, filing_research_version: 1 } })), 'INVALID_RESPONSE');
+});

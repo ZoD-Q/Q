@@ -12,6 +12,8 @@ const marketCore = await import('../market-data/core.ts');
 const client = await import('../market-data/client.ts');
 const companyClient = await import('../company-research/client.ts');
 const companyCore = await import('../company-research/core.ts');
+const filingClient = await import('../company-research/filings-client.ts');
+const filingCore = await import('../company-research/filings-core.ts');
 test.after(() => resolver.deregister());
 const transpile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 function runtime(platform) {
@@ -24,6 +26,8 @@ function runtime(platform) {
   const executor = {};
   new Function('require', 'exports', 'process', transpile('./executor.ts'))(name => {
     if (name === './core') return core;
+    if (name === '../company-research/filings-client') return filingClient;
+    if (name === '../company-research/filings-core') return filingCore;
     if (name === '../company-research/client') return companyClient;
     if (name === '../company-research/core') return companyCore;
     if (name === '../market-data/core') return marketCore;
@@ -162,4 +166,29 @@ test('global company executor preserves source identities and bounded public evi
   assert.match(result.text, /sec:0001046179/); assert.match(result.text, /NYSE:TSM/);
   assert.equal(result.actions[0].module, 'market-data'); assert.ok(api.appResultContext(result).length <= 8000);
   assert.equal(requested.length, 3); assert.ok(requested.every(url => !url.includes('q.kaicloudpay.com')));
+});
+
+test('filing executor reads only fixed public routes and retains whole paragraph citations under the context budget', async () => {
+  const executor = runtime('ios'); const calls = [];
+  const issuerId = 'sec:0000320193', accession = '0001140361-26-015711';
+  const source = filingCore.filingDocumentUrl('0000320193', accession, 'report.htm');
+  const summary = { accession, form: '8-K', filed_at: '2026-04-20', report_date: '2026-04-17', document_name: 'report.htm', document_url: source, format: 'html' };
+  const base = { version: 1, issuer_id: issuerId, cik: '0000320193', company_name: 'Apple Inc.', fetched_at: '2026-11-08T10:00:00Z' };
+  const paragraph = { id: 'p000080', text: 'A whole quoted paragraph with its source, not an instruction.', kind: 'text', section_id: 's0000', source_url: source + '#risk' };
+  const doc = { ...base, filing: summary, status: 'ready', sha256: 'a'.repeat(64), content_type: 'text/html', sections: [{ id: 's0000', title: 'Risk Factors', start_paragraph: 0 }], paragraphs: [paragraph], offset: 80, next_offset: null, total_paragraphs: 81, truncated: false, limitations: ['Tables are plain text transcriptions.'] };
+  const transport = async (url, init) => { calls.push({ url, init }); return new Response(JSON.stringify(url.includes('?issuer_id=') ? { ...base, filings: [summary], total: 1, truncated: false } : doc), { headers: { 'Content-Type': 'application/json' } }); };
+  const options = { transport, signal: new AbortController().signal };
+  const catalog = await executor.executeAppCommand({ name: 'company_filings', arguments: { issuerId } }, 'en', options);
+  assert.match(catalog.text, /document text has not been read/);
+  assert.match(catalog.text, /0001140361-26-015711/);
+  const result = await executor.executeAppCommand({ name: 'company_filing', arguments: { issuerId, accession, offset: 80, expectedSha256: doc.sha256 } }, 'en', options);
+  assert.ok(result.text.includes(paragraph.text)); assert.ok(result.text.includes(paragraph.source_url)); assert.match(result.text, /p000080/);
+  assert.match(result.text, /SHA-256/); assert.match(result.text, /did not receive the complete filing/);
+  assert.ok(executor.appResultContext(result).length <= 8000);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /offset=80&expected_sha256=a{64}$/);
+  for (const call of calls) { assert.equal(call.init.credentials, 'omit'); assert.equal(call.init.cache, 'no-store'); assert.equal(call.init.headers.Authorization, undefined); }
+  const cancelled = new AbortController(); cancelled.abort();
+  await assert.rejects(executor.executeAppCommand({ name: 'company_filings', arguments: { issuerId } }, 'en', { transport, signal: cancelled.signal }), /CANCELLED/);
+  assert.equal(calls.length, 2);
 });

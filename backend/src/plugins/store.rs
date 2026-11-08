@@ -132,7 +132,14 @@ impl StoredConnection {
             id: self.id,
             connection_kind: self.connection_kind.clone(),
             builtin_service_id: self.builtin_service_id.clone(),
-            financial_provider_id: self.financial_provider_id.clone(),
+            financial_provider_id: self
+                .financial_provider_id
+                .clone()
+                .filter(|id| !super::financial::research_profile(id)),
+            research_provider_id: self
+                .financial_provider_id
+                .clone()
+                .filter(|id| super::financial::research_profile(id)),
             card_url: card.card_url,
             name: card.name,
             title: card.title,
@@ -157,6 +164,7 @@ pub struct Connection {
     pub connection_kind: String,
     pub builtin_service_id: Option<String>,
     pub financial_provider_id: Option<String>,
+    pub research_provider_id: Option<String>,
     pub card_url: String,
     pub name: String,
     pub title: String,
@@ -564,8 +572,7 @@ pub(crate) async fn record_remote_error(
     if connection.financial_provider_id.is_some() {
         return super::financial::record_error(state, connection, error).await;
     }
-    let auth =
-        error.category == ErrorCategory::Authorization || matches!(error.status, Some(401 | 403));
+    let auth = error.category == ErrorCategory::Authorization || error.status == Some(401);
     if auth {
         let configured = runtime(state)?.oauth_configured();
         let status = if configured {
@@ -603,6 +610,7 @@ pub(crate) async fn handle_remote<T>(
 
 pub async fn load_tools_for_user(state: &AppState, user: Uuid, id: Uuid) -> ApiResult<Vec<Tool>> {
     let connection = owned(state, user, id).await?;
+    super::financial::reject_ephemeral(&connection)?;
     connection.usable()?;
     let tools = if let Some(service) = connection.bank_service_id()? {
         crate::banking::tools(service)?

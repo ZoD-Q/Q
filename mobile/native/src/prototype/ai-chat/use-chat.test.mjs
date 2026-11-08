@@ -1229,3 +1229,32 @@ test('company search and research use discovered opt-in, preserve evidence and d
   assert.ok(view.historyPosts.some(post => post.body.messages.at(-1).content.includes('Toyota')));
   assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
 });
+
+test('filing results use independent opt-in and explanation recovery never repeats document reads', async t => {
+  const command = { name: 'company_filing', arguments: { issuerId: 'sec:0000320193', accession: '0001140361-26-015711' } };
+  const old = harness({ statusFetch: () => json({ ...configured, app_tools_version: 1, company_research_version: 1 }) }); t.after(old.close); await old.flush(); old.grantConsent();
+  old.current.send('Read the SEC filing'); await old.flush();
+  assert.equal(old.streams[0].request.filing_research_version, undefined);
+  const text = 'Apple SEC filing [p000000] https://www.sec.gov/Archives/ SHA-256 abc; only excerpts were read';
+  let filingAvailable = true;
+  const view = harness({ historyFetch: cloudHistory, statusFetch: () => json({ ...configured, app_tools_version: 1, ...(filingAvailable ? { filing_research_version: 1 } : {}) }), appExecute: async () => ({ text, actions: [] }) });
+  t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('Read the SEC filing'); await view.flush();
+  assert.equal(view.streams[0].request.filing_research_version, 1);
+  assert.equal(view.streams[0].request.company_research_version, undefined);
+  view.finishAppStream(command); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+  assert.equal(view.streams[1].request.app_context[0].name, 'company_filing');
+  assert.match(view.streams[1].request.app_context[0].result, /p000000/);
+  view.failStream(1, 'AI_UPSTREAM_ERROR'); await view.flush();
+  assert.equal(view.current.canResumeAppResult(view.current.conversation.messages.at(-1).id), true);
+  view.current.retry(); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+  assert.equal(view.streams[2].request.app_final_only, true);
+  assert.equal(view.streams[2].request.filing_research_version, 1);
+  assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
+  view.failStream(2, 'AI_UPSTREAM_ERROR'); await view.flush();
+  filingAvailable = false; view.current.reconnect(); await view.flush();
+  view.current.retry(); await view.flush();
+  assert.equal(view.current.messageError, 'APP_RESULT_RELOAD');
+  assert.equal(view.streams.length, 3); assert.equal(view.appCalls.length, 1);
+});

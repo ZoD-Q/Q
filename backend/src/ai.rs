@@ -86,6 +86,8 @@ pub struct ChatRequest {
     pub app_tools_version: Option<u8>,
     #[serde(default, deserialize_with = "app_turn::deserialize_version")]
     pub company_research_version: Option<u8>,
+    #[serde(default, deserialize_with = "app_turn::deserialize_version")]
+    pub filing_research_version: Option<u8>,
     #[serde(default)]
     pub app_context: Vec<AppContext>,
     #[serde(default)]
@@ -162,6 +164,7 @@ impl ChatRequest {
                 &self.app_context,
                 self.app_final_only,
                 self.company_research_version == Some(1),
+                self.filing_research_version == Some(1),
             );
         }
         body
@@ -179,6 +182,7 @@ pub struct AiStatus {
     automatic_readonly_tools: bool,
     app_tools_version: u8,
     company_research_version: u8,
+    filing_research_version: u8,
     models: [ModelInfo; 2],
 }
 pub async fn status(State(state): State<AppState>) -> Json<AiStatus> {
@@ -187,6 +191,7 @@ pub async fn status(State(state): State<AppState>) -> Json<AiStatus> {
         automatic_readonly_tools: true,
         app_tools_version: app_turn::VERSION,
         company_research_version: 1,
+        filing_research_version: 1,
         models: [
             ModelInfo {
                 id: ChatModel::Flash,
@@ -393,7 +398,7 @@ impl AiRuntime {
                                 Err(_) => { yield Ok(event("error", json!({"code":"AI_TIMEOUT","message":"Tool proposal preparation timed out."}))); return; }
                             }
                         } else if app_tools {
-                            match app_turn::proposal(call, request.company_research_version == Some(1)) {
+                            match app_turn::proposal(call, request.company_research_version == Some(1), request.filing_research_version == Some(1)) {
                                 Ok(proposal) => yield Ok(event("app_tool", proposal)),
                                 Err(error) => { yield Ok(event("error", json!({"code":error.code(),"message":error.message()}))); return; }
                             }
@@ -432,6 +437,10 @@ pub async fn chat(
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> ApiResult<Response> {
     request.validate()?;
+    if let Some(connection) = request.plugin_connection_id {
+        crate::plugins::financial::require_persistent_connection(&state, auth.user_id, connection)
+            .await?;
+    }
     let runtime = state.ai.clone().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -747,6 +756,7 @@ mod tests {
             automatic_readonly_tools: false,
             app_tools_version: None,
             company_research_version: None,
+            filing_research_version: None,
             app_context: Vec::new(),
             app_final_only: false,
             messages: vec![ChatMessage {
@@ -788,6 +798,34 @@ mod tests {
         input.company_research_version = Some(2);
         assert!(input.validate().is_err());
         let body = json!({"model":"deepseek-flash","thinking":false,"messages":[{"role":"user","content":"Toyota"}],"app_tools_version":1,"company_research_version":null});
+        assert!(serde_json::from_value::<ChatRequest>(body).is_err());
+    }
+
+    #[test]
+    fn filing_negotiation_is_independent_and_resuming_cannot_read_again() {
+        let mut input = request();
+        input.filing_research_version = Some(1);
+        assert!(input.validate().is_err());
+        input.app_tools_version = Some(1);
+        assert!(input.validate().is_ok());
+        assert_eq!(input.provider_body()["tools"].as_array().unwrap().len(), 7);
+        input.company_research_version = Some(1);
+        assert_eq!(input.provider_body()["tools"].as_array().unwrap().len(), 9);
+        input.app_context.push(app_turn::AppContext {
+            name: "company_filings".into(),
+            arguments: json!({"issuerId":"sec:0000320193"}),
+            result: "Directory only, no document text read".into(),
+        });
+        input.app_final_only = true;
+        assert!(input.validate().is_ok());
+        assert!(input.provider_body().get("tools").is_none());
+        input.filing_research_version = None;
+        assert!(input.validate().is_err());
+        input.app_context.clear();
+        input.app_final_only = false;
+        input.filing_research_version = Some(2);
+        assert!(input.validate().is_err());
+        let body = json!({"model":"deepseek-flash","thinking":false,"messages":[{"role":"user","content":"filings"}],"app_tools_version":1,"filing_research_version":null});
         assert!(serde_json::from_value::<ChatRequest>(body).is_err());
     }
 
@@ -1064,8 +1102,8 @@ mod tests {
                     if mode == "redirect" { return (StatusCode::TEMPORARY_REDIRECT, [("location", "/chat")]).into_response(); }
                     if mode == "slow" { tokio::time::sleep(Duration::from_secs(2)).await; }
                     if mode.starts_with("app_") {
-                        let name = if mode == "app_unknown" { "q_bank_balance" } else if mode == "app_company" { "q_company_search" } else { "q_app_info" };
-                        let arguments = if mode == "app_company" { json!({"query":"Toyota"}) } else if mode == "app_arguments" { json!({"module":"insurance","url":"https://example.com"}) } else { json!({"module":"insurance"}) };
+                        let name = if mode == "app_unknown" { "q_bank_balance" } else if mode == "app_company" { "q_company_search" } else if mode == "app_filing" { "q_company_filing" } else { "q_app_info" };
+                        let arguments = if mode == "app_filing" { json!({"issuerId":"sec:0000320193","accession":"0001140361-26-015711"}) } else if mode == "app_company" { json!({"query":"Toyota"}) } else if mode == "app_arguments" { json!({"module":"insurance","url":"https://example.com"}) } else { json!({"module":"insurance"}) };
                         let mut call = json!({"index":0,"id":"fixture_call","type":"function","function":{"name":name,"arguments":arguments.to_string()}});
                         if mode == "app_no_id" { call.as_object_mut().unwrap().remove("id"); }
                         let mut calls = vec![call];
@@ -1197,6 +1235,38 @@ mod tests {
                 assert_eq!(events.last().unwrap().1["finish_reason"], "tool_calls");
             } else {
                 assert!(!events.iter().any(|(name, _)| name == "done"));
+                assert_eq!(events.last().unwrap().1["code"], "AI_UPSTREAM_ERROR");
+            }
+            assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn filing_proposals_require_filing_opt_in_even_for_company_clients() {
+        for opted_in in [false, true] {
+            let stub = Stub::start("app_filing").await;
+            let runtime = stub.runtime(Duration::from_secs(3), Duration::from_secs(1));
+            let mut input = request();
+            input.app_tools_version = Some(1);
+            input.company_research_version = Some(1);
+            input.filing_research_version = opted_in.then_some(1);
+            assert!(input.validate().is_ok());
+            let response =
+                runtime
+                    .clone()
+                    .response(input, runtime.reserve(Uuid::new_v4()).unwrap(), None);
+            let events = decode_public(&to_bytes(response.into_body(), 1_000_000).await.unwrap());
+            assert_eq!(events.iter().any(|(name, _)| name == "app_tool"), opted_in);
+            if opted_in {
+                assert_eq!(
+                    events
+                        .iter()
+                        .find(|(name, _)| name == "app_tool")
+                        .unwrap()
+                        .1,
+                    json!({"name":"company_filing","arguments":{"issuerId":"sec:0000320193","accession":"0001140361-26-015711"}})
+                );
+            } else {
                 assert_eq!(events.last().unwrap().1["code"], "AI_UPSTREAM_ERROR");
             }
             assert_eq!(stub.calls.load(Ordering::SeqCst), 1);

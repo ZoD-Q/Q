@@ -622,19 +622,36 @@ impl RpcSse {
 }
 
 pub(crate) fn http_result(response: HttpResponse, id: &str) -> McpResult<Value> {
-    if response.status == 401 || response.status == 403 {
+    if response.status == 401 {
         let mut error = McpError::new(
-            if response.status == 401 {
-                "MCP_AUTH_REQUIRED"
-            } else {
-                "MCP_FORBIDDEN"
-            },
+            "MCP_AUTH_REQUIRED",
             ErrorCategory::Authorization,
             "The plugin requires authorization for this operation.",
         )
-        .with_status(response.status);
+        .with_status(401);
         error.auth_challenge = parse_auth_challenge(&response.headers);
         return Err(error);
+    }
+    let failure = match response.status {
+        402 => Some((
+            "MCP_PAYMENT_REQUIRED",
+            ErrorCategory::Tool,
+            "The provider requires additional plan or credit access.",
+        )),
+        403 => Some((
+            "MCP_FORBIDDEN",
+            ErrorCategory::Tool,
+            "The provider denied this operation. Check account permissions and subscription access.",
+        )),
+        429 => Some((
+            "MCP_RATE_LIMITED",
+            ErrorCategory::Limit,
+            "The provider rate or usage limit was reached. Try again later.",
+        )),
+        _ => None,
+    };
+    if let Some((code, category, message)) = failure {
+        return Err(McpError::new(code, category, message).with_status(response.status));
     }
     if !(200..300).contains(&response.status) {
         if let Ok(value) = response.json()

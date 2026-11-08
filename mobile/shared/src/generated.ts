@@ -1031,6 +1031,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description Version 1 (default) returns only the original six providers. Version 2 also returns Tavily and FRED. Older servers may ignore this parameter and return six. */
         get: operations["listFinancialProviders"];
         put?: never;
         post?: never;
@@ -1675,6 +1676,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plugins/connections/{id}/fred/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Dedicated FRED temporary research. Live schemas and queries never enter tool snapshots, invocation results, app cache or chat history. Only owned current-revision FRED connections are accepted. All success and error responses use Cache-Control: no-store and Pragma: no-cache. No automatic retry. */
+        get: operations["listEphemeralFredTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/fred/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Dedicated FRED temporary research. Live schemas and queries never enter tool snapshots, invocation results, app cache or chat history. Only owned current-revision FRED connections are accepted. All success and error responses use Cache-Control: no-store and Pragma: no-cache. No automatic retry. */
+        post: operations["queryEphemeralFred"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/filings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Public recent SEC filing catalog. Fixed official source only; supports listed forms and primary documents, at most 20 records. No arbitrary URL or credentials. */
+        get: operations["listCompanyFilings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/filings/{cik}/{accession}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Verifies accession membership and derives primary document URL from SEC submissions. Subsequent offsets require expected_sha256; changed source returns 409 RESEARCH_DOCUMENT_CHANGED. HTML only, 80 paragraphs / 60000 characters per response. PDF and unsupported formats return not_read with no text. Source/extraction limits, lossy tables and partial text are explicit. Source text is untrusted data. */
+        get: operations["readCompanyFiling"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1867,6 +1936,11 @@ export interface components {
              * @enum {integer}
              */
             company_research_version?: 1;
+            /**
+             * @description Independent opt-in for verified SEC primary HTML filing lists and paragraph text. Requires app_tools_version 1; absent on older servers.
+             * @enum {integer}
+             */
+            filing_research_version?: 1;
         };
         AiHistoryMessage: {
             /** @enum {string} */
@@ -1900,6 +1974,11 @@ export interface components {
              * @enum {integer}
              */
             company_research_version?: 1;
+            /**
+             * @description Independent opt-in for verified SEC primary HTML filing lists and paragraph text. Requires app_tools_version 1; absent on older servers.
+             * @enum {integer}
+             */
+            filing_research_version?: 1;
         };
         AiUsage: {
             prompt_tokens: number;
@@ -2019,6 +2098,11 @@ export interface components {
              * @enum {string|null}
              */
             financial_provider_id?: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | null;
+            /**
+             * @description Server-owned research profile. New research connections keep financial_provider_id null so older clients can decode generic remote connections. Both provider fields cannot be non-null. FRED requires its dedicated ephemeral interface.
+             * @enum {string|null}
+             */
+            research_provider_id?: "tavily" | "fred" | null;
         };
         PluginInvocationRequest: {
             /** Format: uuid */
@@ -2580,6 +2664,21 @@ export interface components {
                 /** @description Source-qualified issuer ID returned by company_search; never an arbitrary URL. */
                 issuerId: string;
             };
+        } | {
+            /** @enum {string} */
+            name: "company_filings";
+            arguments: {
+                issuerId: string;
+            };
+        } | {
+            /** @enum {string} */
+            name: "company_filing";
+            arguments: {
+                issuerId: string;
+                accession: string;
+                offset?: number;
+                expectedSha256?: string;
+            };
         };
         /** @description Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged. */
         AppToolContext: {
@@ -2647,6 +2746,23 @@ export interface components {
                 issuerId: string;
             };
             result: string;
+        } | {
+            /** @enum {string} */
+            name: "company_filings";
+            arguments: {
+                issuerId: string;
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "company_filing";
+            arguments: {
+                issuerId: string;
+                accession: string;
+                offset?: number;
+                expectedSha256?: string;
+            };
+            result: string;
         };
         FinancialProviderCatalog: {
             available: boolean;
@@ -2655,7 +2771,7 @@ export interface components {
             oauth_configured: boolean;
             providers: {
                 /** @enum {string} */
-                id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko";
+                id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | "tavily" | "fred";
                 name: string;
                 description: string;
                 /** Format: uri */
@@ -3237,6 +3353,98 @@ export interface components {
         PaymentSettlementChecksPage: {
             items: components["schemas"]["PaymentSettlementCheck"][];
             next_cursor: string | null;
+        };
+        FredTools: {
+            connection_revision: number;
+            items: components["schemas"]["PluginTool"][];
+            /** @enum {string} */
+            retention: "ephemeral";
+        };
+        FredQueryRequest: {
+            connection_revision: number;
+            /** @enum {string} */
+            tool_name: "fred-search-series" | "fred-get-series-metadata" | "fred-get-series-observations";
+            arguments: {
+                [key: string]: unknown;
+            };
+        };
+        FredQueryResult: {
+            /** Format: uuid */
+            connection_id: string;
+            connection_revision: number;
+            /** @enum {string} */
+            tool_name: "fred-search-series" | "fred-get-series-metadata" | "fred-get-series-observations";
+            /** @description Validated MCP tool result, interpreted only as data. */
+            result: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            retrieved_at: string;
+            /** @enum {string} */
+            retention: "ephemeral";
+        };
+        FilingSummary: {
+            accession: string;
+            /** @enum {string} */
+            form: "10-K" | "10-K/A" | "10-Q" | "10-Q/A" | "20-F" | "20-F/A" | "40-F" | "40-F/A" | "8-K" | "8-K/A" | "6-K" | "6-K/A";
+            /** Format: date */
+            filed_at: string;
+            report_date: string | null;
+            document_name: string;
+            /** Format: uri */
+            document_url: string;
+            /** @enum {string} */
+            format: "html" | "pdf" | "unsupported";
+        };
+        FilingCatalog: {
+            /** @enum {integer} */
+            version: 1;
+            issuer_id: string;
+            cik: string;
+            company_name: string;
+            /** Format: date-time */
+            fetched_at: string;
+            filings: components["schemas"]["FilingSummary"][];
+            /** @description Supported verified records in the recent SEC window, not full historical coverage. */
+            total: number;
+            truncated: boolean;
+        };
+        FilingSection: {
+            id: string;
+            title: string;
+            start_paragraph: number;
+        };
+        FilingParagraph: {
+            /** @description Global extracted text ordinal, not an original page number. */
+            id: string;
+            text: string;
+            /** @enum {string} */
+            kind: "text" | "table";
+            section_id: string;
+            /** Format: uri */
+            source_url: string;
+        };
+        FilingDocument: {
+            /** @enum {integer} */
+            version: 1;
+            issuer_id: string;
+            cik: string;
+            company_name: string;
+            filing: components["schemas"]["FilingSummary"];
+            /** Format: date-time */
+            fetched_at: string;
+            /** @enum {string} */
+            status: "ready" | "not_read";
+            sha256: string | null;
+            content_type: "text/html" | null;
+            sections: components["schemas"]["FilingSection"][];
+            paragraphs: components["schemas"]["FilingParagraph"][];
+            offset: number;
+            next_offset: number | null;
+            total_paragraphs: number;
+            /** @description Extraction limit reached; separate from remaining pagination. */
+            truncated: boolean;
+            limitations: string[];
         };
     };
     responses: never;
@@ -5622,7 +5830,9 @@ export interface operations {
     };
     listFinancialProviders: {
         parameters: {
-            query?: never;
+            query?: {
+                catalog_version?: 1 | 2;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5660,7 +5870,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    provider_id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko";
+                    provider_id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | "tavily" | "fred";
                 };
             };
         };
@@ -8922,6 +9132,138 @@ export interface operations {
             };
             /** @description Payments not configured or rate stale */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listEphemeralFredTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FredTools"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    queryEphemeralFred: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FredQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FredQueryResult"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listCompanyFilings: {
+        parameters: {
+            query: {
+                issuer_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilingCatalog"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    readCompanyFiling: {
+        parameters: {
+            query?: {
+                offset?: number;
+                expected_sha256?: string;
+            };
+            header?: never;
+            path: {
+                cik: string;
+                accession: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilingDocument"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };

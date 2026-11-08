@@ -374,6 +374,8 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
     const selectedPlugin = conversation.plugin;
     const appEnabled = !selectedPlugin && !think && status.app_tools_version === 1;
     const companyEnabled = appEnabled && status.company_research_version === 1;
+    const filingEnabled = appEnabled && status.filing_research_version === 1;
+    if (appResume && appResume.context.some(item => item.name === 'company_filings' || item.name === 'company_filing') && !filingEnabled) { setMessageError('APP_RESULT_RELOAD'); return false; }
     if (appResume && appResume.context.some(item => item.name === 'company_search' || item.name === 'company_research') && !companyEnabled) { setMessageError('APP_RESULT_RELOAD'); return false; }
     if (appResume && (!appEnabled || appResume.token !== authenticated.token || appResume.conversationId !== conversation.id)) { setMessageError('APP_RESULT_RELOAD'); return false; }
     const answer: ChatMessage = { id: request.assistantId, role: 'assistant', content: appResume?.text ?? '', status: 'pending', model, thinking: selectedPlugin ? false : think, contextLimited: context.limited, toolInvocationIds: invocationIds };
@@ -412,7 +414,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
           let appCall: AppCommand | null = null;
           const outgoing = fitChatRequestHistory({
             model, thinking: selectedPlugin ? false : think, messages: context.messages,
-            ...(appEnabled ? { app_tools_version: 1 as const, ...(companyEnabled ? { company_research_version: 1 as const } : {}), app_context: appContext, ...(finalOnly ? { app_final_only: true } : {}) } : {}),
+            ...(appEnabled ? { app_tools_version: 1 as const, ...(companyEnabled ? { company_research_version: 1 as const } : {}), ...(filingEnabled ? { filing_research_version: 1 as const } : {}), app_context: appContext, ...(finalOnly ? { app_final_only: true } : {}) } : {}),
             ...(selectedPlugin ? { plugin_connection_id: selectedPlugin.id, tool_invocation_ids: invocationIds, ...(status.automatic_readonly_tools === true ? { automatic_readonly_tools: true } : {}) } : {}),
           });
           if (outgoing.messages.length < context.messages.length) {
@@ -426,6 +428,8 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh') {
             if (event.type === 'delta') { setPhase('responding'); updateAnswer(request, message => ({ ...message, content: message.content + event.text, status: 'streaming' })); }
             if (event.type === 'app_tool') {
               if (!appEnabled || appCall || finalOnly || appContext.length >= 3) throw new ChatError('INVALID_RESPONSE');
+              if ((event.name === 'company_filings' || event.name === 'company_filing') && !filingEnabled) throw new ChatError('INVALID_RESPONSE');
+              if ((event.name === 'company_search' || event.name === 'company_research') && !companyEnabled) throw new ChatError('INVALID_RESPONSE');
               request.appToolAttempted = true;
               appCall = validateAppCommand({ name: event.name, arguments: event.arguments });
             }

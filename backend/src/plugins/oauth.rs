@@ -115,6 +115,7 @@ struct AuthorizationMetadata {
     scopes: Vec<String>,
     require_response_iss: bool,
     registration_endpoint: Option<String>,
+    confidential: bool,
 }
 
 fn scopes(value: &str) -> ApiResult<Vec<String>> {
@@ -197,6 +198,7 @@ async fn discover_metadata(
     if financial.is_some_and(|p| p.auth != "oauth") {
         return Err(invalid_metadata());
     }
+    let confidential = financial.is_some_and(|p| p.id == "fred");
     let card = connection.card()?;
     let endpoint = runtime
         .http
@@ -268,7 +270,24 @@ async fn discover_metadata(
         || (metadata
             .get("token_endpoint_auth_methods_supported")
             .is_some()
-            && !contains(&metadata, "token_endpoint_auth_methods_supported", "none")?)
+            && !contains(
+                &metadata,
+                "token_endpoint_auth_methods_supported",
+                if confidential {
+                    "client_secret_post"
+                } else {
+                    "none"
+                },
+            )?)
+    {
+        return Err(invalid_metadata());
+    }
+    if confidential
+        && !contains(
+            &metadata,
+            "token_endpoint_auth_methods_supported",
+            "client_secret_post",
+        )?
     {
         return Err(invalid_metadata());
     }
@@ -297,9 +316,17 @@ async fn discover_metadata(
                 reqwest::Url::parse(url)
                     .ok()
                     .map(|u| u.origin().ascii_serialization())
-                    != p.issuer.map(str::to_owned)
+                    != p.issuer
+                        .and_then(|s| Url::parse(s).ok())
+                        .map(|u| u.origin().ascii_serialization())
             })
     }) {
+        return Err(invalid_metadata());
+    }
+    if confidential
+        && (authorization_endpoint != "https://mcp.stlouisfed.org/authorize"
+            || token_endpoint != "https://mcp.stlouisfed.org/token")
+    {
         return Err(invalid_metadata());
     }
     let registration_endpoint = financial
@@ -337,6 +364,14 @@ async fn discover_metadata(
     };
     requested.extend(connection.requested_scopes.clone());
     let requested = scopes(&requested.join(" "))?;
+    if confidential
+        && (!requested.iter().any(|s| s == "mcp:read")
+            || requested
+                .iter()
+                .any(|s| !matches!(s.as_str(), "mcp:read" | "offline_access")))
+    {
+        return Err(invalid_metadata());
+    }
     let require_response_iss = match metadata.get("authorization_response_iss_parameter_supported")
     {
         None => false,
@@ -351,6 +386,7 @@ async fn discover_metadata(
         scopes: requested,
         require_response_iss,
         registration_endpoint,
+        confidential,
     })
 }
 
@@ -366,8 +402,14 @@ pub async fn start(
     let runtime = runtime(&state)?;
     let (mut client_id, redirect_uri) = public_urls(&runtime)?;
     let metadata = discover_metadata(&runtime, &connection).await?;
+    let mut client_credential = None;
     if let Some(endpoint) = &metadata.registration_endpoint {
-        let response=runtime.http.post_json(endpoint,&json!({"client_name":"Q","redirect_uris":[redirect_uri],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}),None,HeaderMap::new()).await.map_err(mcp_error)?;
+        let auth_method = if metadata.confidential {
+            "client_secret_post"
+        } else {
+            "none"
+        };
+        let response=runtime.http.post_json(endpoint,&json!({"client_name":"Q","redirect_uris":[redirect_uri],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":auth_method}),None,HeaderMap::new()).await.map_err(mcp_error)?;
         if !matches!(response.status, 200 | 201) || response.media_type() != "application/json" {
             return Err(invalid_metadata());
         }
@@ -375,10 +417,11 @@ pub async fn start(
         if registered
             .get("token_endpoint_auth_method")
             .and_then(Value::as_str)
-            != Some("none")
-            || registered
-                .get("client_secret")
-                .is_some_and(|s| s.as_str() != Some(""))
+            != Some(auth_method)
+            || (!metadata.confidential
+                && registered
+                    .get("client_secret")
+                    .is_some_and(|s| s.as_str() != Some("")))
             || registered.get("redirect_uris") != Some(&json!([redirect_uri]))
         {
             return Err(invalid_metadata());
@@ -389,16 +432,23 @@ pub async fn start(
             .filter(|s| !s.is_empty() && s.len() <= 2048 && s.bytes().all(|b| b.is_ascii_graphic()))
             .ok_or_else(invalid_metadata)?
             .to_owned();
+        if metadata.confidential {
+            let secret = secret_string(registered.get("client_secret"))?;
+            let expires_at = match registered.get("client_secret_expires_at") {
+                None => None,
+                Some(v) => Some(
+                    v.as_i64()
+                        .filter(|n| *n == 0 || *n > Utc::now().timestamp())
+                        .ok_or_else(invalid_metadata)?,
+                ),
+            };
+            client_credential =
+                Some(json!({"client_id":client_id,"secret":secret,"expires_at":expires_at}));
+        }
     }
     let state_secret = random_secret();
     let verifier = random_secret();
     let attempt_id = Uuid::new_v4();
-    let encrypted_verifier = runtime.seal(
-        auth.user_id,
-        id,
-        &format!("verifier:{attempt_id}"),
-        &json!({"verifier":verifier}),
-    )?;
     let expires_at = Utc::now() + Duration::minutes(10);
     let mut authorization_url =
         Url::parse(&metadata.authorization_endpoint).map_err(|_| invalid_metadata())?;
@@ -476,6 +526,18 @@ pub async fn start(
         .bind(auth.user_id)
         .execute(&mut *tx)
         .await?;
+    let encrypted_verifier = runtime.seal(
+        auth.user_id,
+        id,
+        &verifier_purpose(
+            attempt_id,
+            authorization_revision,
+            &metadata.issuer,
+            &metadata.resource,
+            metadata.confidential,
+        ),
+        &json!({"verifier":verifier,"client_credential":client_credential}),
+    )?;
     sqlx::query("INSERT INTO plugin_oauth_attempts(id,user_id,connection_id,connection_revision,state_hash,encrypted_verifier,issuer,resource,token_endpoint,client_id,redirect_uri,scopes,require_response_iss,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
         .bind(attempt_id).bind(auth.user_id).bind(id).bind(authorization_revision).bind(hash(state_secret.as_bytes())).bind(encrypted_verifier)
         .bind(&metadata.issuer).bind(&metadata.resource).bind(&metadata.token_endpoint).bind(client_id).bind(redirect_uri).bind(&metadata.scopes).bind(metadata.require_response_iss).bind(expires_at).execute(&mut *tx).await?;
@@ -591,7 +653,16 @@ async fn finish_callback(state: &AppState, query: CallbackParams) -> ApiResult<(
         return Err(exchange_failed());
     }
     tx.commit().await?;
-    let result = exchange_code(&runtime, &saved, &query, &client_id, &redirect_uri).await;
+    let confidential = bound.financial_provider_id.as_deref() == Some("fred");
+    let result = exchange_code(
+        &runtime,
+        &saved,
+        &query,
+        &client_id,
+        &redirect_uri,
+        confidential,
+    )
+    .await;
     let tokens = match result {
         Ok(tokens) => tokens,
         Err(error) => {
@@ -632,6 +703,51 @@ async fn finish_callback(state: &AppState, query: CallbackParams) -> ApiResult<(
         .bind(saved.connection_id).bind(saved.user_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
+}
+
+fn verifier_purpose(
+    id: Uuid,
+    revision: i64,
+    issuer: &str,
+    resource: &str,
+    confidential: bool,
+) -> String {
+    if confidential {
+        format!(
+            "verifier:{id}:{revision}:{}",
+            auth_binding(issuer, resource)
+        )
+    } else {
+        format!("verifier:{id}")
+    }
+}
+fn checked_credential(
+    envelope: &Value,
+    client_id: &str,
+    confidential: bool,
+) -> ApiResult<Option<Value>> {
+    let credential = envelope.get("client_credential").filter(|v| !v.is_null());
+    if !confidential {
+        return if credential.is_some() {
+            Err(exchange_failed())
+        } else {
+            Ok(None)
+        };
+    }
+    let c = credential
+        .filter(|v| v.is_object())
+        .ok_or_else(exchange_failed)?;
+    if c.get("client_id").and_then(Value::as_str) != Some(client_id) {
+        return Err(exchange_failed());
+    }
+    secret_string(c.get("secret"))?;
+    if let Some(expiry) = c.get("expires_at").filter(|v| !v.is_null()) {
+        let expiry = expiry.as_i64().ok_or_else(exchange_failed)?;
+        if expiry != 0 && expiry <= Utc::now().timestamp() {
+            return Err(auth_required());
+        }
+    }
+    Ok(Some(c.clone()))
 }
 
 struct TokenResponse {
@@ -696,6 +812,7 @@ async fn exchange_code(
     query: &CallbackParams,
     client_id: &str,
     redirect_uri: &str,
+    confidential: bool,
 ) -> ApiResult<TokenResponse> {
     if saved.client_id != client_id
         || saved.redirect_uri != redirect_uri
@@ -724,14 +841,21 @@ async fn exchange_code(
     let verifier = runtime.open(
         saved.user_id,
         saved.connection_id,
-        &format!("verifier:{}", saved.id),
+        &verifier_purpose(
+            saved.id,
+            saved.connection_revision,
+            &saved.issuer,
+            &saved.resource,
+            confidential,
+        ),
         saved
             .encrypted_verifier
             .as_deref()
             .ok_or_else(exchange_failed)?,
     )?;
+    let credential = checked_credential(&verifier, &saved.client_id, confidential)?;
     let verifier = secret_string(verifier.get("verifier"))?;
-    let form = vec![
+    let mut form = vec![
         ("grant_type".into(), "authorization_code".into()),
         ("code".into(), code.into()),
         ("client_id".into(), saved.client_id.clone()),
@@ -739,6 +863,9 @@ async fn exchange_code(
         ("code_verifier".into(), verifier),
         ("resource".into(), saved.resource.clone()),
     ];
+    if let Some(c) = &credential {
+        form.push(("client_secret".into(), secret_string(c.get("secret"))?));
+    }
     let response = runtime
         .http
         .post_form(&saved.token_endpoint, &form, HeaderMap::new())
@@ -747,11 +874,15 @@ async fn exchange_code(
     if response.status != 200 || response.media_type() != "application/json" {
         return Err(exchange_failed());
     }
-    parse_token(
+    let mut tokens = parse_token(
         response.json().map_err(|_| exchange_failed())?,
         &saved.scopes,
         None,
-    )
+    )?;
+    if let Some(c) = credential {
+        tokens.secret["client_credential"] = c;
+    }
+    Ok(tokens)
 }
 
 #[derive(FromRow)]
@@ -817,6 +948,22 @@ pub(crate) async fn bearer_for(
         &token_purpose(connection.revision, &saved.issuer, &saved.resource),
         &saved.encrypted_tokens,
     )?;
+    let confidential = connection.financial_provider_id.as_deref() == Some("fred");
+    if confidential
+        && (saved.issuer != "https://mcp.stlouisfed.org/"
+            || saved.resource != "https://mcp.stlouisfed.org/"
+            || saved.token_endpoint != "https://mcp.stlouisfed.org/token")
+    {
+        return Err(auth_required());
+    }
+    let credential = match checked_credential(&secret, &saved.client_id, confidential) {
+        Ok(value) => value,
+        Err(error) => {
+            tx.commit().await?;
+            invalidate_tokens(state, connection, &saved.encrypted_tokens).await?;
+            return Err(error);
+        }
+    };
     let now = Utc::now();
     if saved.refresh_state == "refreshing" {
         let stale = saved
@@ -856,7 +1003,7 @@ pub(crate) async fn bearer_for(
         .bind(connection.id).bind(connection.user_id).bind(deadline).execute(&mut *tx).await?;
     tx.commit().await?;
     // Claim first and never retry a refresh with an unknown result: rotation may have consumed it.
-    let result = refresh_token_request(&runtime, &saved, &refresh_token).await;
+    let result = refresh_token_request(&runtime, &saved, &refresh_token, credential.as_ref()).await;
     let tokens = match result {
         Ok(tokens) => tokens,
         Err(error) => {
@@ -896,6 +1043,7 @@ async fn refresh_token_request(
     runtime: &PluginRuntime,
     saved: &SavedToken,
     refresh_token: &str,
+    credential: Option<&Value>,
 ) -> ApiResult<TokenResponse> {
     let mut form = vec![
         ("grant_type".into(), "refresh_token".into()),
@@ -906,6 +1054,9 @@ async fn refresh_token_request(
     if !saved.scopes.is_empty() {
         form.push(("scope".into(), saved.scopes.join(" ")));
     }
+    if let Some(c) = credential {
+        form.push(("client_secret".into(), secret_string(c.get("secret"))?));
+    }
     let response = runtime
         .http
         .post_form(&saved.token_endpoint, &form, HeaderMap::new())
@@ -914,11 +1065,15 @@ async fn refresh_token_request(
     if response.status != 200 || response.media_type() != "application/json" {
         return Err(exchange_failed());
     }
-    parse_token(
+    let mut tokens = parse_token(
         response.json().map_err(|_| exchange_failed())?,
         &saved.scopes,
         Some(refresh_token),
-    )
+    )?;
+    if let Some(c) = credential {
+        tokens.secret["client_credential"] = c.clone();
+    }
+    Ok(tokens)
 }
 
 async fn invalidate_tokens(
@@ -1043,6 +1198,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn confidential_secret_is_bound_and_never_adopted_from_token_response() {
+        let credential =
+            json!({"client_id":"fred-registered","secret":"fixture-client-secret","expires_at":0});
+        let envelope = json!({"client_credential":credential});
+        assert!(
+            checked_credential(&envelope, "fred-registered", true)
+                .unwrap()
+                .is_some()
+        );
+        assert!(checked_credential(&envelope, "other-client", true).is_err());
+        assert!(checked_credential(&envelope, "fred-registered", false).is_err());
+        assert!(checked_credential(&json!({}), "fred-registered", true).is_err());
+        let mut expired = envelope.clone();
+        expired["client_credential"]["expires_at"] = json!(1);
+        assert!(checked_credential(&expired, "fred-registered", true).is_err());
+        let token = parse_token(json!({"token_type":"Bearer","access_token":"fixture-access","client_secret":"evil","client_credential":credential}), &[], None).unwrap();
+        assert!(token.secret.get("client_credential").is_none());
+        assert!(!token.secret.to_string().contains("evil"));
+        let id = Uuid::new_v4();
+        assert_ne!(
+            verifier_purpose(
+                id,
+                1,
+                "https://mcp.stlouisfed.org/",
+                "https://mcp.stlouisfed.org/",
+                true
+            ),
+            verifier_purpose(
+                id,
+                2,
+                "https://mcp.stlouisfed.org/",
+                "https://mcp.stlouisfed.org/",
+                true
+            )
+        );
+        assert_eq!(
+            verifier_purpose(id, 1, "old", "old", false),
+            format!("verifier:{id}")
+        );
+    }
+
     #[tokio::test]
     async fn issuer_validation_precedes_code_exchange_and_provider_errors() {
         let runtime = fixture_runtime("http://127.0.0.1:12345/");
@@ -1073,7 +1270,7 @@ mod tests {
                 iss,
                 error: Some("remote-error-text".into()),
             };
-            let error = exchange_code(&runtime, &saved, &query, &client_id, &redirect_uri)
+            let error = exchange_code(&runtime, &saved, &query, &client_id, &redirect_uri, false)
                 .await
                 .err()
                 .expect("issuer rejection");
@@ -1085,7 +1282,7 @@ mod tests {
             iss: Some(saved.issuer.clone()),
             error: Some("untrusted-provider-error".into()),
         };
-        let error = exchange_code(&runtime, &saved, &query, &client_id, &redirect_uri)
+        let error = exchange_code(&runtime, &saved, &query, &client_id, &redirect_uri, false)
             .await
             .err()
             .expect("denial");
