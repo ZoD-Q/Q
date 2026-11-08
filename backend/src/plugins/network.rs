@@ -401,6 +401,12 @@ impl SafeHttp {
         let mut url =
             Url::parse(&self.canonical_url(value)?).map_err(|_| McpError::unsafe_url())?;
         let authorized_url = url.clone();
+        // Only the server-owned Tavily profile may select free keyless access.
+        if headers.contains_key("x-tavily-access-mode")
+            && (url.as_str() != "https://mcp.tavily.com/mcp/" || bearer.is_some() || redirects != 0)
+        {
+            return Err(McpError::validation());
+        }
         #[cfg(any(test, feature = "plugin-test-fixtures"))]
         if let Some(target) = self.fixture_routes.get(url.as_str()) {
             url = Url::parse(target).map_err(|_| McpError::unsafe_url())?;
@@ -522,7 +528,8 @@ fn validate_headers(headers: &HeaderMap) -> McpResult<()> {
         if !(matches!(
             name,
             "accept" | "content-type" | "if-none-match" | "if-modified-since"
-        ) || name.starts_with("mcp-"))
+        ) || name.starts_with("mcp-")
+            || (name == "x-tavily-access-mode" && value == "keyless"))
             || value.as_bytes().len() > 8192
         {
             return Err(McpError::validation());
@@ -651,6 +658,29 @@ pub fn parse_auth_challenge(headers: &HeaderMap) -> Option<AuthChallenge> {
         resource_metadata: metadata,
         scope,
     })
+}
+
+#[cfg(test)]
+mod research_header_tests {
+    use super::*;
+    #[tokio::test]
+    async fn keyless_header_cannot_be_used_on_another_endpoint_or_as_an_auth_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tavily-access-mode", HeaderValue::from_static("keyless"));
+        let error = SafeHttp::default()
+            .post_json(
+                "https://example.com/mcp",
+                &serde_json::json!({}),
+                None,
+                headers.clone(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "MCP_INVALID_INPUT");
+        headers.insert("x-tavily-access-mode", HeaderValue::from_static("secret"));
+        assert!(validate_headers(&headers).is_err());
+    }
 }
 
 #[cfg(test)]

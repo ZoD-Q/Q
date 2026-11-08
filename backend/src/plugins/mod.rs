@@ -24,6 +24,7 @@ use crate::{
 };
 pub mod discovery;
 pub mod financial;
+pub mod fred;
 pub mod invocations;
 mod legacy;
 pub mod network;
@@ -205,14 +206,19 @@ pub(crate) fn changed() -> ApiError {
     )
 }
 pub(crate) fn mcp_error(error: McpError) -> ApiError {
-    if error.category == ErrorCategory::Authorization || matches!(error.status, Some(401 | 403)) {
+    if error.category == ErrorCategory::Authorization || error.status == Some(401) {
         return auth_required();
     }
-    let status = match error.category {
-        ErrorCategory::Validation | ErrorCategory::UnsafeNetwork => StatusCode::BAD_REQUEST,
-        ErrorCategory::Unsupported => StatusCode::UNPROCESSABLE_ENTITY,
-        ErrorCategory::Timeout => StatusCode::GATEWAY_TIMEOUT,
-        _ => StatusCode::BAD_GATEWAY,
+    let status = match error.status {
+        Some(402) => StatusCode::PAYMENT_REQUIRED,
+        Some(403) => StatusCode::FORBIDDEN,
+        Some(429) => StatusCode::TOO_MANY_REQUESTS,
+        _ => match error.category {
+            ErrorCategory::Validation | ErrorCategory::UnsafeNetwork => StatusCode::BAD_REQUEST,
+            ErrorCategory::Unsupported => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCategory::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            _ => StatusCode::BAD_GATEWAY,
+        },
     };
     ApiError::new(status, error.code, error.message)
 }
@@ -239,6 +245,7 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
 }
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .merge(fred::routes())
         .route("/v1/plugins/financial/providers", get(financial::providers))
         .route(
             "/v1/plugins/financial/connections",

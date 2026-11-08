@@ -4,6 +4,8 @@
 
 2026-11-04通过普通Q会话读取`/v1/plugins/financial/providers`返回200、六家目录，`available`、`credentials_configured`、`oauth_configured`均为true。这些字段表示宿主目录、凭据加密和OAuth基础配置已就绪；`credentials_configured`不表示六家供应商的个人密钥已录入，也不能解释为供应商都已授权或通过实账调用。现有管理网页仍是静态demo，见[部署状态](../../backend/deploy/STATUS.md)。
 
+2026-11-08源码扩展：新增 Tavily 搜索/正文提取和 FRED 临时宏观研究，重整为原生分组目录与按连接阶段显示的主操作。该扩展尚未部署或发包；下面明确区分原六家已部署目录与本轮新增源码，验证见[本轮记录](research-2026-11-08.md)。
+
 ## 使用路径
 
 插件 → 金融插件 → 选择服务 → 添加个人连接 → 按服务要求配置个人密钥或在供应商页面授权 → 检查状态 → 在聊天中使用。服务连接、工具列表和实际调用结果各自核验，目录出现不代表授权完成。金融插件与现有银行模拟插件相邻，原目录参考和“我的连接”保留。
@@ -22,6 +24,8 @@
 | Alpha Vantage | 官方MCP；固定官方授权服务的OAuth与公开客户端注册 | 明确选择的行情、历史、基本面、财报日历与新闻工具子集 |
 | Twelve Data | 官方托管MCP；CIMD与OAuth | 明确选择的行情、公司、财务、新闻、技术指标等工具子集；不暴露账号或密钥管理工具 |
 | CoinGecko | 官方公共MCP；匿名、有限流 | 当前公开服务实际返回的文档搜索与远程数据查询工具；不按宣传页硬编码工具数量 |
+| Tavily（新增源码） | 官方 keyless MCP；固定公开请求头，无个人密钥 | 仅网页搜索与正文提取，受共享额度限制；不开放 crawl、map 或 research |
+| FRED（新增源码） | 固定官方 OAuth；独立临时研究适配 | 数据系列搜索、系列元数据、观测值三项；实时读取授权后的工具定义，未知表单结构拒绝执行，不进入普通聊天 |
 
 工具定义必须来自真实tools/list并通过有界校验，表内名称和范围不是本地虚构工具。每家采用明确选择的工具集合，控制单次模型上下文；不静默截取前32项，不声称覆盖供应商所有接口。供应商增加、删除或更改工具时，复用已有连接变更确认流程。
 
@@ -43,6 +47,18 @@ Massive与Alpha Vantage的动态客户端注册只在固定官方授权来源内
 
 更换个人密钥或重新授权会提升连接版本并取消旧待确认提案，旧结果不能回灌为新授权上下文。断开和删号清理相应密钥。主助手知道金融插件入口和连接限制，使用具体供应商时仍进入该个人插件对话，不隐式读取其他插件的私人结果。
 
+## 2026-11-08 搜索与临时宏观研究
+
+新客户端请求 `catalog_version=2` 获取八家；默认/版本1仍返回六家，旧服务器返回六家时新增项显示尚不可用。内部供应商标识扩展经追加迁移完成；公开连接的 `financial_provider_id` 保留原六家枚举，Tavily/FRED 使用可选 `research_provider_id` 且原字段为 null。不能同时声明两类供应商，第三方 Card 不能选择任何固定适配。
+
+Tavily 仅在固定官方端点发送 `X-Tavily-Access-Mode: keyless`，搜索与提取沿用具体确认及保存结果的流程。HTTP 200 中的共享额度错误也作为失败处理，不把付款/注册提示当研究成果。Alpha Vantage 的受控工具集合增加财报电话会、内幕交易与机构持仓，仍需实际 tools/list 与账号权益；工具变化先确认。401 提示重新授权，403 提示无访问权，402 提示套餐要求，429 提示稍后重试；非认证失败不会删除有效授权。
+
+FRED 进入独立临时研究页。页面明确告知：查询和返回内容仅留当前内存，不保存到小Q缓存、调用结果存档、聊天历史或模型上下文；后台、离页、切号及卸载清除内容并取消请求。小Q只保存连接身份、加密授权材料和安全状态码，不保存 FRED 工具快照或请求/结果正文。响应包含 `Cache-Control: no-store` 与 `Pragma: no-cache`，普通工具/聊天/历史路径拒绝 FRED。没有“用于对话”或自动后台刷新入口。
+
+FRED 页面提供[使用条款](https://fred.stlouisfed.org/legal/#MCPConnector)及非背书说明。授权采用固定 `https://mcp.stlouisfed.org/` 发行者和资源，保留尾斜杠、S256 PKCE 与 state；其专用 confidential DCR 客户端秘密只在现有加密封装内存储并绑定账号、连接、版本、发行者和资源，换码/刷新不接受上游替换秘密。此例外不改变 Massive/Alpha 的公开客户端或通用 CIMD 规则。
+
+本轮公开探测：Tavily 匿名初始化、工具发现和公开搜索已取得结果；正文提取遇到共享额度错误，未记为成功。FRED 仅取得公开授权元数据，尚无真实个人授权后的工具/业务验收。SEC 正文能力及边界见[公司研究](company-research.md)。新增源码不能据此宣称已上线或八家均已实账验证。
+
 ## 验收边界
 
 匿名公开探测已确认CoinGecko的2025-11-25会话协商、工具列表、文档搜索及Bitcoin美元参考数据读取。五个受保护服务已核对官方文档、端点和公开认证元数据，尚无个人供应商密钥或真实账号授权后的完整业务验收证据，因此不能报告为已通过授权业务验收。服务器六项目录与配置标记返回成功，也不能替代供应商授权、真实工具调用或模型续答。下面保留上线前验证记录；部署与安装包状态另看[服务器状态](../../backend/deploy/STATUS.md)和[移动发布记录](mobile-release-2026-11-04/README.md)。TestFlight构建5仅确认上传接收，公测处理/审核及公开下载状态仍待账号核实，真机供应商操作未验收。
@@ -55,6 +71,8 @@ Massive与Alpha Vantage的动态客户端注册只在固定官方授权来源内
 - [Alpha Vantage官方MCP](https://mcp.alphavantage.co/)
 - [Twelve Data官方实现](https://github.com/twelvedata/mcp)
 - [CoinGecko公共MCP](https://mcp.api.coingecko.com/)
+- [Tavily keyless 官方说明](https://docs.tavily.com/documentation/keyless)
+- [FRED MCP 官方说明](https://fred.stlouisfed.org/help/data/connecting-fred-to-ai-services/fred-mcp-connector)
 
 ## 上线前验证记录（2026-11-03）
 

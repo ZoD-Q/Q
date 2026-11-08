@@ -14,6 +14,8 @@ export type AppCommand =
   | { name: 'market_query'; arguments: MarketQuery }
   | { name: 'company_search'; arguments: { query: string } }
   | { name: 'company_research'; arguments: { issuerId: string } }
+  | { name: 'company_filings'; arguments: { issuerId: string } }
+  | { name: 'company_filing'; arguments: { issuerId: string; accession: string; offset?: number; expectedSha256?: string } }
   | { name: 'app_open'; arguments: { module: ModuleId; query?: string; insuranceIds?: string[]; marketQuery?: MarketQuery } };
 export type AppNavigationAction = {
   module: ModuleId; label: string; query?: string; insuranceIds?: string[];
@@ -102,6 +104,19 @@ export function validateAppCommand(value: unknown): AppCommand {
       const issuerId = boundedText(args.issuerId, 40);
       if (!/^(?:sec:(?!0{10}$)[0-9]{10}|wikidata:Q[1-9][0-9]{0,15})$/.test(issuerId)) return invalid();
       return { name: command.name, arguments: { issuerId } };
+    }
+    case 'company_filings':
+    case 'company_filing': {
+      keys(args, command.name === 'company_filings' ? ['issuerId'] : ['issuerId', 'accession'], command.name === 'company_filings' ? [] : ['offset', 'expectedSha256']);
+      const issuerId = boundedText(args.issuerId, 40);
+      if (!/^sec:(?!0{10}$)[0-9]{10}$/.test(issuerId)) return invalid();
+      if (command.name === 'company_filings') return { name: command.name, arguments: { issuerId } };
+      const accession = boundedText(args.accession, 20);
+      if (!/^[0-9]{10}-[0-9]{2}-[0-9]{6}$/.test(accession)
+        || (args.offset !== undefined && (typeof args.offset !== 'number' || !Number.isSafeInteger(args.offset) || args.offset < 0 || args.offset >= 2000))
+        || (args.expectedSha256 !== undefined && (typeof args.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(args.expectedSha256)))
+        || (typeof args.offset === 'number' && args.offset > 0 && args.expectedSha256 === undefined)) return invalid();
+      return { name: command.name, arguments: { issuerId, accession, ...(args.offset === undefined ? {} : { offset: args.offset as number }), ...(args.expectedSha256 === undefined ? {} : { expectedSha256: args.expectedSha256 as string }) } };
     }
     case 'market_query':
       return { name: command.name, arguments: market(args) };
@@ -213,7 +228,7 @@ export function executeLocalAppCommand(input: AppCommand, locale: AppLocale): Ap
       actions: [createAppNavigationAction('market-data', locale, { marketQuery: command.arguments })], marketQuery: command.arguments,
       data: { kind: 'market_query', pending: true, query: { ...command.arguments } } };
   }
-  if (command.name === 'company_search' || command.name === 'company_research') return { text: zh ? '尚未读取公开公司资料。' : 'Public company information has not been retrieved yet.', actions: [createAppNavigationAction('market-data', locale)], data: { pending: true } };
+  if (command.name === 'company_search' || command.name === 'company_research' || command.name === 'company_filings' || command.name === 'company_filing') return { text: zh ? '尚未读取公开公司资料。' : 'Public company information has not been retrieved yet.', actions: [createAppNavigationAction('market-data', locale)], data: { pending: true } };
   const item = moduleDefinition(command.arguments.module);
   const destination = createAppNavigationAction(item.id, locale, command.arguments);
   return { text: [zh ? `可以打开${appCopy(item.title, locale)}，继续在页面操作。` : `You can open ${appCopy(item.title, locale)} and continue on that page.`, appCopy(item.summary, locale), appCopy(item.limits, locale),

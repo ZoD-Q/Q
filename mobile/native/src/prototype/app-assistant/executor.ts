@@ -1,3 +1,5 @@
+import { listCompanyFilings, readCompanyFiling } from '../company-research/filings-client';
+import { buildFilingCatalogText, buildFilingEvidenceText } from '../company-research/filings-core';
 import { searchCompanies, researchCompany } from '../company-research/client';
 import { buildCompanyResearchText } from '../company-research/core';
 import { requestMarketReport } from '../market-data/client';
@@ -27,6 +29,16 @@ export function appResultContext(result: AppReadResult): string {
 export async function executeAppCommand(value: AppCommand, locale: 'zh' | 'en', options: { signal: AbortSignal; transport: typeof fetch }): Promise<AppReadResult> {
   const command = validateAppCommand(value);
   if (options.signal.aborted) throw new Error('CANCELLED');
+  if (command.name === 'company_filings' || command.name === 'company_filing') {
+    const text = command.name === 'company_filings'
+      ? buildFilingCatalogText(await listCompanyFilings(command.arguments.issuerId, options), locale)
+      : buildFilingEvidenceText(await readCompanyFiling(command.arguments.issuerId, command.arguments.accession, { ...options, offset: command.arguments.offset, expectedSha256: command.arguments.expectedSha256 }), locale);
+    if (options.signal.aborted) throw new Error('CANCELLED');
+    // Filing renderers omit whole paragraphs, preserving each included citation.
+    const result = { text, actions: [createAppNavigationAction('market-data', locale)] };
+    appResultContext(result);
+    return result;
+  }
   if (command.name === 'company_search' || command.name === 'company_research') {
     const report = command.name === 'company_search' ? await searchCompanies(command.arguments.query, options) : await researchCompany(command.arguments.issuerId, options);
     if (options.signal.aborted) throw new Error('CANCELLED');

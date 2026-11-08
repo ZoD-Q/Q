@@ -14,6 +14,7 @@ import { normalizeOwnerName, type EntryKind, type PluginEntryIntent } from '../p
 import { BankProposalView } from '../banking/proposal';
 import { BankPluginCatalog } from '../banking/plugin-catalog';
 import { FinancialPluginCatalog } from '../financial-plugins/page';
+import type { RecommendationCandidate } from '../recommendations/core';
 
 type LinkIntent = { initialIntent?: PluginEntryIntent | null; onIntentHandled?: (intent: PluginEntryIntent, outcome: PluginEntryIntentOutcome) => void };
 const ownerLabel = (name: string | null | undefined, text: (zh: string, en: string) => string) => name
@@ -129,7 +130,7 @@ function ToolForm({ tool, busy, onPrepare }: { tool: PluginTool; busy: boolean; 
   </View>;
 }
 
-function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, initialIntent, onIntentHandled }: { token: string; onSelect: (connection: PluginConnection) => void; onOpenWorkbench: () => void; onOpenFinancial?: () => void } & LinkIntent) {
+function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, initialIntent, onIntentHandled, initialConnectionId }: { token: string; onSelect: (connection: PluginConnection) => void; onOpenWorkbench: () => void; onOpenFinancial?: () => void; initialConnectionId?: string | null } & LinkIntent) {
   const { text, colors } = useDesign();
   const [connections, setConnections] = useState<PluginConnection[]>([]);
   const [selected, setSelected] = useState<PluginConnection | null>(null);
@@ -169,6 +170,7 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
   const load = async () => {
     const [available, items] = await Promise.all([call('/v1/plugins/status', decodePluginStatus), call('/v1/plugins/connections', decodeList(decodePluginConnection))]);
     setStatus(available); setConnections(items);
+    if (initialConnectionId) setSelected(items.find(connection => connection.id === initialConnectionId) ?? null);
   };
   useEffect(() => {
     mounted.current = true;
@@ -181,6 +183,10 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
   }, []);
   const path = (suffix = '') => `/v1/plugins/connections/${selected?.id}${suffix}`;
   const open = async (connection: PluginConnection) => {
+    if (connection.research_provider_id === 'fred') {
+      if (!onOpenFinancial) throw new WorkbenchError('PLUGIN_EPHEMERAL_REQUIRED');
+      onOpenFinancial(); return;
+    }
     setAdvanced(false); setSelected(connection); setTools([]); setTool(null); setActiveInvocation(null); setInvocations([]); setResources([]); setPrompts([]); setPromptResult(null); setOauth(null);
   };
   const openAdvanced = async () => {
@@ -303,16 +309,17 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
   </Page>;
 }
 
-export function PluginHostPage({ chat, onOpenWorkbench, onOpenMarketData, onSelect, initialIntent, onIntentHandled, active = true }: { active?: boolean; chat: ChatController; onOpenWorkbench: () => void; onOpenMarketData?: () => void; onSelect: (connection: PluginConnection) => void } & LinkIntent) {
+export function PluginHostPage({ chat, onOpenWorkbench, onOpenMarketData, onSelect, initialIntent, onIntentHandled, active = true, recommendationTarget, onReturnToRecommendation }: { active?: boolean; chat: ChatController; onOpenWorkbench: () => void; onOpenMarketData?: () => void; onSelect: (connection: PluginConnection) => void; recommendationTarget?: RecommendationCandidate | null; onReturnToRecommendation?: () => void } & LinkIntent) {
   const { text, colors } = useDesign();
-  const [tab, setTab] = useState('connected');
+  const [tab, setTab] = useState(recommendationTarget?.provider_id ? 'finance' : recommendationTarget?.bank_id ? 'banks' : 'connected');
   const [authModalPending, authModalEvent] = useReducer(pluginAuthModalReducer, chat.authOpen);
   const connectionPageReady = canPresentPluginConnectionPage({ platform: process.env.EXPO_OS, authenticated: !!chat.session, authOpen: chat.authOpen, authModalPending });
   const openAuth = () => { authModalEvent('requested'); chat.openAuth(); };
   return <View style={{ flex: 1 }}><View style={{ paddingHorizontal: 24, paddingBottom: 12 }}>
+    {onReturnToRecommendation ? <Action kind="ghost" icon={ArrowLeft} label={text('返回并继续原问题', 'Back to original request')} onPress={onReturnToRecommendation} style={{ alignSelf: 'flex-start', minHeight: 48 }} /> : null}
     {onOpenMarketData ? <Row title={text('金融数据工具', 'Financial data tools')} subtitle={text('查询公开币种数据、公司研究资料与财经新闻，核对来源与时间。', 'Explore public crypto data, company research and financial news with sources and timestamps.')} onPress={onOpenMarketData} /> : null}
     <Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'banks', label: text('银行插件', 'Bank plugins') }, { id: 'finance', label: text('金融插件', 'Financial plugins') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
-    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? tab === 'banks' ? <BankPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} /> : tab === 'finance' ? <FinancialPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} active={active} /> : <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} onOpenFinancial={() => setTab('finance')} initialIntent={initialIntent} onIntentHandled={onIntentHandled} />
+    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? tab === 'banks' ? <BankPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} initialBankId={recommendationTarget?.bank_id} /> : tab === 'finance' ? <FinancialPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} active={active} initialProviderId={recommendationTarget?.provider_id} /> : <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} onOpenFinancial={() => setTab('finance')} initialIntent={initialIntent} onIntentHandled={onIntentHandled} initialConnectionId={recommendationTarget?.connection_id} />
       : chat.session ? <Page title={text('我的插件', 'My plugins')}><ActivityIndicator color={colors.accent} accessibilityLabel={text('正在完成登录', 'Finishing sign-in')} /></Page>
         : <Page title={text('我的插件', 'My plugins')}><Type muted>{initialIntent ? text('链接已保留。登录 Q 后继续查看插件信息，再确认添加。', 'Your link is kept. Sign in to Q to review the plugin and confirm addition.') : text('登录 Q 后添加插件，连接与授权保存在你的账户下。', 'Sign in to Q to save plugin connections and authorizations to your account.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} onPress={openAuth} disabled={chat.authBusy} /></Page>}
     <ChatAuthSheet controller={chat} onShow={() => authModalEvent('shown')} onDismiss={() => authModalEvent('dismissed')}

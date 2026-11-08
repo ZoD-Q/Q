@@ -39,6 +39,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state.video = VideoRuntime::from_env()?.map(Arc::new);
     // Environment-backed provider configuration is deliberately limited to executable startup.
     state.ai = AiRuntime::from_env()?.map(Arc::new);
+    state.recommendations_enabled = match env::var("Q_AI_RECOMMENDATIONS").as_deref() {
+        Ok("1" | "true") => true,
+        Ok("0" | "false") | Err(_) => false,
+        _ => return Err("Q_AI_RECOMMENDATIONS must be true, false, 1 or 0".into()),
+    };
     state.plugins = Some(Arc::new(PluginRuntime::from_env()?));
     state.payments = xiaoq_backend::payments::PaymentRuntime::from_env()?.map(Arc::new);
     if let Some(runtime) = state.payments.as_deref() {

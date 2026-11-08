@@ -42,6 +42,7 @@ export type PluginConnection = {
   endpoint_url: string; revision: number; status: string; auth_status: string; last_error_code: string | null;
   owner_name?: string | null;
   financial_provider_id?: 'ifind' | 'jin10' | 'massive' | 'alphavantage' | 'twelvedata' | 'coingecko' | null;
+  research_provider_id?: 'tavily' | 'fred' | null;
   connection_kind?: 'remote_mcp' | 'bank_demo'; builtin_service_id?: string | null;
   created_at: string; updated_at: string; pending_update: boolean; pending_update_details?: unknown;
 };
@@ -98,6 +99,7 @@ export function decodePluginConnection(value: unknown): PluginConnection {
   if (!record(value) || !isUuid(value.id) || !['card_url', 'name', 'title', 'description', 'version', 'endpoint_url', 'status', 'auth_status', 'created_at', 'updated_at'].every(key => str(value[key], 16000)) || !Number.isSafeInteger(value.revision) || typeof value.pending_update !== 'boolean' || !nullable(value.last_error_code)) return fail();
   const identity = decodePluginIdentity(value);
   if (value.financial_provider_id != null && (identity.connection_kind !== 'remote_mcp' || typeof value.financial_provider_id !== 'string' || !['ifind', 'jin10', 'massive', 'alphavantage', 'twelvedata', 'coingecko'].includes(value.financial_provider_id))) return fail();
+  if (value.research_provider_id != null && (identity.connection_kind !== 'remote_mcp' || value.financial_provider_id != null || typeof value.research_provider_id !== 'string' || !['tavily', 'fred'].includes(value.research_provider_id))) return fail();
   if (identity.connection_kind === 'bank_demo' && value.auth_status !== 'anonymous') return fail();
   return { ...value, ...identity, owner_name: normalizeOwnerName(value.owner_name) } as PluginConnection;
 }
@@ -198,6 +200,10 @@ export function pluginError(error: unknown, text: (zh: string, en: string) => st
     MCP_NETWORK_ERROR: ['暂时无法连接插件，请稍后重新读取；已提交的调用请先查询状态。', 'The plugin is temporarily unreachable. Read it again later; check the status of submitted invocations first.'],
     MCP_TIMEOUT: ['插件响应超时。已提交的调用请查询状态，不要重复执行。', 'The plugin timed out. Check submitted invocations; do not repeat them.'],
     MCP_HTTP_ERROR: ['插件服务暂未正常响应，请稍后重新读取。', 'The plugin service is not responding normally. Read it again later.'],
+    MCP_FORBIDDEN: ['服务拒绝此项访问，请核对账号权限；现有授权仍保留。', 'The provider denied access. Check your account permissions; authorization is retained.'],
+    MCP_PAYMENT_REQUIRED: ['服务要求额外的套餐或额度，请到服务方核对权益。', 'The provider requires additional plan or credit access. Check your subscription.'],
+    MCP_RATE_LIMITED: ['服务调用额度或频率已达上限，请稍后再试。', 'The provider’s quota or rate limit was reached. Try later.'],
+    PLUGIN_EPHEMERAL_REQUIRED: ['FRED 仅在临时研究页使用，查询与结果不会保存到聊天历史。', 'Use FRED in temporary research. Queries and results are not saved to chat history.'],
     MCP_LIMIT_EXCEEDED: ['插件内容超出当前支持范围。已提交的调用请先查询状态，不要重复执行。', 'The plugin content exceeds supported limits. Check submitted invocations; do not repeat them.'],
     MCP_VERSION_UNSUPPORTED: ['此插件暂不支持小Q使用的协议版本。', 'This plugin does not support Q’s protocol version.'],
     MCP_METHOD_UNSUPPORTED: ['此插件暂不提供这项能力。', 'This plugin does not provide this capability.'],

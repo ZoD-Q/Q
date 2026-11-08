@@ -9,9 +9,9 @@ const core=await import('./core.ts'), plugin=await import('../plugin-host/core.t
 test.after(()=>resolver.deregister());
 const source=ts.transpileModule(readFileSync(new URL('./page.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const id='11111111-1111-4111-8111-111111111111', attemptId='22222222-2222-4222-8222-222222222222';
-const saved=(provider,ready=false)=>({id,revision:1,title:'Provider',name:provider,description:'Public provider',version:'1',card_url:core.FINANCIAL_PROVIDERS[provider].home,endpoint_url:'https://service.example/mcp',connection_kind:'remote_mcp',builtin_service_id:null,financial_provider_id:provider,status:ready?'ready':'auth_required',auth_status:ready?'authorized':'required',pending_update:false,last_error_code:null,created_at:'2026-11-02',updated_at:'2026-11-02'});
+const saved=(provider,ready=false)=>({id,revision:1,title:'Provider',name:provider,description:'Public provider',version:'1',card_url:core.FINANCIAL_PROVIDERS[provider].home,endpoint_url:'https://service.example/mcp',connection_kind:'remote_mcp',builtin_service_id:null,financial_provider_id:['fred','tavily'].includes(provider)?null:provider,research_provider_id:['fred','tavily'].includes(provider)?provider:null,status:ready?'ready':'auth_required',auth_status:ready?'authorized':'required',pending_update:false,last_error_code:null,created_at:'2026-11-02',updated_at:'2026-11-02'});
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return{promise,resolve};};
-function harness({override,initial={},configured=true}={}){
+function harness({override,initial={},configured=true,legacy=false,initialProviderId}={}){
  let slots=[],cursor=0,effects=[],dirty=true,tree,mounted=true,writesAfterUnmount=0,owner='owner-a',active=true;const calls=[],selected=[],opened=[],connections={...initial};let background;
  const appState={currentState:'active',addEventListener(_,cb){background=cb;return{remove(){}};}};
  const react={
@@ -22,14 +22,14 @@ function harness({override,initial={},configured=true}={}){
  react.useLayoutEffect=react.useEffect;
  const jsx=(type,props)=>({type,props});
  const design={...Object.fromEntries(['Action','Input','Page','Row','Sheet','Type'].map(name=>[name,name])),useDesign:()=>({colors:{},text:(_,en)=>en})};
- const catalog=()=>({available:true,credentials_configured:configured,oauth_configured:configured,providers:Object.entries(core.FINANCIAL_PROVIDERS).map(([id,p])=>({id,name:p.name,description:p.description[1],homepage_url:p.home,auth_mode:p.auth,connection:connections[id]??null}))});
- const imports={react,'react/jsx-runtime':{jsx,jsxs:jsx},'react-native':{ActivityIndicator:'Spinner',AppState:appState,View:'View',Linking:{openURL:async url=>opened.push(url)}},'lucide-react-native':{ArrowLeft:'Back',ChartNoAxesCombined:'Chart',RefreshCw:'Refresh'},'../design':design,'../api-workbench/core':workbench,'../plugin-host/core':plugin,'./core':core,
+ const catalog=()=>({available:true,credentials_configured:configured,oauth_configured:configured,providers:Object.entries(core.FINANCIAL_PROVIDERS).filter(([id])=>!legacy||!['fred','tavily'].includes(id)).map(([id,p])=>({id,name:p.name,description:p.description[1],homepage_url:p.home,auth_mode:p.auth,connection:connections[id]??null}))});
+ const imports={react,'react/jsx-runtime':{jsx,jsxs:jsx},'react-native':{ActivityIndicator:'Spinner',AppState:appState,View:'View',Pressable:'Pressable',Linking:{openURL:async url=>opened.push(url)}},'lucide-react-native':{ArrowLeft:'Back',ChartNoAxesCombined:'Chart',RefreshCw:'Refresh'},'../design':design,'../api-workbench/core':workbench,'../plugin-host/core':plugin,'./core':core,'./fred-panel':{FredResearchPanel:'FredResearchPanel'},
  '../plugin-host/client':{pluginRequest:async(token,path,decode,options={})=>{
   const call={token,path,...options};calls.push(call);
   const external=await override?.(call);if(external!==undefined)return decode(external);
   let value;
-  if(path==='/v1/plugins/financial/providers')value=catalog();
-  else if(path==='/v1/plugins/financial/connections'){const provider=options.body.provider_id;value=connections[provider]=saved(provider,provider==='coingecko');}
+  if(path==='/v1/plugins/financial/providers?catalog_version=2')value=catalog();
+  else if(path==='/v1/plugins/financial/connections'){const provider=options.body.provider_id;value=connections[provider]=saved(provider,['coingecko','tavily'].includes(provider));}
   else if(path.endsWith('/credential')){value=connections.ifind={...connections.ifind,revision:2,status:'ready',auth_status:'authorized'};}
   else if(path.endsWith('/oauth/start'))value={attempt_id:attemptId,authorization_url:'https://auth.massive.com/oauth2/auth?state=fixture&code_challenge=fixture'};
   else if(path===`/v1/plugins/oauth/attempts/${attemptId}`){connections.massive={...connections.massive,status:'ready',auth_status:'authorized'};value={id:attemptId,connection_id:id,status:'succeeded'};}
@@ -41,11 +41,11 @@ function harness({override,initial={},configured=true}={}){
  }}};
  const module={exports:{}};runInNewContext(source,{module,exports:module.exports,AbortController,URL,require:name=>{assert.ok(name in imports,name);return imports[name];}});
  function nodes(value,result=[]){if(Array.isArray(value))value.forEach(v=>nodes(v,result));else if(value&&typeof value==='object'){if(value.type==='Sheet'&&!value.props.visible)return result;result.push(value);nodes(value.props?.children,result);nodes(value.props?.action,result);}return result;}
- function render(){let loops=0;while(dirty){assert.ok(loops++<12);dirty=false;cursor=0;tree=module.exports.FinancialPluginCatalog({token:owner,active,onSelect:value=>selected.push(value)});effects.splice(0).forEach(effect=>effect());}return nodes(tree);}
+ function render(){let loops=0;while(dirty){assert.ok(loops++<12);dirty=false;cursor=0;tree=module.exports.FinancialPluginCatalog({token:owner,active,initialProviderId,onSelect:value=>selected.push(value)});effects.splice(0).forEach(effect=>effect());}return nodes(tree);}
  function press(label){const node=render().find(n=>n.type==='Action'&&n.props.label===label);assert.ok(node,label);assert.equal(!!node.props.disabled,false,label);node.props.onPress();render();}
  return{calls,selected,opened,connections,render,press,get writesAfterUnmount(){return writesAfterUnmount;},
   async flush(){for(let i=0;i<40;i++){await Promise.resolve();render();}},
-  choose(name){const row=render().find(n=>n.type==='Row'&&n.props.title===name);assert.ok(row,name);row.props.onPress();render();},
+  choose(name){const row=render().find(n=>n.type==='Pressable'&&n.props.accessibilityLabel===name);assert.ok(row,name);assert.equal(Boolean(row.props.disabled),false);row.props.onPress();render();},
   enter(secret){const input=render().find(n=>n.type==='Input');assert.ok(input);input.props.onChangeText(secret);render();},
   text(){return render().filter(n=>n.type==='Type').flatMap(n=>n.props.children).join(' ');},
   closeKey(){render().find(n=>n.type==='Sheet'&&n.props.title==='Configure personal key').props.onClose();render();},
@@ -55,12 +55,19 @@ function harness({override,initial={},configured=true}={}){
   unmount(){mounted=false;slots.forEach(s=>s.cleanup?.());},
  };
 }
-test('six providers render without business queries; anonymous add and explicit chat selection use verified tools',async()=>{
- const h=harness();h.render();await h.flush();assert.equal(h.render().filter(n=>n.type==='Row').length,6);assert.equal(h.calls.length,1);
+test('eight providers render without business queries; anonymous add and explicit chat selection use verified tools',async()=>{
+ const h=harness();h.render();await h.flush();assert.equal(h.render().filter(n=>n.type==='Row').length,8);assert.equal(h.calls.length,1);
  h.choose('CoinGecko');h.press('Add financial plugin');await h.flush();
  assert.equal(h.calls.filter(c=>c.path.endsWith('/tools')).length,0);
  h.press('Use in chat');await h.flush();assert.equal(h.selected.length,1);assert.equal(h.selected[0].financial_provider_id,'coingecko');
  assert.equal(h.calls.some(c=>c.path.includes('invocation')),false);
+});
+test('recommended provider opens its existing authorization flow without adding or calling it automatically',async()=>{
+ const h=harness({initialProviderId:'ifind'});h.render();await h.flush();
+ assert.equal(h.render().find(n=>n.type==='Page').props.title,'iFinD');
+ assert.equal(h.calls.length,1);assert.equal(h.calls[0].path,'/v1/plugins/financial/providers?catalog_version=2');assert.equal(h.selected.length,0);
+ assert.ok(h.render().some(n=>n.type==='Action'&&n.props.label==='Add financial plugin'));
+ const invalid=harness({initialProviderId:'unrecognized-provider'});invalid.render();await invalid.flush();assert.equal(invalid.render().filter(n=>n.type==='Pressable').length,8);
 });
 test('personal keys stay masked and are cleared at submission, closing and background',async()=>{
  const h=harness({initial:{ifind:saved('ifind')}});h.render();await h.flush();h.choose('iFinD');h.press('Configure personal key');h.enter('fixture-key');
@@ -113,4 +120,23 @@ test('a succeeded OAuth attempt cannot publish an unexpected connection or unapp
   const h=harness({initial:{massive:saved('massive')},override:async c=>c.path===`/v1/plugins/connections/${id}`?{...saved('massive',true),...change}:undefined});h.render();await h.flush();h.choose('Massive');h.press('Connect provider account');await h.flush();h.press('Check authorization result');await h.flush();
   assert.equal(h.selected.length,0);assert.doesNotMatch(h.text(),/Authorization completed/);
  }
+});
+
+test('new sources are unavailable on a legacy six-provider catalog without blocking original services',async()=>{
+ const h=harness({legacy:true});h.render();await h.flush();h.choose('FRED');
+ assert.match(h.text(),/has not enabled this source/);assert.equal(h.render().find(n=>n.props.label==='Add financial plugin').props.disabled,true);
+ h.press('Back to financial plugins');h.choose('iFinD');assert.equal(h.render().find(n=>n.props.label==='Add financial plugin').props.disabled,false);
+});
+test('FRED enters its ephemeral page without calling ordinary plugin tools or chat',async()=>{
+ const h=harness({initial:{fred:saved('fred',true)}});h.render();await h.flush();h.choose('FRED');
+ assert.equal(h.render().some(n=>n.props.label==='Use in chat'),false);assert.match(h.text(),/does not cache queries/);
+ h.press('Start temporary research');assert.ok(h.render().some(n=>n.type==='FredResearchPanel'));assert.equal(h.selected.length,0);assert.equal(h.calls.some(c=>c.path.endsWith('/tools')),false);
+ h.background();assert.equal(h.render().some(n=>n.type==='FredResearchPanel'),false);
+});
+
+test('cancelling an uncertain addition requires recovery and never republishes the late response',async()=>{
+ const pending=deferred();const h=harness({override:c=>c.path==='/v1/plugins/financial/connections'?pending.promise:undefined});h.render();await h.flush();h.choose('CoinGecko');h.press('Add financial plugin');await h.flush();const post=h.calls.find(c=>c.path==='/v1/plugins/financial/connections');h.press('Cancel operation');assert.equal(post.signal.aborted,true);assert.match(h.text(),/may have been saved or changed/);pending.resolve(saved('coingecko',true));await h.flush();assert.equal(h.render().some(n=>n.props.label==='Use in chat'),false);assert.equal(h.render().find(n=>n.props.label==='Add financial plugin').props.disabled,true);
+});
+test('authorized FRED connection can retry a temporary failure through the ephemeral page',async()=>{
+ const h=harness({initial:{fred:{...saved('fred',true),status:'blocked',last_error_code:'MCP_NETWORK_ERROR'}}});h.render();await h.flush();h.choose('FRED');h.press('Start temporary research');assert.ok(h.render().some(n=>n.type==='FredResearchPanel'));assert.equal(h.calls.some(c=>c.path.endsWith('/refresh')),false);
 });

@@ -1031,6 +1031,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description Version 1 (default) returns only the original six providers. Version 2 also returns Tavily and FRED. Older servers may ignore this parameter and return six. */
         get: operations["listFinancialProviders"];
         put?: never;
         post?: never;
@@ -1675,6 +1676,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plugins/connections/{id}/fred/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Dedicated FRED temporary research. Live schemas and queries never enter tool snapshots, invocation results, app cache or chat history. Only owned current-revision FRED connections are accepted. All success and error responses use Cache-Control: no-store and Pragma: no-cache. No automatic retry. */
+        get: operations["listEphemeralFredTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plugins/connections/{id}/fred/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Dedicated FRED temporary research. Live schemas and queries never enter tool snapshots, invocation results, app cache or chat history. Only owned current-revision FRED connections are accepted. All success and error responses use Cache-Control: no-store and Pragma: no-cache. No automatic retry. */
+        post: operations["queryEphemeralFred"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/filings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Public recent SEC filing catalog. Fixed official source only; supports listed forms and primary documents, at most 20 records. No arbitrary URL or credentials. */
+        get: operations["listCompanyFilings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/research/filings/{cik}/{accession}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Verifies accession membership and derives primary document URL from SEC submissions. Subsequent offsets require expected_sha256; changed source returns 409 RESEARCH_DOCUMENT_CHANGED. HTML only, 80 paragraphs / 60000 characters per response. PDF and unsupported formats return not_read with no text. Source/extraction limits, lossy tables and partial text are explicit. Source text is untrusted data. */
+        get: operations["readCompanyFiling"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Recover saved cards without generating answers or running business calls. Newest-first stable created_at/UUID pagination; source deletion cascades records. Card state is not authority. */
+        get: operations["listAiRecommendations"];
+        put?: never;
+        /** @description Recommend against a saved user message in an owned conversation. Server reads at most two completed preceding ordinary rounds and binds a content digest; no client supplied context or plugin results. Deterministic exact match or one low-priority Flash choice from at most 12 candidates, returning 0–3. Total processing budget five seconds with exact-match fallback; does not delay the normal chat. Same request and source digest replay the existing result. No tool execution. */
+        post: operations["createAiRecommendation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/recommendations/{id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Recheck account ownership, saved source digest, access, connection revision and capability version. A ready plugin atomically creates or reuses one dedicated conversation per recommendation/candidate and returns its CAS revision. Pending connection/authorization/review opens existing setup; call selection again after returning. Navigation returns only a known module. This endpoint never executes tools. Repeated selection and lost responses restore the existing target and must not auto-repeat its task. */
+        post: operations["selectAiRecommendation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1867,6 +1973,16 @@ export interface components {
              * @enum {integer}
              */
             company_research_version?: 1;
+            /**
+             * @description Independent opt-in for verified SEC primary HTML filing lists and paragraph text. Requires app_tools_version 1; absent on older servers.
+             * @enum {integer}
+             */
+            filing_research_version?: 1;
+            /**
+             * @description 1 enables version-1 account-scoped recommendations; 0 or absence disables them. Controlled by the server Q_AI_RECOMMENDATIONS flag, off by default.
+             * @enum {integer}
+             */
+            recommendations_version?: 0 | 1;
         };
         AiHistoryMessage: {
             /** @enum {string} */
@@ -1900,6 +2016,11 @@ export interface components {
              * @enum {integer}
              */
             company_research_version?: 1;
+            /**
+             * @description Independent opt-in for verified SEC primary HTML filing lists and paragraph text. Requires app_tools_version 1; absent on older servers.
+             * @enum {integer}
+             */
+            filing_research_version?: 1;
         };
         AiUsage: {
             prompt_tokens: number;
@@ -2019,6 +2140,11 @@ export interface components {
              * @enum {string|null}
              */
             financial_provider_id?: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | null;
+            /**
+             * @description Server-owned research profile. New research connections keep financial_provider_id null so older clients can decode generic remote connections. Both provider fields cannot be non-null. FRED requires its dedicated ephemeral interface.
+             * @enum {string|null}
+             */
+            research_provider_id?: "tavily" | "fred" | null;
         };
         PluginInvocationRequest: {
             /** Format: uuid */
@@ -2580,6 +2706,21 @@ export interface components {
                 /** @description Source-qualified issuer ID returned by company_search; never an arbitrary URL. */
                 issuerId: string;
             };
+        } | {
+            /** @enum {string} */
+            name: "company_filings";
+            arguments: {
+                issuerId: string;
+            };
+        } | {
+            /** @enum {string} */
+            name: "company_filing";
+            arguments: {
+                issuerId: string;
+                accession: string;
+                offset?: number;
+                expectedSha256?: string;
+            };
         };
         /** @description Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged. */
         AppToolContext: {
@@ -2647,6 +2788,23 @@ export interface components {
                 issuerId: string;
             };
             result: string;
+        } | {
+            /** @enum {string} */
+            name: "company_filings";
+            arguments: {
+                issuerId: string;
+            };
+            result: string;
+        } | {
+            /** @enum {string} */
+            name: "company_filing";
+            arguments: {
+                issuerId: string;
+                accession: string;
+                offset?: number;
+                expectedSha256?: string;
+            };
+            result: string;
         };
         FinancialProviderCatalog: {
             available: boolean;
@@ -2655,7 +2813,7 @@ export interface components {
             oauth_configured: boolean;
             providers: {
                 /** @enum {string} */
-                id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko";
+                id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | "tavily" | "fred";
                 name: string;
                 description: string;
                 /** Format: uri */
@@ -3237,6 +3395,158 @@ export interface components {
         PaymentSettlementChecksPage: {
             items: components["schemas"]["PaymentSettlementCheck"][];
             next_cursor: string | null;
+        };
+        FredTools: {
+            connection_revision: number;
+            items: components["schemas"]["PluginTool"][];
+            /** @enum {string} */
+            retention: "ephemeral";
+        };
+        FredQueryRequest: {
+            connection_revision: number;
+            /** @enum {string} */
+            tool_name: "fred-search-series" | "fred-get-series-metadata" | "fred-get-series-observations";
+            arguments: {
+                [key: string]: unknown;
+            };
+        };
+        FredQueryResult: {
+            /** Format: uuid */
+            connection_id: string;
+            connection_revision: number;
+            /** @enum {string} */
+            tool_name: "fred-search-series" | "fred-get-series-metadata" | "fred-get-series-observations";
+            /** @description Validated MCP tool result, interpreted only as data. */
+            result: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            retrieved_at: string;
+            /** @enum {string} */
+            retention: "ephemeral";
+        };
+        FilingSummary: {
+            accession: string;
+            /** @enum {string} */
+            form: "10-K" | "10-K/A" | "10-Q" | "10-Q/A" | "20-F" | "20-F/A" | "40-F" | "40-F/A" | "8-K" | "8-K/A" | "6-K" | "6-K/A";
+            /** Format: date */
+            filed_at: string;
+            report_date: string | null;
+            document_name: string;
+            /** Format: uri */
+            document_url: string;
+            /** @enum {string} */
+            format: "html" | "pdf" | "unsupported";
+        };
+        FilingCatalog: {
+            /** @enum {integer} */
+            version: 1;
+            issuer_id: string;
+            cik: string;
+            company_name: string;
+            /** Format: date-time */
+            fetched_at: string;
+            filings: components["schemas"]["FilingSummary"][];
+            /** @description Supported verified records in the recent SEC window, not full historical coverage. */
+            total: number;
+            truncated: boolean;
+        };
+        FilingSection: {
+            id: string;
+            title: string;
+            start_paragraph: number;
+        };
+        FilingParagraph: {
+            /** @description Global extracted text ordinal, not an original page number. */
+            id: string;
+            text: string;
+            /** @enum {string} */
+            kind: "text" | "table";
+            section_id: string;
+            /** Format: uri */
+            source_url: string;
+        };
+        FilingDocument: {
+            /** @enum {integer} */
+            version: 1;
+            issuer_id: string;
+            cik: string;
+            company_name: string;
+            filing: components["schemas"]["FilingSummary"];
+            /** Format: date-time */
+            fetched_at: string;
+            /** @enum {string} */
+            status: "ready" | "not_read";
+            sha256: string | null;
+            content_type: "text/html" | null;
+            sections: components["schemas"]["FilingSection"][];
+            paragraphs: components["schemas"]["FilingParagraph"][];
+            offset: number;
+            next_offset: number | null;
+            total_paragraphs: number;
+            /** @description Extraction limit reached; separate from remaining pagination. */
+            truncated: boolean;
+            limitations: string[];
+        };
+        /** @description Server-owned display metadata, never authorization. Tool instructions, credentials and private results are omitted. Revalidate access and capability version on selection. */
+        AiRecommendationCandidate: {
+            id: string;
+            title: string;
+            description: string;
+            reason: string;
+            /** @enum {string} */
+            kind: "plugin" | "module";
+            /** @enum {string} */
+            access: "ready" | "connect" | "authorize" | "review" | "unavailable";
+            /** Format: uuid */
+            connection_id: string | null;
+            /** Format: int64 */
+            connection_revision: number | null;
+            module: string | null;
+            provider_id: string | null;
+            bank_id: string | null;
+            capability_version: string;
+            price_note: string | null;
+        };
+        AiRecommendation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversation_id: string;
+            source_message_id: string;
+            /** @enum {string} */
+            status: "complete" | "skipped";
+            candidates: components["schemas"]["AiRecommendationCandidate"][];
+            catalog_version: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        AiRecommendationRequest: {
+            /** Format: uuid */
+            conversation_id: string;
+            source_message_id: string;
+            /** Format: uuid */
+            request_id: string;
+            /** @enum {string} */
+            locale: "zh" | "en";
+        };
+        AiRecommendationPage: {
+            items: components["schemas"]["AiRecommendation"][];
+            /** Format: uuid */
+            next_cursor: string | null;
+        };
+        AiRecommendationSelectRequest: {
+            candidate_id: string;
+        };
+        AiRecommendationSelection: {
+            /** @enum {string} */
+            kind: "conversation" | "connect" | "authorize" | "review" | "navigate";
+            candidate: components["schemas"]["AiRecommendationCandidate"];
+            conversation: components["schemas"]["AiConversation"] | null;
+            /** @description Only the first successful dedicated-conversation creation is true. Replays restore its existing snapshot without rewriting messages or executing the task. */
+            created: boolean;
         };
     };
     responses: never;
@@ -5622,7 +5932,9 @@ export interface operations {
     };
     listFinancialProviders: {
         parameters: {
-            query?: never;
+            query?: {
+                catalog_version?: 1 | 2;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5660,7 +5972,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    provider_id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko";
+                    provider_id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | "tavily" | "fred";
                 };
             };
         };
@@ -8922,6 +9234,239 @@ export interface operations {
             };
             /** @description Payments not configured or rate stale */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listEphemeralFredTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FredTools"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    queryEphemeralFred: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FredQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FredQueryResult"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listCompanyFilings: {
+        parameters: {
+            query: {
+                issuer_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilingCatalog"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    readCompanyFiling: {
+        parameters: {
+            query?: {
+                offset?: number;
+                expected_sha256?: string;
+            };
+            header?: never;
+            path: {
+                cik: string;
+                accession: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilingDocument"];
+                };
+            };
+            /** @description Structured error. No upstream secrets or raw errors. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    listAiRecommendations: {
+        parameters: {
+            query: {
+                conversation_id: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped result; Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRecommendationPage"];
+                };
+            };
+            /** @description Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    createAiRecommendation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiRecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner-scoped result; Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRecommendation"];
+                };
+            };
+            /** @description Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    selectAiRecommendation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiRecommendationSelectRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner-scoped result; Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRecommendationSelection"];
+                };
+            };
+            /** @description Safe structured error. Authentication, ownership, disabled feature, stale source/capability, expired card, rate/size limits and idempotency conflicts are checked server-side. */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };

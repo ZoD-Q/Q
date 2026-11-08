@@ -24,6 +24,7 @@ const bankCatalog = await import('../banking/catalog.ts');
 const bankData = await import('../banking/data.ts');
 const financeConversation = await import('../finance-agent/conversation.ts');
 const financeIntent = await import('../finance-agent/intent.ts');
+const recommendationCore = await import('../recommendations/core.ts');
 test.after(() => resolver.deregister());
 
 const token = 'q_' + 'a'.repeat(43);
@@ -42,7 +43,7 @@ const hookSource = ts.transpileModule(readFileSync(new URL('./use-chat.ts', impo
 /** Execute the actual hook's async actions with deterministic state/effect plumbing.
  * This verifies orchestration, not React rendering, layout, or native transport. */
 function harness({ stored = token, statusFetch = async () => json(configured), meFetch = async () => json(user),
-  historyFetch = async () => new Response('', { status: 404 }), historySave, historyDetail, bankFetch, appExecute,
+  historyFetch = async () => new Response('', { status: 404 }), historySave, historyDetail, bankFetch, appExecute, recommendationFetch, recommendationPending = null, pendingSave,
 } = {}) {
   const appCalls = [];
   const slots = [], calls = [], timers = new Map(), streams = [], streamCompletions = [], streamFailures = [], historyPosts = [], ordering = [];
@@ -71,6 +72,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
   };
   const session = createSessionStore({ get: async () => stored, set: async value => { stored = value; }, remove: async () => { stored = null; } });
   const consent = createAiPermission();
+  let savedRecommendation = recommendationPending;
   const appListeners = new Set();
   const appState = { currentState: 'active', addEventListener: (_, listener) => { appListeners.add(listener); return { remove: () => appListeners.delete(listener) }; } };
   const imports = {
@@ -82,6 +84,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
       if (path.startsWith('/v1/banking/') || path.startsWith('/v1/plugins/')) { ordering.push(path + ':' + options.method); if (bankFetch) return bankFetch(path, options); throw new Error('Unexpected bank action'); }
       if (path === '/v1/ai/status') return statusFetch(options);
       if (path === '/v1/me') return meFetch(options);
+      if (path.startsWith('/v1/ai/recommendations')) { ordering.push('recommendation:' + options.method); return recommendationFetch ? recommendationFetch(path, options) : json({ items: [], next_cursor: null }); }
       if (path === '/v1/ai/conversations') return historyFetch(options);
       if (path.startsWith('/v1/ai/conversations/') && options.method === 'GET' && historyDetail) return historyDetail(path.split('/').at(-1), options);
       if (path.startsWith('/v1/ai/conversations/') && options.method === 'POST') {
@@ -103,6 +106,11 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     '../finance-agent/conversation': financeConversation,
     '../finance-agent/intent': financeIntent,
     '../app-assistant/core': appCore,
+    '../recommendations/core': recommendationCore,
+    '../recommendations/pending': {
+      readPendingRecommendation: async () => savedRecommendation,
+      savePendingRecommendation: async (owner, value) => { if (pendingSave) await pendingSave(owner, value); savedRecommendation = value; },
+    },
     '../app-assistant/executor': {
       executeAppCommand: async (command, locale, options) => { appCalls.push({ command, signal: options.signal }); return appExecute ? appExecute(command, locale, options) : appCore.executeLocalAppCommand(command, locale); },
       appResultContext: result => JSON.stringify({ text: result.text, data: result.data }),
@@ -141,6 +149,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     get current() { return dirty ? render() : result; },
     calls, streams, historyPosts, ordering, appCalls,
     token: () => stored,
+    pendingRecommendation: () => savedRecommendation,
     grantConsent: () => consent.grant(stored),
     revokeConsent: () => consent.revoke(),
     changeToken: session.writeToken,
@@ -185,6 +194,271 @@ test('cold start and closing sign-in cannot turn an in-flight status check into 
   assert.equal(view.current.statusPhase, 'ready');
   assert.equal(view.current.status.configured, true);
   assert.equal(view.calls.length, 1);
+});
+
+const recommendedStatus = { ...configured, recommendations_version: 1, app_tools_version: 1 };
+const recommendationCandidate = { id: 'module:market-data', title: '公开市场资料', description: '查询市场资料', reason: '可以查询这类资料', kind: 'module', access: 'ready',
+  connection_id: null, connection_revision: null, module: 'market-data', provider_id: null, bank_id: null, capability_version: 'fixture-v1', price_note: null };
+const recommendationRecord = (body, fields = {}) => ({ id: '44444444-4444-4444-8444-444444444444', conversation_id: body.conversation_id, source_message_id: body.source_message_id,
+  status: 'complete', candidates: [recommendationCandidate], catalog_version: 'fixture-v1', created_at: '2026-11-08T00:00:00Z', expires_at: '2026-11-09T00:00:00Z', ...fields });
+const childId = '55555555-5555-4555-8555-555555555555';
+const childHistory = (content = '查询比特币资料', fields = {}) => ({ id: childId, title: '公开市场资料', revision: 1, updated_at: '2026-11-08T00:00:00Z',
+  messages: [{ id: 'child-user', role: 'user', content, status: 'complete' }], ...fields });
+
+test('recommendations start after durable history alongside the answer, including deep thinking', async t => {
+  const save = deferred(), recommend = deferred();
+  let firstSave;
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    historySave: (id, body) => { if (!firstSave) { firstSave = { id, body }; return save.promise; } return json({ id, ...body, revision: body.expected_revision + 1, updated_at: user.created_at }); },
+    recommendationFetch: (_path, options) => options.method === 'POST' ? recommend.promise : json({ items: [], next_cursor: null }),
+  }); t.after(view.close);
+  await view.flush(); view.grantConsent(); view.current.setThink(true);
+  assert.equal(view.current.send('查询比特币资料'), true); await view.flush();
+  assert.equal(view.calls.some(call => call.path === '/v1/ai/recommendations' && call.method === 'POST'), false);
+  assert.equal(view.streams.length, 0);
+  save.resolve(json({ ...firstSave.body, id: firstSave.id, revision: 1, updated_at: user.created_at })); await view.flush();
+  const request = view.calls.find(call => call.path === '/v1/ai/recommendations' && call.method === 'POST');
+  assert.ok(request); assert.equal(view.streams.length, 1, 'a pending recommendation never blocks the answer');
+  assert.equal(view.streams[0].request.thinking, true);
+  const body = JSON.parse(request.body);
+  assert.deepEqual(Object.keys(body).sort(), ['conversation_id', 'locale', 'request_id', 'source_message_id']);
+  assert.equal(body.source_message_id, view.current.conversation.messages[0].id);
+  recommend.resolve(json(recommendationRecord(body))); await view.flush();
+  assert.equal(Object.keys(view.current.recommendations).length, 1);
+  view.finishStream(); await view.flush(); assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+});
+
+test('recommendations stay off without version, consent or cloud persistence and never enter local finance', async t => {
+  for (const setting of [
+    { statusFetch: async () => json(configured), historyFetch: cloudHistory, consent: true },
+    { statusFetch: async () => json(recommendedStatus), historyFetch: async () => new Response('', { status: 404 }), consent: true },
+    { statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory, consent: false },
+  ]) {
+    const view = harness(setting); t.after(view.close); await view.flush(); if (setting.consent) view.grantConsent();
+    view.current.send('查一查股票行情'); await view.flush();
+    assert.equal(view.calls.some(call => call.path === '/v1/ai/recommendations' && call.method === 'POST'), false);
+    view.close();
+  }
+  const local = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory }); t.after(local.close);
+  await local.flush(); local.grantConsent();
+  local.current.addLocalFinance({ request: 'Private finance', title: 'Private', answer: 'Local result', result: { kind: 'help', content: 'Only local' } });
+  await local.flush(); assert.equal(local.calls.some(call => call.path === '/v1/ai/recommendations' && call.method === 'POST'), false);
+});
+
+test('stopping, changing conversation, background and account changes abort discovery and reject late cards', async t => {
+  for (const exit of ['stop', 'conversation', 'background', 'account']) {
+    const pending = deferred();
+    const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+      recommendationFetch: (_path, options) => options.method === 'POST' ? pending.promise : json({ items: [], next_cursor: null }),
+    }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('比特币价格查询'); await view.flush();
+    const request = view.calls.find(call => call.path === '/v1/ai/recommendations' && call.method === 'POST');
+    if (exit === 'stop') view.current.stop();
+    else if (exit === 'conversation') view.current.newConversation();
+    else if (exit === 'background') view.setAppState('background');
+    else await view.changeToken('q_' + 'b'.repeat(43));
+    await view.flush(); assert.equal(request.signal.aborted, true, exit);
+    pending.resolve(json(recommendationRecord(JSON.parse(request.body)))); await view.flush();
+    assert.deepEqual(Object.keys(view.current.recommendations), [], exit);
+    view.close();
+  }
+});
+
+test('recommendation failure leaves the answer and its ordinary retry intact without rediscovery', async t => {
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    recommendationFetch: (_path, options) => options.method === 'POST' ? new Response('', { status: 503 }) : json({ items: [], next_cursor: null }),
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('比特币价格查询'); await view.flush();
+  assert.equal(view.streams.length, 1); assert.equal(view.current.messageError, '');
+  view.failStream(0, 'AI_TIMEOUT'); await view.flush(); view.current.retry(); await view.flush();
+  assert.equal(view.streams.length, 2);
+  assert.equal(view.calls.filter(call => call.path === '/v1/ai/recommendations' && call.method === 'POST').length, 1);
+  view.finishStream(1); await view.flush(); assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+});
+
+test('first successful recommendation selection seeds the child revision and continues its existing user turn once', async t => {
+  const selection = deferred(); let record;
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    recommendationFetch: (path, options) => {
+      if (path.endsWith('/select')) return selection.promise;
+      if (options.method === 'POST') { record = recommendationRecord(JSON.parse(options.body)); return json(record); }
+      return json({ items: record ? [record] : [], next_cursor: null });
+    },
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查询比特币资料'); await view.flush(); view.finishStream(); await view.flush();
+  view.current.setDraft('尚未发送的新想法');
+  const first = view.current.selectRecommendation(record.id, recommendationCandidate.id);
+  assert.equal(await view.current.selectRecommendation(record.id, recommendationCandidate.id), null, 'rapid clicks share one selection');
+  await view.flush();
+  assert.equal(view.pendingRecommendation().recordId, record.id, 'recovery identifiers are saved before the request');
+  selection.resolve(json({ kind: 'conversation', candidate: recommendationCandidate, conversation: childHistory(), created: true }));
+  await first; await view.flush();
+  assert.equal(view.current.activeId, childId);
+  assert.equal(view.current.conversation.messages.filter(message => message.role === 'user').length, 1);
+  assert.equal(view.streams.length, 2);
+  assert.equal(view.streams[1].request.app_tools_version, 1);
+  assert.equal(view.historyPosts.find(post => post.id === childId).body.expected_revision, 1);
+  assert.equal(view.calls.filter(call => call.path === '/v1/ai/recommendations' && call.method === 'POST').length, 1, 'handoff does not recommend its already-selected capability again');
+  assert.equal(view.current.draft, '');
+  view.finishStream(1); await view.flush(); view.current.openRecommendationSource(); await view.flush();
+  assert.equal(view.current.activeId, record.conversation_id); assert.equal(view.current.draft, '尚未发送的新想法', 'returning restores the unsent source draft');
+});
+
+test('lost selection response reopens the server child, and an explicit continue cannot repeat an existing answer', async t => {
+  let record, calls = 0, detail = childHistory();
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    recommendationFetch: (path, options) => {
+      if (path.endsWith('/select')) { if (++calls === 1) throw new Error('lost response after commit'); return json({ kind: 'conversation', candidate: recommendationCandidate, conversation: detail, created: false }); }
+      if (options.method === 'POST') { record = recommendationRecord(JSON.parse(options.body)); return json(record); }
+      return json({ items: record ? [record] : [], next_cursor: null });
+    },
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查询比特币资料'); await view.flush(); view.finishStream(); await view.flush();
+  assert.equal(await view.current.selectRecommendation(record.id, recommendationCandidate.id), null); await view.flush();
+  assert.equal(view.current.recommendationError.recordId, record.id);
+  await view.current.selectRecommendation(record.id, recommendationCandidate.id); await view.flush();
+  assert.equal(view.current.activeId, childId); assert.equal(view.streams.length, 1, 'created:false never automatically starts a model');
+  assert.equal(view.current.canContinueRecommendation, true);
+  await view.current.selectRecommendation(record.id, recommendationCandidate.id, true); await view.flush();
+  assert.equal(view.streams.length, 2); view.finishStream(1); await view.flush();
+  detail = childHistory('查询比特币资料', { revision: 3, messages: [...view.current.conversation.messages] });
+  await view.current.selectRecommendation(record.id, recommendationCandidate.id, true); await view.flush();
+  assert.equal(view.streams.length, 2, 'even explicit recovery only continues an untouched user turn');
+  assert.equal(view.current.canContinueRecommendation, false);
+});
+
+test('recommended research switches out of thinking and preserves filing evidence through explanation recovery', async t => {
+  let record;
+  const command = { name: 'company_filing', arguments: { issuerId: 'sec:0000320193', accession: '0000320193-26-000026', offset: 146, expectedSha256: 'a'.repeat(64) } };
+  const view = harness({ statusFetch: async () => json({ ...recommendedStatus, company_research_version: 1, filing_research_version: 1 }), historyFetch: cloudHistory,
+    appExecute: async () => ({ text: 'SEC excerpt [p000146], source hash and limitations retained', actions: [] }),
+    recommendationFetch: (path, options) => {
+      if (path.endsWith('/select')) return json({ kind: 'conversation', candidate: recommendationCandidate, conversation: childHistory('Read Apple risk factors'), created: true });
+      if (options.method === 'POST') { record = recommendationRecord(JSON.parse(options.body)); return json(record); }
+      return json({ items: record ? [record] : [], next_cursor: null });
+    },
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.setThink(true);
+  view.current.send('Read Apple risk factors'); await view.flush();
+  assert.equal(view.streams[0].request.thinking, true);
+  assert.equal(view.streams[0].request.filing_research_version, undefined);
+  view.finishStream(); await view.flush();
+  await view.current.selectRecommendation(record.id, recommendationCandidate.id); await view.flush();
+  assert.equal(view.streams[1].request.thinking, false);
+  assert.equal(view.streams[1].request.app_tools_version, 1);
+  assert.equal(view.streams[1].request.filing_research_version, 1);
+  view.finishAppStream(command, 1); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+  const collected = view.streams[2].request.app_context;
+  assert.equal(collected[0].name, 'company_filing');
+  assert.deepEqual(collected[0].arguments, command.arguments);
+  view.failStream(2, 'AI_UPSTREAM_ERROR'); await view.flush(); view.current.retry(); await view.flush();
+  assert.equal(view.appCalls.length, 1, 'explanation recovery never reads the filing twice');
+  assert.equal(view.streams[3].request.app_final_only, true);
+  assert.equal(view.streams[3].request.filing_research_version, 1);
+  assert.deepEqual(view.streams[3].request.app_context, collected);
+  assert.equal(view.calls.filter(call => call.path === '/v1/ai/recommendations' && call.method === 'POST').length, 1);
+});
+
+test('saved recommendation history and pending identifiers recover without starting a model or selecting a plugin', async t => {
+  const sourceId = '66666666-6666-4666-8666-666666666666';
+  const record = recommendationRecord({ conversation_id: sourceId, source_message_id: 'source-user' });
+  const detail = { ...childHistory(), id: sourceId, messages: [{ id: 'source-user', role: 'user', content: '查询比特币资料', status: 'complete' }, { id: 'source-answer', role: 'assistant', content: 'Answer', status: 'complete' }] };
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: async () => json({ items: [{ id: sourceId, title: detail.title, revision: 1, updated_at: detail.updated_at }], next_cursor: null }),
+    historyDetail: async () => json(detail), recommendationPending: { recordId: record.id, candidateId: recommendationCandidate.id, sourceConversationId: sourceId },
+    recommendationFetch: (_path, options) => { assert.equal(options.method, 'GET'); return json({ items: [record], next_cursor: null }); },
+  }); t.after(view.close); await view.flush(); await view.current.openConversation(sourceId); await view.flush();
+  assert.equal(Object.keys(view.current.recommendations).length, 1); assert.equal(view.streams.length, 0);
+  assert.equal(view.current.pendingRecommendation.sourceConversationId, sourceId);
+  assert.equal(view.calls.some(call => call.path.endsWith('/select')), false);
+});
+
+test('late selection after leaving the chat preserves recovery but cannot open or execute the target', async t => {
+  const pending = deferred(); let record;
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    recommendationFetch: (path, options) => {
+      if (path.endsWith('/select')) return pending.promise;
+      if (options.method === 'POST') { record = recommendationRecord(JSON.parse(options.body)); return json(record); }
+      return json({ items: record ? [record] : [], next_cursor: null });
+    },
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查询比特币资料'); await view.flush(); view.finishStream(); await view.flush();
+  const selecting = view.current.selectRecommendation(record.id, recommendationCandidate.id); await view.flush();
+  const request = view.calls.find(call => call.path.endsWith('/select'));
+  view.current.newConversation(); assert.equal(request.signal.aborted, true);
+  pending.resolve(json({ kind: 'conversation', candidate: recommendationCandidate, conversation: childHistory(), created: true }));
+  await selecting; await view.flush();
+  assert.equal(view.current.activeId, null); assert.equal(view.streams.length, 1); assert.equal(view.pendingRecommendation().recordId, record.id);
+});
+
+test('a five-second recommendation deadline cannot cancel a completed answer', async t => {
+  const pending = deferred();
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    recommendationFetch: (_path, options) => options.method === 'POST' ? pending.promise : json({ items: [], next_cursor: null }),
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查一查股票市场'); await view.flush();
+  const request = view.calls.find(call => call.path === '/v1/ai/recommendations' && call.method === 'POST');
+  view.finishStream(); await view.flush();
+  assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+  await new Promise(resolve => setTimeout(resolve, 5100)); await view.flush();
+  assert.equal(request.signal.aborted, true); assert.equal(view.streams[0].signal.aborted, false);
+  assert.equal(view.current.messageError, ''); assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+  pending.resolve(json(recommendationRecord(JSON.parse(request.body)))); await view.flush();
+  assert.deepEqual(Object.keys(view.current.recommendations), []);
+});
+
+test('connection recovery revalidates access, waits for renewed AI consent, and does not repeat the saved user message', async t => {
+  let record, selections = 0;
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    recommendationFetch: (path, options) => {
+      if (path.endsWith('/select')) return json(++selections === 1
+        ? { kind: 'authorize', candidate: { ...recommendationCandidate, access: 'authorize' }, conversation: null, created: false }
+        : { kind: 'conversation', candidate: recommendationCandidate, conversation: childHistory(), created: true });
+      if (options.method === 'POST') { record = recommendationRecord(JSON.parse(options.body)); return json(record); }
+      return json({ items: record ? [record] : [], next_cursor: null });
+    },
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查询比特币资料'); await view.flush(); view.finishStream(); await view.flush();
+  const needsAuth = await view.current.selectRecommendation(record.id, recommendationCandidate.id); await view.flush();
+  assert.equal(needsAuth.kind, 'authorize'); assert.equal(view.current.activeId, record.conversation_id); assert.equal(view.streams.length, 1);
+  view.revokeConsent(); await view.flush();
+  await view.current.selectRecommendation(record.id, recommendationCandidate.id, true); await view.flush();
+  assert.equal(selections, 2); assert.equal(view.current.aiConsentOpen, true); assert.equal(view.streams.length, 1);
+  view.current.confirmAiSharing(); await view.flush();
+  assert.equal(view.streams.length, 2); assert.equal(view.streams[1].request.app_tools_version, 1);
+  assert.equal(view.current.conversation.messages.filter(message => message.role === 'user').length, 1);
+});
+
+test('failed local recovery storage prevents a selection with an unrecoverable outcome', async t => {
+  let record;
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory, pendingSave: async () => { throw new Error('storage full'); },
+    recommendationFetch: (_path, options) => {
+      if (options.method === 'POST') { record = recommendationRecord(JSON.parse(options.body)); return json(record); }
+      return json({ items: record ? [record] : [], next_cursor: null });
+    },
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查询比特币资料'); await view.flush(); view.finishStream(); await view.flush();
+  assert.equal(await view.current.selectRecommendation(record.id, recommendationCandidate.id), null); await view.flush();
+  assert.equal(view.current.recommendationError.code, 'STORAGE_ERROR'); assert.equal(view.calls.some(call => call.path.endsWith('/select')), false);
+  assert.equal(view.streams.length, 1);
+});
+
+test('a completed public lookup marks only its current source turn even when it has no navigation actions', async t => {
+  const view = harness({ statusFetch: async () => json(recommendedStatus), historyFetch: cloudHistory,
+    appExecute: async () => ({ text: 'Public market result', actions: [] }),
+    recommendationFetch: (_path, options) => options.method === 'POST' ? json(recommendationRecord(JSON.parse(options.body))) : json({ items: [], next_cursor: null }),
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查询比特币资料'); await view.flush();
+  const source = view.current.conversation.messages[0];
+  view.finishAppStream({ name: 'market_query', arguments: { kind: 'crypto', asset: 'BTC' } }); await view.flush();
+  const key = recommendationCore.recommendationTurnKey(view.current.activeId, source.id);
+  assert.equal(view.current.recommendationCoverage[key][0], 'market-data');
+  assert.equal(view.current.appActions[view.current.conversation.messages.at(-1).id].length, 0);
+  view.finishStream(1); await view.flush(); view.current.send('还有其他问题'); await view.flush();
+  const next = view.current.conversation.messages.findLast(message => message.role === 'user');
+  assert.equal(view.current.recommendationCoverage[recommendationCore.recommendationTurnKey(view.current.activeId, next.id)], undefined);
+});
+
+test('turning off the advertised feature cancels in-flight recommendations but preserves the running answer', async t => {
+  let feature = 1; const pending = deferred();
+  const view = harness({ statusFetch: async () => json({ ...configured, recommendations_version: feature }), historyFetch: cloudHistory,
+    recommendationFetch: (_path, options) => options.method === 'POST' ? pending.promise : json({ items: [], next_cursor: null }),
+  }); t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('查看市场资料'); await view.flush();
+  const request = view.calls.find(call => call.path === '/v1/ai/recommendations' && call.method === 'POST');
+  feature = 0; view.current.reconnect(); await view.flush();
+  assert.equal(request.signal.aborted, true); assert.equal(view.streams[0].signal.aborted, false);
+  pending.resolve(json(recommendationRecord(JSON.parse(request.body)))); await view.flush(); assert.deepEqual(Object.keys(view.current.recommendations), []);
+  view.finishStream(); await view.flush(); assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
 });
 
 test('bounded status retries retain restored identity and draft and never send a chat', async t => {
@@ -1228,4 +1502,33 @@ test('company search and research use discovered opt-in, preserve evidence and d
   assert.equal(view.streams[2].request.app_context.length, 2);
   assert.ok(view.historyPosts.some(post => post.body.messages.at(-1).content.includes('Toyota')));
   assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
+});
+
+test('filing results use independent opt-in and explanation recovery never repeats document reads', async t => {
+  const command = { name: 'company_filing', arguments: { issuerId: 'sec:0000320193', accession: '0001140361-26-015711' } };
+  const old = harness({ statusFetch: () => json({ ...configured, app_tools_version: 1, company_research_version: 1 }) }); t.after(old.close); await old.flush(); old.grantConsent();
+  old.current.send('Read the SEC filing'); await old.flush();
+  assert.equal(old.streams[0].request.filing_research_version, undefined);
+  const text = 'Apple SEC filing [p000000] https://www.sec.gov/Archives/ SHA-256 abc; only excerpts were read';
+  let filingAvailable = true;
+  const view = harness({ historyFetch: cloudHistory, statusFetch: () => json({ ...configured, app_tools_version: 1, ...(filingAvailable ? { filing_research_version: 1 } : {}) }), appExecute: async () => ({ text, actions: [] }) });
+  t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('Read the SEC filing'); await view.flush();
+  assert.equal(view.streams[0].request.filing_research_version, 1);
+  assert.equal(view.streams[0].request.company_research_version, undefined);
+  view.finishAppStream(command); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+  assert.equal(view.streams[1].request.app_context[0].name, 'company_filing');
+  assert.match(view.streams[1].request.app_context[0].result, /p000000/);
+  view.failStream(1, 'AI_UPSTREAM_ERROR'); await view.flush();
+  assert.equal(view.current.canResumeAppResult(view.current.conversation.messages.at(-1).id), true);
+  view.current.retry(); await view.flush();
+  assert.equal(view.appCalls.length, 1);
+  assert.equal(view.streams[2].request.app_final_only, true);
+  assert.equal(view.streams[2].request.filing_research_version, 1);
+  assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
+  view.failStream(2, 'AI_UPSTREAM_ERROR'); await view.flush();
+  filingAvailable = false; view.current.reconnect(); await view.flush();
+  view.current.retry(); await view.flush();
+  assert.equal(view.current.messageError, 'APP_RESULT_RELOAD');
+  assert.equal(view.streams.length, 3); assert.equal(view.appCalls.length, 1);
 });

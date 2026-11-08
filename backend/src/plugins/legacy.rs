@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use std::{collections::HashSet, time::Duration};
 
 const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
-struct Session<'a> {
+pub(crate) struct Session<'a> {
     http: &'a SafeHttp,
     endpoint: &'a str,
     token: Option<&'a RemoteBearer>,
@@ -35,9 +35,26 @@ impl Drop for Session<'_> {
         }
     }
 }
-impl Session<'_> {
+impl<'a> Session<'a> {
+    pub(crate) fn new(
+        http: &'a SafeHttp,
+        endpoint: &'a str,
+        token: Option<&'a RemoteBearer>,
+        initial: &str,
+    ) -> Self {
+        Self {
+            http,
+            endpoint,
+            token,
+            version: initial.into(),
+            session: None,
+        }
+    }
     fn headers(&self) -> McpResult<HeaderMap> {
         let mut h = HeaderMap::new();
+        if self.endpoint == "https://mcp.tavily.com/mcp/" {
+            h.insert("x-tavily-access-mode", HeaderValue::from_static("keyless"));
+        }
         h.insert(
             ACCEPT,
             HeaderValue::from_static("application/json, text/event-stream"),
@@ -95,7 +112,7 @@ impl Session<'_> {
         }
         Ok((protocol::http_result(response, &id)?, session))
     }
-    async fn initialize(&mut self) -> McpResult<()> {
+    pub(crate) async fn initialize(&mut self) -> McpResult<()> {
         let (result,session)=self.rpc("initialize",json!({"protocolVersion":self.version,"capabilities":{},"clientInfo":{"name":"Q","version":env!("CARGO_PKG_VERSION")}})).await?;
         let version = result
             .get("protocolVersion")
@@ -126,29 +143,15 @@ impl Session<'_> {
         Ok(())
     }
 }
-pub(crate) async fn tools(
-    http: &SafeHttp,
-    endpoint: &str,
-    token: Option<&RemoteBearer>,
-    profile: &[&str],
-    initial: &str,
-) -> McpResult<Vec<Tool>> {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        let mut session = Session {
-            http,
-            endpoint,
-            token,
-            version: initial.into(),
-            session: None,
-        };
-        session.initialize().await?;
+impl Session<'_> {
+    pub(crate) async fn read_tools(&self, profile: &[&str]) -> McpResult<Vec<Tool>> {
         let mut tools = Vec::new();
         let mut cursor = None;
         let mut cursors = HashSet::new();
         let mut names = HashSet::new();
         let mut raw_count = 0;
         for _ in 0..8 {
-            let (result, _) = session
+            let (result, _) = self
                 .rpc(
                     "tools/list",
                     cursor.as_ref().map_or(json!({}), |c| json!({"cursor":c})),
@@ -191,6 +194,34 @@ pub(crate) async fn tools(
             }
         }
         Err(McpError::limit())
+    }
+    pub(crate) async fn call_tool(&self, tool: &Tool, args: &Value) -> McpResult<Value> {
+        protocol::validate_arguments(tool, args)?;
+        let (result, _) = self
+            .rpc("tools/call", json!({"name":tool.name,"arguments":args}))
+            .await?;
+        protocol::validate_tool_result(tool, &result)?;
+        Ok(result)
+    }
+}
+
+pub(crate) async fn tools(
+    http: &SafeHttp,
+    endpoint: &str,
+    token: Option<&RemoteBearer>,
+    profile: &[&str],
+    initial: &str,
+) -> McpResult<Vec<Tool>> {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let mut session = Session {
+            http,
+            endpoint,
+            token,
+            version: initial.into(),
+            session: None,
+        };
+        session.initialize().await?;
+        session.read_tools(profile).await
     })
     .await
     .map_err(|_| McpError::timeout())?
