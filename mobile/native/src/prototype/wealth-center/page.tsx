@@ -21,7 +21,7 @@ const tabs: readonly { id: PageKey; title: Copy }[] = [
   { id: 'overview', title: ['总览', 'Overview'] }, { id: 'perf', title: ['收益风险', 'Risk & return'] },
   { id: 'holdings', title: ['持仓', 'Holdings'] }, { id: 'funds', title: ['基金', 'Funds'] },
   { id: 'protection', title: ['保障', 'Protection'] }, { id: 'ai', title: ['AI 助手', 'Assistant'] },
-  { id: 'shelf', title: ['货架', 'Shelf'] }, { id: 'settings', title: ['设置', 'Settings'] },
+  { id: 'shelf', title: ['我的', 'Mine'] }, { id: 'settings', title: ['设置', 'Settings'] },
 ];
 const shelfRisks: readonly { id: ShelfRiskGroup | 'all'; title: Copy }[] = [
   { id: 'all', title: ['全部风险', 'All risk'] }, { id: 'stable', title: ['稳健 R1–R2', 'Stable'] },
@@ -387,31 +387,68 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
     <Type size={12} muted>{text('AI 回答为公开知识与模拟数据的信息整理，不构成投资建议；交易类操作不在对话中执行。', 'Answers summarize public knowledge and demo data; not investment advice. No trades execute in chat.')}</Type>
   </>;
   const shelf = () => <>
+    <View style={{ gap: 12, padding: 20, borderRadius: 20, backgroundColor: colors.accentBg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Sparkles size={20} color={colors.accent} strokeWidth={1.6} /><Type size={13} muted>{text('我的资产（模拟）', 'My assets (demo)')}</Type></View>
+        <Tag accent={switches.advisory}>{text(`自评 R2 · 中低`, 'Self R2')}</Tag>
+      </View>
+      <Type selectable size={30} weight="600" style={{ letterSpacing: -1 }}>{hideAssets ? '¥ ✽✽✽,✽✽✽.✽✽' : money(totalNow)}</Type>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 22 }}>
+        <View><Type size={11} muted>{text('今日盈亏', "Today's P&L")}</Type><Type selectable weight="600" style={{ color: pnl >= 0 ? UP_RED : DOWN_GREEN }}>{hideAssets ? '✽✽✽' : `${pnl >= 0 ? '+' : ''}${money(pnl)}`}</Type></View>
+        <View><Type size={11} muted>{text('累计收益', 'Cumulative')}</Type><Type selectable weight="600" style={{ color: UP_RED }}>{hideAssets ? '✽✽✽' : `+${money(HOLD_PNL + 3281.53)}`}</Type></View>
+        <View><Type size={11} muted>{text('持仓', 'Positions')}</Type><Type weight="600">{holdings.length} {text('笔', '')}</Type></View>
+      </View>
+      <View style={{ gap: 5 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Type size={11} muted>{text('🎯 旅行基金', '🎯 Travel fund')}</Type>
+          <Type size={11} muted selectable>{Math.round(savingsGoal.progress * 100)}% · {text('每月 ¥2,000（演示）', '¥2,000 monthly (demo)')}</Type>
+        </View>
+        <View style={{ height: 7, borderRadius: 4, backgroundColor: colors.soft, overflow: 'hidden' }}>
+          <View style={{ width: `${Math.round(savingsGoal.progress * 100)}%`, height: '100%', backgroundColor: colors.accent }} />
+        </View>
+      </View>
+    </View>
+    <View style={{ gap: 8, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
+      <Type weight="600" size={14}>{text('适当性与风险', 'Suitability & risk')}<Type size={10} muted>  {text('正式测评由持牌机构完成', 'formal assessment at licensed firms')}</Type></Type>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <Tag accent>{text('自评 R2 · 中低', 'Self R2')}</Tag>
+        <Action kind="ghost" label={text('重新评估（演示）', 'Re-assess (demo)')} onPress={() => setRiskSheet(true)} />
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <Type size={12}>{text('高风险产品可见性', 'High-risk visibility')}</Type>
+        <Choice label={switches.advisory ? text('R4–R5 可见', 'Visible') : text('已隐藏', 'Hidden')} selected={false} onPress={() => setSwitches(current => ({ ...current, advisory: !current.advisory }))} />
+      </View>
+    </View>
+    <View style={{ gap: 8, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
+      <Type weight="600" size={14}>{text('数据授权', 'Data authorization')}</Type>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <Type size={12}>{text('公开行情', 'Public quotes')}</Type>
+        <Choice label={switches.market ? text('已授权', 'Granted') : text('已关闭', 'Off')} selected={false} onPress={() => setSwitches(current => ({ ...current, market: !current.market }))} />
+        <Type size={12}>{text('用量统计', 'Usage stats')}</Type>
+        <Choice label={switches.usage ? text('已授权', 'Granted') : text('已关闭', 'Off')} selected={false} onPress={() => setSwitches(current => ({ ...current, usage: !current.usage }))} />
+      </View>
+    </View>
     <View style={{ gap: 8 }}>
-      <Type size={12} muted>{text('按风险与期限筛选示例类别；业绩基准不是承诺收益。', 'Filter demo categories by risk and term. Benchmarks are not promised returns.')}</Type>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <Type weight="600" size={15}>{text('我的常用', 'My frequent picks')}</Type>
+        <Type size={11} muted>{text('示例类别 · 非推荐', 'Demo categories · not advice')}</Type>
+      </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{shelfRisks.map(item => <Choice key={item.id} label={text(item.title[0], item.title[1])} selected={shelfRisk === item.id} onPress={() => setShelfRisk(item.id)} />)}</View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{shelfTerms.map(item => <Choice key={item.id} label={text(item.title[0], item.title[1])} selected={shelfTerm === item.id} onPress={() => setShelfTerm(item.id)} />)}</View>
+      <Type size={12} muted>{text(`${filterShelf(shelfItems, shelfRisk, shelfTerm).length} 项匹配`, `${filterShelf(shelfItems, shelfRisk, shelfTerm).length} items`)}</Type>
+      {filterShelf(shelfItems, shelfRisk, shelfTerm).map((item: ShelfItem) => <View key={item.name} style={{ gap: 6, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.line }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Type weight="600">{item.name}</Type>
+          <Tag accent={item.risk === 'R1' || item.risk === 'R2'}>{RISK_LABEL[item.risk]}</Tag>
+        </View>
+        <Type size={12} muted selectable>{item.bench}</Type>
+        <Type size={12} muted>{text(`起投 ${item.min} · ${item.term}`, `From ${item.min} · ${item.term}`)}</Type>
+      </View>)}
     </View>
-    <Type size={12} muted>{text(`${filterShelf(shelfItems, shelfRisk, shelfTerm).length} 项 · 示例类别，非推荐`, `${filterShelf(shelfItems, shelfRisk, shelfTerm).length} items · demo categories, not recommendations`)}</Type>
-    {filterShelf(shelfItems, shelfRisk, shelfTerm).map((item: ShelfItem) => <View key={item.name} style={{ gap: 6, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.line }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <Type weight="600">{item.name}</Type>
-        <Tag accent={item.risk === 'R1' || item.risk === 'R2'}>{RISK_LABEL[item.risk]}</Tag>
-      </View>
-      <Type size={12} muted selectable>{item.bench}</Type>
-      <Type size={12} muted>{text(`起投 ${item.min} · ${item.term}`, `From ${item.min} · ${item.term}`)}</Type>
-    </View>)}
-    <Type size={12} muted>{text('货架为公开产品类别的示例展示，不构成推荐或个性化排序；实际投资在持牌销售机构办理，R4/R5 需先完成正式风险测评。', 'Demo categories only. Invest via licensed distributors; R4/R5 require a formal risk assessment first.')}</Type>
+    <Type size={12} muted>{text('我的常用为公开产品类别的示例展示，不构成推荐或个性化排序；实际投资在持牌销售机构办理，R4/R5 需先完成正式风险测评。', 'Frequent picks are demo categories. Invest via licensed distributors; R4/R5 require a formal risk assessment first.')}</Type>
   </>;
   const settings = () => <>
-    <Row title={text('银行卡', 'Bank cards')} subtitle={text('模拟银行卡 ×3；演示资金与理财模拟账本分开管理。港币钱包（真实）充值通道未接通，与模拟账本隔离。', '3 demo cards; demo funds stay separate from the wealth ledger. The real HKD wallet top-up is not connected.')} />
-    <Row title={text('适当性自我评估', 'Suitability self-assessment')} subtitle={text('当前自评 R2 · 中低。自评结果不构成适当性匹配结论，正式测评由持牌机构完成。', 'Self-assessed R2. This is not a suitability conclusion; formal assessments happen at licensed firms.')} onPress={() => setRiskSheet(true)} />
-    <Row title={text('高风险产品可见性', 'High-risk visibility')} subtitle={text('开启后货架显示 R4–R5 示例；购买前仍需完成正式风险测评。', 'Show R4–R5 demo entries; a formal assessment is still required before purchase.')} onPress={() => setSwitches(current => ({ ...current, advisory: !current.advisory }))} last />
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-      <Tag accent={switches.advisory}>{switches.advisory ? text('R4–R5 可见', 'Visible') : text('R4–R5 已隐藏', 'Hidden')}</Tag>
-    </View>
-    <Row title={text('数据授权 · 公开行情', 'Data · public quotes')} subtitle={text('币种快照、公司公告等按次查询所需。', 'Needed for per-use quotes and filings.')} onPress={() => setSwitches(current => ({ ...current, market: !current.market }))} />
-    <Row title={text('数据授权 · 用量统计', 'Data · usage stats')} subtitle={text('按量付费订单与用量事件的统计汇总。', 'Aggregate stats for pay-per-use orders.')} onPress={() => setSwitches(current => ({ ...current, usage: !current.usage }))} last />
+    <Row title={text('银行卡', 'Bank cards')} subtitle={text('模拟银行卡 ×3；演示资金与理财模拟账本分开管理。港币钱包（真实）充值通道未接通，与模拟账本隔离。适当性自评、高风险可见性与数据授权已移至「我的」页。', '3 demo cards; demo funds stay separate from the wealth ledger. The real HKD wallet top-up is not connected. Suitability, visibility and data authorization moved to the Mine tab.')} last />
     <Type size={12} muted>{text('本页均为演示状态标注。真实数据授权与适当性评估以持牌机构流程为准。', 'All states here are demo annotations; real authorizations follow licensed processes.')}</Type>
   </>;
   const protection = () => <>
