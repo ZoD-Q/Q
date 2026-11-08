@@ -2,12 +2,11 @@
 // rng; the page layer owns timers, state and rendering. Demo data only — never a live price feed.
 import { EQUITY_UNITS, marketFunds, shelfItems, shelfRiskGroups, type MarketFund, type RiskLevel, type ShelfItem, type ShelfRiskGroup } from './catalog';
 
-export type Candle = { o: number; c: number; h: number; l: number };
-const drift = (value: number, rng: () => number, scale: number) => value * (1 + (rng() - 0.5) * scale);
+export type Candle = { o: number; c: number; h: number; l: number; vol: number };
 export function nextCandle(price: number, rng: () => number = Math.random): { candle: Candle; price: number } {
   const o = price;
   const c = o * (1 + (rng() - 0.485) * 0.0018);
-  const candle: Candle = { o, c, h: Math.max(o, c) * (1 + rng() * 0.0008), l: Math.min(o, c) * (1 - rng() * 0.0008) };
+  const candle: Candle = { o, c, h: Math.max(o, c) * (1 + rng() * 0.0008), l: Math.min(o, c) * (1 - rng() * 0.0008), vol: 20 + Math.round(rng() * 80) };
   return { candle, price: c };
 }
 export function seedCandles(count = 30, start = 1.039, rng: () => number = Math.random): { candles: Candle[]; price: number } {

@@ -41,32 +41,59 @@ const money = (value: number) => `¥${value.toLocaleString('zh-CN', { minimumFra
 const clock = () => new Date().toTimeString().slice(0, 8);
 
 function CandleChart({ candles, price, count = 26 }: { candles: Candle[]; price: number; count?: number }) {
-  const { colors } = useDesign();
+  const { text } = useDesign();
   const shown = sliceWindow(candles, count);
-  const { min, max } = windowBounds(shown);
+  let min = Infinity, max = -Infinity, maxVol = 0;
+  for (const candle of shown) { if (candle.l < min) min = candle.l; if (candle.h > max) max = candle.h; if (candle.vol > maxVol) maxVol = candle.vol; }
   const span = max - min || 1;
-  const W = 280, H = 104, padT = 12, padB = 16;
-  const y = (value: number) => padT + (max - value) / span * (H - padT - padB);
-  const step = W / shown.length, bw = Math.max(3, step * 0.55);
+  const W = 280, padT = 8, priceH = 84, volTop = priceH + 14, volH = 34;
+  const H = volTop + volH + 6;
+  const y = (value: number) => padT + (max - value) / span * (priceH - padT);
+  const step = W / shown.length, bw = Math.max(2.5, step * 0.6);
+  const upColor = '#0ecb81', downColor = '#f6465d';
+  const last = shown[shown.length - 1] ?? { o: price, c: price, h: price, l: price, vol: 0 };
+  const lastUp = last.c >= last.o;
   const lastY = y(price);
+  const gridY = [padT + (priceH - padT) * 0.2, padT + (priceH - padT) * 0.5, padT + (priceH - padT) * 0.8];
+  const gridPrices = gridY.map(gridValue => (max - (gridValue - padT) / (priceH - padT) * span).toFixed(4));
   return (
-    <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} accessibilityRole="image" accessibilityLabel="组合基金部分净值K线，模拟行情实时更新">
-      <Line x1={0} y1={lastY} x2={W} y2={lastY} stroke={colors.muted} strokeWidth={0.7} strokeDasharray="3 3" />
-      {shown.map((candle, index) => {
-        const cx = index * step + step / 2;
-        const bullish = candle.c >= candle.o;
-        const color = bullish ? '#c73a3a' : '#1e8a5e';
-        const yO = y(candle.o), yC = y(candle.c);
-        const top = Math.min(yO, yC), height = Math.max(1.2, Math.abs(yO - yC));
-        return (
-          <G key={index}>
-            <Line x1={cx} y1={y(candle.h)} x2={cx} y2={y(candle.l)} stroke={color} strokeWidth={1} />
-            <Rect x={cx - bw / 2} y={top} width={bw} height={height} fill={color} />
-          </G>
-        );
-      })}
-      <SvgText x={W - 2} y={Math.max(11, lastY - 4)} textAnchor="end" fontSize={10} fontWeight={600} fill={colors.ink}>{price.toFixed(4)}</SvgText>
-    </Svg>
+    <View style={{ backgroundColor: '#171b26', borderRadius: 12, padding: 8, gap: 4 }}>
+      <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+        <Type size={10} style={{ color: '#d1d4dc' }}>开 <Type weight="600" style={{ color: last.c >= last.o ? upColor : downColor }}>{last.o.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>高 <Type weight="600" style={{ color: upColor }}>{last.h.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>低 <Type weight="600" style={{ color: downColor }}>{last.l.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>收 <Type weight="600" style={{ color: last.c >= last.o ? upColor : downColor }}>{last.c.toFixed(4)}</Type></Type>
+        <Type size={10} style={{ color: '#d1d4dc' }}>量 <Type weight="600" style={{ color: '#848e9c' }}>{last.vol}M</Type></Type>
+      </View>
+      <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H + 10} accessibilityRole="image" accessibilityLabel="组合基金部分净值K线与成交量，模拟行情实时更新">
+        {gridY.map((gridValue, index) => <Line key={`g${index}`} x1={0} y1={gridValue} x2={W - 46} y2={gridValue} stroke="#2a2e39" strokeWidth={0.6} />)}
+        {gridPrices.map((gridPrice, index) => <SvgText key={`p${index}`} x={W - 44} y={gridY[index] + 3} fontSize={7.5} fill="#848e9c">{gridPrice}</SvgText>)}
+        {shown.map((candle, index) => {
+          const cx = index * step + step / 2;
+          const bullish = candle.c >= candle.o;
+          const color = bullish ? upColor : downColor;
+          const yO = y(candle.o), yC = y(candle.c);
+          const top = Math.min(yO, yC), height = Math.max(1, Math.abs(yO - yC));
+          const volH2 = Math.max(1.5, candle.vol / (maxVol || 1) * volH);
+          return (
+            <G key={index}>
+              <Line x1={cx} y1={y(candle.h)} x2={cx} y2={y(candle.l)} stroke={color} strokeWidth={0.9} />
+              <Rect x={cx - bw / 2} y={top} width={bw} height={height} fill={color} />
+              <Rect x={cx - bw / 2} y={volTop + volH - volH2} width={bw} height={volH2} fill={color} opacity={0.55} />
+            </G>
+          );
+        })}
+        <Line x1={0} y1={lastY} x2={W - 46} y2={lastY} stroke={lastUp ? upColor : downColor} strokeWidth={0.7} strokeDasharray="4 3" />
+        <Rect x={W - 44} y={Math.max(2, lastY - 8)} width={44} height={16} fill={lastUp ? upColor : downColor} rx={2} />
+        <SvgText x={W - 22} y={Math.max(12, lastY + 3.5)} textAnchor="middle" fontSize={9} fontWeight={700} fill="#ffffff">{price.toFixed(4)}</SvgText>
+        <Line x1={0} y1={volTop - 6} x2={W} y2={volTop - 6} stroke="#2a2e39" strokeWidth={0.6} />
+        <SvgText x={2} y={volTop + 8} fontSize={7.5} fill="#848e9c">VOL</SvgText>
+      </Svg>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Type size={9} style={{ color: '#848e9c' }}>{text('VOL 成交量（模拟）', 'VOL volume (simulated)')}</Type>
+        <Type size={9} style={{ color: '#848e9c' }}>{text('币安风格 · 绿涨红跌', 'Binance style · green up')}</Type>
+      </View>
+    </View>
   );
 }
 
