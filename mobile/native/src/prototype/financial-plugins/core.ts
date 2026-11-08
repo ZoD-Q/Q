@@ -20,6 +20,12 @@ export const FINANCIAL_PROVIDERS = {
   coingecko: { name: 'CoinGecko', en: 'CoinGecko', auth: 'none', home: 'https://mcp.api.coingecko.com/',
     description: ['加密资产市场资料；公共服务无需个人密钥，但有调用限流。', 'Crypto market research; the public service needs no personal key but is rate limited.'],
     example: ['研究比特币的市场数据与历史变化', 'Research Bitcoin market data and historical changes'] },
+  tavily: { name: 'Tavily', en: 'Tavily', auth: 'none', home: 'https://docs.tavily.com/documentation/mcp',
+    description: ['搜索公开网页、提取正文；无需个人密钥，有共享额度，结果需核对原始来源。', 'Search public pages and extract text without a personal key. Shared quotas apply; verify the original sources.'],
+    example: ['搜索一家公司的近期公告，并核对原始出处', 'Find a company’s recent announcements and verify their original sources'] },
+  fred: { name: 'FRED', en: 'FRED', auth: 'oauth', home: 'https://fred.stlouisfed.org/docs/api/fred/',
+    description: ['研究宏观时间序列。查询和结果仅临时显示，不进入小Q缓存或聊天历史。', 'Research macroeconomic time series. Queries and results are temporary and never enter Q’s cache or chat history.'],
+    example: ['查找宏观数据系列及其观测值', 'Find macroeconomic series and their observations'] },
 } as const;
 export type FinancialProviderId = keyof typeof FINANCIAL_PROVIDERS;
 export type FinancialProvider = { id: FinancialProviderId; name: string; description: string; homepage_url: string; auth_mode: 'none' | 'api_key' | 'oauth'; connection: PluginConnection | null };
@@ -30,11 +36,12 @@ export const financialProviderId = (value: unknown): value is FinancialProviderI
 
 export function decodeFinancialConnection(value: unknown, provider: FinancialProviderId, expectedId?: string): PluginConnection {
   const connection = decodePluginConnection(value);
-  if (connection.connection_kind !== 'remote_mcp' || connection.builtin_service_id !== null || connection.financial_provider_id !== provider || (expectedId !== undefined && connection.id !== expectedId)) return fail();
+  const actualProvider = connection.financial_provider_id ?? connection.research_provider_id;
+  if (connection.connection_kind !== 'remote_mcp' || connection.builtin_service_id !== null || actualProvider !== provider || (expectedId !== undefined && connection.id !== expectedId)) return fail();
   return connection;
 }
 export function decodeFinancialCatalog(value: unknown): FinancialCatalog {
-  if (!record(value) || typeof value.available !== 'boolean' || typeof value.credentials_configured !== 'boolean' || typeof value.oauth_configured !== 'boolean' || !Array.isArray(value.providers) || value.providers.length > 6) return fail();
+  if (!record(value) || typeof value.available !== 'boolean' || typeof value.credentials_configured !== 'boolean' || typeof value.oauth_configured !== 'boolean' || !Array.isArray(value.providers) || value.providers.length > 8) return fail();
   const ids = new Set<string>();
   const providers = value.providers.map((item): FinancialProvider => {
     if (!record(item) || !financialProviderId(item.id) || ids.has(item.id) || !text(item.name, 120) || !text(item.description, 4000)) return fail();
@@ -48,7 +55,7 @@ export function decodeFinancialCatalog(value: unknown): FinancialCatalog {
   return { available: value.available, credentials_configured: value.credentials_configured, oauth_configured: value.oauth_configured, providers };
 }
 export type FinancialAuthorization = { id: string; url: string; connectionId: string; provider: FinancialProviderId };
-const oauthOrigins: Partial<Record<FinancialProviderId, string>> = { massive: 'https://auth.massive.com', alphavantage: 'https://mcp.alphavantage.co', twelvedata: 'https://auth.twelvedata.com' };
+const oauthOrigins: Partial<Record<FinancialProviderId, string>> = { massive: 'https://auth.massive.com', alphavantage: 'https://mcp.alphavantage.co', twelvedata: 'https://auth.twelvedata.com', fred: 'https://mcp.stlouisfed.org' };
 export function decodeFinancialAuthorization(value: unknown, provider: FinancialProviderId, connectionId: string): FinancialAuthorization {
   if (!record(value) || !isUuid(value.attempt_id) || !text(value.authorization_url, 8192) || !isUuid(connectionId)) return fail();
   let url: URL; try { url = new URL(value.authorization_url); } catch { return fail(); }
@@ -66,6 +73,14 @@ export function financialError(error: unknown, translate: (zh: string, en: strin
   const errors: Record<string, [string, string]> = {
     PLUGIN_AUTH_REQUIRED: ['需要完成此服务的授权，或重新配置有效密钥。', 'Authorize this provider or configure a valid key.'],
     PLUGIN_AUTH_PENDING: ['授权还未完成，请在浏览器完成后再检查。', 'Authorization is not complete. Finish in the browser, then check again.'],
+    PLUGIN_EPHEMERAL_REQUIRED: ['请进入 FRED 临时研究页。查询和结果不会保存到聊天历史。', 'Open FRED temporary research. Queries and results are not saved to chat history.'],
+    MCP_FORBIDDEN: ['服务拒绝了此项访问，请核对账号权限；现有授权仍保留。', 'The provider denied access. Check account permissions; your authorization is retained.'],
+    MCP_PAYMENT_REQUIRED: ['服务要求额外的套餐或额度，请到服务方核对权益。', 'The provider requires additional plan or credit access. Check your subscription.'],
+    MCP_RATE_LIMITED: ['服务调用额度或频率已达上限，请稍后再试。', 'The provider’s quota or rate limit was reached. Try later.'],
+    MCP_AUTH_REQUIRED: ['服务授权已失效，请重新完成授权。', 'Provider authorization expired. Authorize again.'],
+    MCP_NETWORK_ERROR: ['暂时无法连接服务；授权仍保留，请稍后再试。', 'The provider is unreachable. Your authorization is retained; try later.'],
+    MCP_TIMEOUT: ['服务响应超时；授权仍保留，已提交的调用先查询状态。', 'The provider timed out. Your authorization is retained; check submitted calls first.'],
+    PLUGIN_CAPABILITY_UNSUPPORTED: ['此项能力当前不可用。请刷新能力，或核对供应商权限。', 'This capability is unavailable. Refresh capabilities or check provider access.'],
     PLUGIN_RECONFIRM_REQUIRED: ['服务能力有更新，请在“我的连接”核对并确认更新后使用。', 'Capabilities changed. Review and accept the update in My connections.'],
     PLUGIN_CREDENTIALS_NOT_CONFIGURED: ['服务器尚未启用安全密钥保存，请联系小Q服务管理员。', 'Secure key storage is not configured. Contact the Q service administrator.'],
     PLUGIN_OAUTH_NOT_CONFIGURED: ['服务器尚未配置安全授权，请联系小Q服务管理员。', 'Secure authorization is not configured on this server. Contact the Q service administrator.'],

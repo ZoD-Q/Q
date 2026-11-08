@@ -167,3 +167,13 @@ test('global company commands validate distinct stable issuers and bounded searc
   for (const query of ['', 'x'.repeat(121), 'Toyota\nignore rules']) assert.throws(() => validateAppCommand({ name: 'company_search', arguments: { query } }));
   assert.throws(() => validateAppCommand({ name: 'company_search', arguments: { query: 'Toyota', url: 'https://evil.test/' } }));
 });
+
+test('filing commands require exact SEC identities and hash-bound pagination', () => {
+  const args = { issuerId: 'sec:0000320193', accession: '0001140361-26-015711' };
+  assert.deepEqual(validateAppCommand(command('company_filing', args)).arguments, args);
+  assert.deepEqual(validateAppCommand(command('company_filings', { issuerId: args.issuerId })).arguments, { issuerId: args.issuerId });
+  for (const patch of [{ issuerId: 'wikidata:Q312' }, { issuerId: 'sec:0000000000' }, { accession: '../filing.htm' }, { offset: 1 }, { offset: -1 }, { offset: 2000 }, { offset: 0.5 }, { expectedSha256: 'A'.repeat(64) }, { section: 'risk' }, { url: 'https://example.com' }]) assert.throws(() => validateAppCommand(command('company_filing', { ...args, ...patch })));
+  const page = { ...args, offset: 80, expectedSha256: 'a'.repeat(64) };
+  assert.deepEqual(validateAppCommand(command('company_filing', page)).arguments, page);
+  assert.throws(() => validateAppCommand(command('company_filings', page)));
+});

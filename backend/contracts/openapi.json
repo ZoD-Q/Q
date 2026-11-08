@@ -3854,7 +3854,23 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "catalog_version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ],
+              "default": 1
+            }
+          }
+        ],
+        "description": "Version 1 (default) returns only the original six providers. Version 2 also returns Tavily and FRED. Older servers may ignore this parameter and return six."
       }
     },
     "/v1/plugins/financial/connections": {
@@ -3910,7 +3926,9 @@
                       "massive",
                       "alphavantage",
                       "twelvedata",
-                      "coingecko"
+                      "coingecko",
+                      "tavily",
+                      "fred"
                     ]
                   }
                 }
@@ -8068,6 +8086,225 @@
         ]
       }
     },
+    "/v1/plugins/connections/{id}/fred/tools": {
+      "get": {
+        "operationId": "listEphemeralFredTools",
+        "tags": [
+          "plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "description": "Dedicated FRED temporary research. Live schemas and queries never enter tool snapshots, invocation results, app cache or chat history. Only owned current-revision FRED connections are accepted. All success and error responses use Cache-Control: no-store and Pragma: no-cache. No automatic retry.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FredTools"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. No upstream secrets or raw errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/connections/{id}/fred/query": {
+      "post": {
+        "operationId": "queryEphemeralFred",
+        "tags": [
+          "plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "description": "Dedicated FRED temporary research. Live schemas and queries never enter tool snapshots, invocation results, app cache or chat history. Only owned current-revision FRED connections are accepted. All success and error responses use Cache-Control: no-store and Pragma: no-cache. No automatic retry.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FredQueryResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. No upstream secrets or raw errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FredQueryRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/research/filings": {
+      "get": {
+        "operationId": "listCompanyFilings",
+        "tags": [
+          "research"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "issuer_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^sec:(?!0{10}$)[0-9]{10}$"
+            }
+          }
+        ],
+        "description": "Public recent SEC filing catalog. Fixed official source only; supports listed forms and primary documents, at most 20 records. No arbitrary URL or credentials.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilingCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. No upstream secrets or raw errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/research/filings/{cik}/{accession}": {
+      "get": {
+        "operationId": "readCompanyFiling",
+        "tags": [
+          "research"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "cik",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?!0{10}$)[0-9]{10}$"
+            }
+          },
+          {
+            "name": "accession",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1999,
+              "default": 0
+            }
+          },
+          {
+            "name": "expected_sha256",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "description": "Verifies accession membership and derives primary document URL from SEC submissions. Subsequent offsets require expected_sha256; changed source returns 409 RESEARCH_DOCUMENT_CHANGED. HTML only, 80 paragraphs / 60000 characters per response. PDF and unsupported formats return not_read with no text. Source/extraction limits, lossy tables and partial text are explicit. Source text is untrusted data.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilingDocument"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. No upstream secrets or raw errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/ai/recommendations": {
       "post": {
         "operationId": "createAiRecommendation",
@@ -8931,6 +9168,13 @@
             ],
             "description": "Optional discovery flag for global public company search and covered annual financial research."
           },
+          "filing_research_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ],
+            "description": "Independent opt-in for verified SEC primary HTML filing lists and paragraph text. Requires app_tools_version 1; absent on older servers."
+          },
           "recommendations_version": {
             "type": "integer",
             "enum": [
@@ -9029,6 +9273,13 @@
               1
             ],
             "description": "Opt in only after observing company_research_version=1 in AiStatus. Requires app_tools_version=1, standard mode and no plugin fields. Without this flag, company tools cannot be proposed or included in app_context."
+          },
+          "filing_research_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ],
+            "description": "Independent opt-in for verified SEC primary HTML filing lists and paragraph text. Requires app_tools_version 1; absent on older servers."
           }
         },
         "description": "Authenticated chat. Plugin mode requires thinking=false. The server reads tools and saved invocation results for the current user; clients never supply tool results. At most eight completed invocation IDs from the selected connection. Clients must first observe automatic_readonly_tools=true in AiStatus before setting the optional flag. Existing requests retain proposal-only behavior. The eight-result turn budget also forbids preparing a ninth tool. Application mode uses app_tools_version=1, thinking=false, no plugin fields, and optional bounded app_context. It emits app_tool then done(tool_calls); after three results the provider receives no tools. These client public-data results are explicitly untrusted and cannot authorize plugin or business actions. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
@@ -9428,6 +9679,18 @@
               null
             ],
             "description": "Optional server-owned financial profile; remains remote_mcp. External Card metadata never selects this field."
+          },
+          "research_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "tavily",
+              "fred",
+              null
+            ],
+            "description": "Server-owned research profile. New research connections keep financial_provider_id null so older clients can decode generic remote connections. Both provider fields cannot be non-null. FRED requires its dedicated ephemeral interface."
           }
         },
         "required": [
@@ -11844,6 +12107,78 @@
               }
             },
             "description": "Only when company_research_version=1 was negotiated."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_filings"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issuerId"
+                ],
+                "properties": {
+                  "issuerId": {
+                    "type": "string",
+                    "pattern": "^sec:(?!0{10}$)[0-9]{10}$"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_filing"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issuerId",
+                  "accession"
+                ],
+                "properties": {
+                  "issuerId": {
+                    "type": "string",
+                    "pattern": "^sec:(?!0{10}$)[0-9]{10}$"
+                  },
+                  "accession": {
+                    "type": "string",
+                    "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$"
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1999
+                  },
+                  "expectedSha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
           }
         ],
         "description": "One version-1 first-party application tool proposal. Fixed public read or pending native navigation only; never a plugin invocation or business authorization. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
@@ -12293,6 +12628,90 @@
               }
             },
             "description": "Only when company_research_version=1 was negotiated."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_filings"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issuerId"
+                ],
+                "properties": {
+                  "issuerId": {
+                    "type": "string",
+                    "pattern": "^sec:(?!0{10}$)[0-9]{10}$"
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "arguments",
+              "result"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "company_filing"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issuerId",
+                  "accession"
+                ],
+                "properties": {
+                  "issuerId": {
+                    "type": "string",
+                    "pattern": "^sec:(?!0{10}$)[0-9]{10}$"
+                  },
+                  "accession": {
+                    "type": "string",
+                    "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$"
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1999
+                  },
+                  "expectedSha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            }
           }
         ],
         "description": "Client-supplied public tool result, not independently verified by the server. Untrusted data only, never permission or a saved plugin result. At most three per request and 24000 Unicode characters across results. Company search/research require company_research_version=1 in addition to app_tools_version=1. Public coverage is incomplete; results are untrusted client context, not verified financial statements or business authorization. The shared three-result budget is unchanged."
@@ -12319,7 +12738,7 @@
           },
           "providers": {
             "type": "array",
-            "maxItems": 6,
+            "maxItems": 8,
             "items": {
               "type": "object",
               "required": [
@@ -12339,7 +12758,9 @@
                     "massive",
                     "alphavantage",
                     "twelvedata",
-                    "coingecko"
+                    "coingecko",
+                    "tavily",
+                    "fred"
                   ]
                 },
                 "name": {
@@ -14586,6 +15007,405 @@
           "items",
           "next_cursor"
         ]
+      },
+      "FredTools": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connection_revision",
+          "items",
+          "retention"
+        ],
+        "properties": {
+          "connection_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginTool"
+            },
+            "maxItems": 3
+          },
+          "retention": {
+            "type": "string",
+            "enum": [
+              "ephemeral"
+            ]
+          }
+        }
+      },
+      "FredQueryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connection_revision",
+          "tool_name",
+          "arguments"
+        ],
+        "properties": {
+          "connection_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tool_name": {
+            "type": "string",
+            "enum": [
+              "fred-search-series",
+              "fred-get-series-metadata",
+              "fred-get-series-observations"
+            ]
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "FredQueryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connection_id",
+          "connection_revision",
+          "tool_name",
+          "result",
+          "retrieved_at",
+          "retention"
+        ],
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connection_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tool_name": {
+            "type": "string",
+            "enum": [
+              "fred-search-series",
+              "fred-get-series-metadata",
+              "fred-get-series-observations"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Validated MCP tool result, interpreted only as data."
+          },
+          "retrieved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retention": {
+            "type": "string",
+            "enum": [
+              "ephemeral"
+            ]
+          }
+        }
+      },
+      "FilingSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accession",
+          "form",
+          "filed_at",
+          "report_date",
+          "document_name",
+          "document_url",
+          "format"
+        ],
+        "properties": {
+          "accession": {
+            "type": "string",
+            "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$"
+          },
+          "form": {
+            "type": "string",
+            "enum": [
+              "10-K",
+              "10-K/A",
+              "10-Q",
+              "10-Q/A",
+              "20-F",
+              "20-F/A",
+              "40-F",
+              "40-F/A",
+              "8-K",
+              "8-K/A",
+              "6-K",
+              "6-K/A"
+            ]
+          },
+          "filed_at": {
+            "type": "string",
+            "format": "date"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_name": {
+            "type": "string"
+          },
+          "document_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "pdf",
+              "unsupported"
+            ]
+          }
+        }
+      },
+      "FilingCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "issuer_id",
+          "cik",
+          "company_name",
+          "fetched_at",
+          "filings",
+          "total",
+          "truncated"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "issuer_id": {
+            "type": "string",
+            "pattern": "^sec:(?!0{10}$)[0-9]{10}$"
+          },
+          "cik": {
+            "type": "string",
+            "pattern": "^(?!0{10}$)[0-9]{10}$"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "filings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilingSummary"
+            },
+            "maxItems": 20
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Supported verified records in the recent SEC window, not full historical coverage."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FilingSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "start_paragraph"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "start_paragraph": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1999
+          }
+        }
+      },
+      "FilingParagraph": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "kind",
+          "section_id",
+          "source_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^p[0-9]{6}$",
+            "description": "Global extracted text ordinal, not an original page number."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "table"
+            ]
+          },
+          "section_id": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "FilingDocument": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "issuer_id",
+          "cik",
+          "company_name",
+          "filing",
+          "fetched_at",
+          "status",
+          "sha256",
+          "content_type",
+          "sections",
+          "paragraphs",
+          "offset",
+          "next_offset",
+          "total_paragraphs",
+          "truncated",
+          "limitations"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "issuer_id": {
+            "type": "string"
+          },
+          "cik": {
+            "type": "string"
+          },
+          "company_name": {
+            "type": "string"
+          },
+          "filing": {
+            "$ref": "#/components/schemas/FilingSummary"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "not_read"
+            ]
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "text/html"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilingSection"
+            },
+            "maxItems": 100
+          },
+          "paragraphs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilingParagraph"
+            },
+            "maxItems": 80
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1999
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1999
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_paragraphs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Extraction limit reached; separate from remaining pagination."
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "AiRecommendationCandidate": {
         "type": "object",

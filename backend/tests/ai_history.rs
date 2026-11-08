@@ -126,6 +126,35 @@ fn snapshot(revision: i64) -> Value {
 }
 
 #[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; no upstream requests"]
+async fn fred_display_metadata_never_enters_history_and_old_generic_snapshots_remain_supported() {
+    let h = Harness::new().await;
+    let token = h.register("history_fred").await;
+    let path = format!("/v1/ai/conversations/{}", Uuid::new_v4());
+    let mut body = snapshot(0);
+    body["plugin"] = json!({"id":Uuid::new_v4(),"title":"Temporary research","endpoint_url":"https://mcp.stlouisfed.org/mcp"});
+    let denied = h
+        .json(
+            "POST",
+            &path,
+            &token,
+            Some(body.clone()),
+            StatusCode::CONFLICT,
+        )
+        .await;
+    assert_eq!(denied["error"]["code"], "PLUGIN_EPHEMERAL_REQUIRED");
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_conversations")
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    body["plugin"]["endpoint_url"] = json!("https://example.com/removed-plugin");
+    h.json("POST", &path, &token, Some(body), StatusCode::OK)
+        .await;
+    h.finish().await;
+}
+
+#[tokio::test]
 #[ignore = "requires dedicated TEST_DATABASE_URL; no external bank or model requests"]
 async fn bank_connection_display_projection_saves_before_balance_proposal_and_confirmation() {
     let h = Harness::new().await;

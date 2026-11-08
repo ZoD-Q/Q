@@ -25,6 +25,7 @@ pub mod banking;
 pub mod client_ip;
 pub mod content_policy;
 pub mod error;
+pub mod filing_research;
 pub mod identity;
 pub mod insurance;
 pub mod ledger;
@@ -49,6 +50,7 @@ pub struct AppState {
     pub video: Option<Arc<video::VideoRuntime>>,
     pub ai: Option<Arc<ai::AiRuntime>>,
     pub plugins: Option<Arc<plugins::PluginRuntime>>,
+    pub filings: Arc<filing_research::FilingRuntime>,
     pub payments: Option<Arc<payments::PaymentRuntime>>,
     pub recommendations_enabled: bool,
     pub recommendation_gate: Arc<Semaphore>,
@@ -70,6 +72,7 @@ impl AppState {
             video: None,
             ai: None,
             plugins: None,
+            filings: Arc::new(filing_research::FilingRuntime::new()),
             payments: None,
             recommendations_enabled: false,
             recommendation_gate: Arc::new(Semaphore::new(1)),
@@ -213,6 +216,7 @@ pub fn app(state: AppState, allowed_origins: Vec<HeaderValue>) -> Router {
         .merge(banking::router().layer(middleware::from_fn(private_response)))
         .merge(payments::router().layer(middleware::from_fn(private_response)))
         .merge(market_data::router())
+        .merge(filing_research::router())
         .layer(cors)
         .with_state(state)
 }

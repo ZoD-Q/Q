@@ -63,6 +63,8 @@ test('completed public query types suppress recommendations even without navigat
   const success = { text: 'Read result', actions: [] };
   assert.equal(core.completedRecommendationModule({ name: 'market_query', arguments: { kind: 'crypto', asset: 'BTC' } }, success), 'market-data');
   assert.equal(core.completedRecommendationModule({ name: 'company_search', arguments: { query: 'Toyota' } }, success), 'market-data');
+  assert.equal(core.completedRecommendationModule({ name: 'company_filings', arguments: { issuerId: 'sec:0000320193' } }, success), 'market-data');
+  assert.equal(core.completedRecommendationModule({ name: 'company_filing', arguments: { issuerId: 'sec:0000320193', accession: '0000320193-26-000026' } }, success), 'market-data');
   assert.equal(core.completedRecommendationModule({ name: 'insurance_search', arguments: { query: 'medical' } }, success), 'insurance');
   assert.equal(core.completedRecommendationModule({ name: 'app_info', arguments: { module: 'all' } }, success), null);
   for (const data of [{ success: false }, { pending: true }]) assert.equal(core.completedRecommendationModule({ name: 'market_query' }, { ...success, data }), null);

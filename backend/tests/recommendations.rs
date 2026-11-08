@@ -227,6 +227,82 @@ fn contains_candidate(record: &Value, id: &str) -> bool {
 }
 
 #[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; no provider calls"]
+async fn fred_cannot_be_selected_into_persistent_chat_even_from_a_stale_recommendation() {
+    let h = Harness::new().await;
+    let (token, owner) = h.register("reco_fred").await;
+    let connection = h
+        .json(
+            "POST",
+            "/v1/plugins/financial/connections",
+            &token,
+            Some(json!({"provider_id":"fred"})),
+            StatusCode::OK,
+        )
+        .await;
+    let connection_id = Uuid::parse_str(connection["id"].as_str().unwrap()).unwrap();
+    // A fixture representing completed authorization: this must still never
+    // make the temporary provider eligible for a persisted continuation.
+    sqlx::query(
+        "UPDATE plugin_connections SET status='ready',auth_status='authorized' WHERE id=$1",
+    )
+    .bind(connection_id)
+    .execute(&h.state.pool)
+    .await
+    .unwrap();
+    let catalog = catalog::load(&h.state, owner, "en").await.unwrap();
+    assert!(
+        !catalog
+            .candidates
+            .iter()
+            .any(|item| item.provider_id.as_deref() == Some("fred")
+                || item.connection_id == Some(connection_id))
+    );
+    let mut stale_candidate = catalog
+        .candidates
+        .iter()
+        .find(|item| item.provider_id.as_deref() == Some("tavily"))
+        .unwrap()
+        .clone();
+    stale_candidate.id = "financial:fred".into();
+    stale_candidate.title = "FRED".into();
+    stale_candidate.provider_id = Some("fred".into());
+    stale_candidate.connection_id = Some(connection_id);
+    stale_candidate.connection_revision = Some(1);
+    stale_candidate.access = "ready".into();
+    let (conversation, message, _) = h
+        .save(&token, "Use FRED to inspect economic time series")
+        .await;
+    let record = h.recommend(&token, conversation, &message).await;
+    assert!(!contains_candidate(&record, "financial:fred"));
+    let recommendation_id = Uuid::parse_str(record["id"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE ai_recommendations SET status='complete',candidates=$2 WHERE id=$1")
+        .bind(recommendation_id)
+        .bind(json!([stale_candidate]))
+        .execute(&h.state.pool)
+        .await
+        .unwrap();
+    let denied = h
+        .select(&token, &record, "financial:fred", StatusCode::CONFLICT)
+        .await;
+    assert_eq!(denied["error"]["code"], "RECOMMENDATION_STALE");
+    let histories: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ai_conversations WHERE user_id=$1")
+            .bind(owner)
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    let selections: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ai_recommendation_selections WHERE user_id=$1")
+            .bind(owner)
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    assert_eq!((histories, selections), (1, 0));
+    h.finish().await;
+}
+
+#[tokio::test]
 #[ignore = "requires dedicated TEST_DATABASE_URL"]
 async fn selection_is_atomic_owner_scoped_recoverable_and_does_not_execute() {
     let h = Harness::new().await;

@@ -183,6 +183,10 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
   }, []);
   const path = (suffix = '') => `/v1/plugins/connections/${selected?.id}${suffix}`;
   const open = async (connection: PluginConnection) => {
+    if (connection.research_provider_id === 'fred') {
+      if (!onOpenFinancial) throw new WorkbenchError('PLUGIN_EPHEMERAL_REQUIRED');
+      onOpenFinancial(); return;
+    }
     setAdvanced(false); setSelected(connection); setTools([]); setTool(null); setActiveInvocation(null); setInvocations([]); setResources([]); setPrompts([]); setPromptResult(null); setOauth(null);
   };
   const openAdvanced = async () => {

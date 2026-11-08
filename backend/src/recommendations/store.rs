@@ -297,6 +297,12 @@ pub(super) async fn select(
     saved: &Candidate,
     current: Candidate,
 ) -> ApiResult<Selection> {
+    if current.provider_id.as_deref() == Some("fred") {
+        return Err(ApiError::conflict(
+            "PLUGIN_EPHEMERAL_REQUIRED",
+            "FRED research cannot continue in a saved conversation.",
+        ));
+    }
     if current.access == "unavailable" {
         return Err(stale());
     }
@@ -339,6 +345,7 @@ pub(super) async fn select(
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(stale)?;
+        plugins::financial::reject_ephemeral(&connection)?;
         if Some(connection.revision) != current.connection_revision
             || connection.status == "revoked"
             || super::catalog::connection_version(&connection)? != current.capability_version

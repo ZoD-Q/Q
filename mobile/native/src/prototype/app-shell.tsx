@@ -615,7 +615,8 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
             <PluginHostPage key={recommendationTarget?.id ?? 'plugins'} active={active} chat={chat} initialIntent={pendingPluginIntent} recommendationTarget={recommendationTarget}
               onReturnToRecommendation={chat.pendingRecommendation ? returnToRecommendedQuestion : undefined}
               onIntentHandled={(intent, outcome) => updatePluginIntent({ type: "settled", intent, outcome })} onOpenWorkbench={() => navigate("plugin-workbench")} onOpenMarketData={() => navigate('market-data')} onSelect={connection => {
-                if (chat.pendingRecommendation && recommendationTarget && (recommendationTarget.connection_id === connection.id || (recommendationTarget.provider_id && recommendationTarget.provider_id === connection.financial_provider_id) || (recommendationTarget.bank_id && connection.builtin_service_id === `q.bank-demo.${recommendationTarget.bank_id}`))) returnToRecommendedQuestion();
+                if (connection.research_provider_id === 'fred') { notify(text('请从金融插件进入 FRED 临时研究，查询和结果不会保存到聊天。', 'Open FRED temporary research from Financial plugins. Queries and results are not saved to chat.')); return; }
+                if (chat.pendingRecommendation && recommendationTarget && (recommendationTarget.connection_id === connection.id || (recommendationTarget.provider_id && recommendationTarget.provider_id === (connection.financial_provider_id ?? connection.research_provider_id)) || (recommendationTarget.bank_id && connection.builtin_service_id === `q.bank-demo.${recommendationTarget.bank_id}`))) returnToRecommendedQuestion();
                 else { chat.selectPlugin(connection); navigate("chat"); }
               }} />
           ) : (

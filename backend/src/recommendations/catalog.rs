@@ -312,6 +312,11 @@ fn copy<'a>(locale: &str, zh: &'a str, en: &'a str) -> &'a str {
 pub(super) fn fixed_candidates(locale: &str, plugins_enabled: bool) -> Vec<Candidate> {
     let mut candidates = module_candidates(locale);
     for provider in financial::PROVIDERS {
+        // Recommendation selections persist a continuation conversation. FRED
+        // remains exclusively in the ephemeral research interface.
+        if provider.id == "fred" {
+            continue;
+        }
         let (english, terms, aliases) = provider_terms(provider.id);
         candidates.push(Candidate {
             id: format!("financial:{}", provider.id),
@@ -399,6 +404,11 @@ fn provider_terms(id: &str) -> (&'static str, &'static str, &'static str) {
             "Cryptocurrency market research and public data, with actual tool scope and public-service limits.",
             "加密货币|数字货币|加密资产|cryptocurrency|crypto|bitcoin|比特币|以太坊|ethereum|BTC|ETH|SOL|山寨币|altcoin|币价|代币|token price|币种市值|crypto market cap|defi|NFT",
             "CoinGecko|Coin Gecko",
+        ),
+        "tavily" => (
+            "Search public web pages and extract source text with shared keyless quotas. Verify original sources; no private workspace data.",
+            "公开网页|网页搜索|网页正文|web search|website search|extract webpage|webpage extraction|public web sources",
+            "Tavily",
         ),
         _ => ("", "", ""),
     }
@@ -581,6 +591,28 @@ mod tests {
     use chrono::Utc;
     use serde::Deserialize;
     use std::collections::HashSet;
+
+    #[test]
+    fn temporary_research_is_excluded_from_persistent_recommendations() {
+        for locale in ["zh", "en"] {
+            let candidates = fixed_candidates(locale, true);
+            assert!(
+                !candidates
+                    .iter()
+                    .any(|item| item.provider_id.as_deref() == Some("fred"))
+            );
+            let search = candidates
+                .iter()
+                .find(|item| item.provider_id.as_deref() == Some("tavily"))
+                .unwrap();
+            assert!(!search.description.is_empty());
+            assert!(
+                matching::exact("Use Tavily to search public web sources", &candidates)
+                    .iter()
+                    .any(|item| item.id == search.id)
+            );
+        }
+    }
 
     fn tool(name: &str, description: &str) -> Tool {
         Tool {

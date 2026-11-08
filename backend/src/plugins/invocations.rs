@@ -89,6 +89,7 @@ pub async fn prepare_invocation(
     arguments: Value,
     idempotency_key: Uuid,
 ) -> ApiResult<Invocation> {
+    super::financial::require_persistent_connection(state, user, connection_id).await?;
     if tool_name.is_empty()
         || tool_name.len() > 512
         || tool_name.chars().count() > 128
@@ -288,6 +289,7 @@ pub async fn confirm(
 pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> ApiResult<Invocation> {
     expire(state, user).await?;
     let proposal = stored(state, user, id).await?;
+    super::financial::require_persistent_connection(state, user, proposal.connection_id).await?;
     if proposal.status != "awaiting_confirmation" {
         return get_invocation(state, user, id).await;
     }
@@ -375,11 +377,15 @@ pub(crate) async fn confirm_owned(state: &AppState, user: Uuid, id: Uuid) -> Api
             store::record_remote_error(state, &connection, &error).await?;
             // A response rejected after dispatch can still follow an executed business action.
             // A pinned-address check can fail after request.send(), so even UnsafeNetwork
-            // is uncertain here. Only input checks and explicit authorization rejection fail closed.
+            // is uncertain here. Explicit rejection and the fixed read-only Tavily quota response
+            // are known failures; other post-dispatch errors remain unknown.
             let status = if matches!(
                 error.category,
                 ErrorCategory::Validation | ErrorCategory::Authorization
-            ) {
+            ) || error.status == Some(403)
+                || (connection.financial_provider_id.as_deref() == Some("tavily")
+                    && error.code == "MCP_RATE_LIMITED")
+            {
                 "failed"
             } else {
                 "unknown"

@@ -217,6 +217,7 @@ jobs:
           cargo test --locked --manifest-path backend/Cargo.toml --all-features --test payment_upgrade -- --ignored
           cargo test --locked --manifest-path backend/Cargo.toml --all-features --test market_news -- --ignored
           cargo test --locked --manifest-path backend/Cargo.toml --all-features --test financial_plugins -- --ignored
+          cargo test --locked --manifest-path backend/Cargo.toml --all-features --test filing_research
           cargo test --locked --manifest-path backend/Cargo.toml --all-features --lib trusted_readonly_rechecks -- --ignored
 
   deploy-check:

@@ -90,7 +90,7 @@ export const recommendationTurnKey = (conversationId: string, sourceMessageId: s
 /** Only the trusted local executor can supply this ephemeral evidence; restored text cannot. */
 export function completedRecommendationModule(command: AppCommand, result: AppReadResult): ModuleId | null {
   if (!result.text.trim() || (object(result.data) && (result.data.success === false || result.data.pending === true))) return null;
-  if (['market_query', 'company_search', 'company_research'].includes(command.name)) return 'market-data';
+  if (['market_query', 'company_search', 'company_research', 'company_filings', 'company_filing'].includes(command.name)) return 'market-data';
   if (['insurance_search', 'insurance_compare'].includes(command.name)) return 'insurance';
   return null;
 }

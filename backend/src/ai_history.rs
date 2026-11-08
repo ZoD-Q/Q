@@ -232,6 +232,28 @@ pub async fn save(
 ) -> ApiResult<Json<Value>> {
     let Path(id) = id.map_err(|_| ApiError::validation("Provide a valid conversation UUID."))?;
     let snapshot = request.snapshot()?;
+    if let Some(plugin) = &request.plugin {
+        let connection = Uuid::parse_str(plugin["id"].as_str().unwrap())
+            .map_err(|_| ApiError::validation("Invalid history plugin identity."))?;
+        // Historical generic connections may have been removed. Reject only the
+        // fixed FRED identity, before opening any history write transaction.
+        let ephemeral: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM plugin_connections WHERE user_id=$1 AND id=$2 AND financial_provider_id='fred')",
+        )
+        .bind(auth.user_id)
+        .bind(connection)
+        .fetch_one(&state.pool)
+        .await?;
+        let fred_endpoint = plugin["endpoint_url"].as_str().is_some_and(|value| {
+            reqwest::Url::parse(value).is_ok_and(|url| url.host_str() == Some("mcp.stlouisfed.org"))
+        });
+        if ephemeral || fred_endpoint {
+            return Err(ApiError::conflict(
+                "PLUGIN_EPHEMERAL_REQUIRED",
+                "FRED research cannot be saved to chat history.",
+            ));
+        }
+    }
     let mut tx = state.pool.begin().await?;
     account_lifecycle::lock_active(&mut tx, auth.user_id).await?;
     // Serialize all history writes for one account, including quota checks and first saves.

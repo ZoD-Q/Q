@@ -247,3 +247,34 @@ test('module recommendation uses validated navigation and prefills supported fil
   assert.equal(service.props.insuranceEntry.label, '打开保险');
   assert.deepEqual(h.called, []); assert.equal(h.controller.draft, 'Keep draft');
 });
+
+test('a first Tavily connection returns to the recommended question using its research identity', async () => {
+  const h = shellHarness();
+  const candidate = { id: 'financial:tavily', title: 'Tavily', provider_id: 'tavily', connection_id: null, bank_id: null };
+  h.controller.pendingRecommendation = { recordId: 'record', candidateId: candidate.id, sourceConversationId: 'source' };
+  h.controller.selectRecommendation = async () => ({ kind: 'connect', candidate, conversation: null, created: false });
+  h.controller.openRecommendationSource = () => h.called.push('source');
+  h.controller.selectPlugin = value => h.called.push(['plugin', value.id]);
+  h.render().find(node => node.type === 'ChatPage').props.onSelectRecommendation('record', candidate.id);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  const host = h.render().find(node => node.type === 'PluginHostPage');
+  assert.equal(host.props.recommendationTarget.connection_id, null);
+  host.props.onSelect({ id: 'new-connection', financial_provider_id: null, research_provider_id: 'tavily' });
+  assert.deepEqual(h.called, ['source']);
+  assert.ok(h.render().some(node => node.type === 'ChatPage'));
+});
+
+test('FRED cannot enter persisted chat through a stale recommendation callback', async () => {
+  const h = shellHarness();
+  const candidate = { id: 'financial:fred', title: 'FRED', provider_id: 'fred', connection_id: 'fred-connection', bank_id: null };
+  h.controller.pendingRecommendation = { recordId: 'record', candidateId: candidate.id, sourceConversationId: 'source' };
+  h.controller.selectRecommendation = async () => ({ kind: 'connect', candidate, conversation: null, created: false });
+  h.controller.openRecommendationSource = () => h.called.push('source');
+  h.controller.selectPlugin = value => h.called.push(['plugin', value.id]);
+  h.render().find(node => node.type === 'ChatPage').props.onSelectRecommendation('record', candidate.id);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  h.render().find(node => node.type === 'PluginHostPage').props.onSelect({ id: 'fred-connection', financial_provider_id: null, research_provider_id: 'fred' });
+  assert.deepEqual(h.called, []);
+  assert.match(h.notices.at(-1), /FRED 临时研究/);
+  assert.ok(h.render().some(node => node.type === 'PluginHostPage'));
+});
