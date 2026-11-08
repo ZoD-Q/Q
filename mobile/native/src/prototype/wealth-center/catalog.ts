@@ -70,12 +70,12 @@ export function trustedExternalUrl(url: string, allowed: readonly string[]): boo
 // Featured product list for the wealth home (Futu-style cards). Benchmark ranges are disclosed
 // ranges, never promised returns; demo entries carry no official channel. Applications happen on
 // the manager's or a licensed distributor's official channel — Q never places orders.
-export type FeaturedProduct = { name: string; code: string; org: string; cat: 'stable' | 'growth'; risk: RiskLevel; bench: string; term: string; min: string; official: string | null };
+export type FeaturedProduct = { name: string; code: string; org: string; cat: 'stable' | 'growth'; risk: RiskLevel; bench: string; term: string; min: string; official: string | null; simStart?: number };
 export const featuredProducts: readonly FeaturedProduct[] = [
-  { name: '货币现金宝（示例）', code: '—', org: '示例组合', cat: 'stable', risk: 'R1', bench: '1.50%–2.00%', term: '活期', min: '¥1', official: null },
-  { name: '易方达天天理财货币A', code: '000009', org: '易方达基金', cat: 'stable', risk: 'R1', bench: '1.60%–2.10%', term: '活期', min: '¥1', official: 'https://www.efunds.com.cn/fund/000009_org.shtml' },
-  { name: '短债基金（示例）', code: '—', org: '示例类别', cat: 'stable', risk: 'R2', bench: '2.00%–2.80%', term: '90 天持有期', min: '¥10', official: null },
-  { name: '固收+（示例）', code: '—', org: '示例类别', cat: 'growth', risk: 'R3', bench: '3.00%–4.50%', term: '开放式', min: '¥10', official: null },
-  { name: '华夏沪深300ETF联接A', code: '000051', org: '华夏基金', cat: 'growth', risk: 'R4', bench: '跟踪沪深300', term: '开放式', min: '¥100', official: 'https://www.chinaamc.com/' },
-  { name: '偏股混合（示例）', code: '—', org: '示例类别', cat: 'growth', risk: 'R4', bench: '5.00%–12.0%', term: '开放式', min: '¥100', official: null },
+  { name: '货币现金宝（示例）', code: '—', org: '示例组合', cat: 'stable', risk: 'R1', bench: '1.50%–2.00%', term: '活期', min: '¥1', official: null, simStart: 1.0 },
+  { name: '易方达天天理财货币A', code: '000009', org: '易方达基金', cat: 'stable', risk: 'R1', bench: '1.60%–2.10%', term: '活期', min: '¥1', official: 'https://www.efunds.com.cn/fund/000009_org.shtml', simStart: 1.0002 },
+  { name: '短债基金（示例）', code: '—', org: '示例类别', cat: 'stable', risk: 'R2', bench: '2.00%–2.80%', term: '90 天持有期', min: '¥10', official: null, simStart: 1.0312 },
+  { name: '固收+（示例）', code: '—', org: '示例类别', cat: 'growth', risk: 'R3', bench: '3.00%–4.50%', term: '开放式', min: '¥10', official: null, simStart: 1.0846 },
+  { name: '华夏沪深300ETF联接A', code: '000051', org: '华夏基金', cat: 'growth', risk: 'R4', bench: '跟踪沪深300', term: '开放式', min: '¥100', official: 'https://www.chinaamc.com/', simStart: 1.2418 },
+  { name: '偏股混合（示例）', code: '—', org: '示例类别', cat: 'growth', risk: 'R4', bench: '5.00%–12.0%', term: '开放式', min: '¥100', official: null, simStart: 1.1563 },
 ];

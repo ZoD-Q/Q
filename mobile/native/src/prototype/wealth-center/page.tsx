@@ -87,6 +87,16 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
       state.candles.push(step.candle);
       if (state.candles.length > 160) state.candles.shift();
       state.price = step.price;
+      const active = detailRef.current;
+      if (active) {
+        const series = detailMarket.current[active.name];
+        if (series) {
+          const detailStep = nextCandle(series.price);
+          series.candles.push(detailStep.candle);
+          if (series.candles.length > 120) series.candles.shift();
+          series.price = detailStep.price;
+        }
+      }
       setTick(value => value + 1);
     }, 1600);
     return () => clearInterval(timer);
@@ -107,6 +117,17 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const [switches, setSwitches] = useState({ advisory: true, market: true, usage: false });
   const [hideAssets, setHideAssets] = useState(false);
   const [chartPeriod, setChartPeriod] = useState('1m');
+  const [detail, setDetail] = useState<FeaturedProduct | null>(null);
+  const detailRef = useRef<FeaturedProduct | null>(null);
+  detailRef.current = detail;
+  const detailMarket = useRef<Record<string, { candles: Candle[]; price: number }>>({});
+  const openDetail = (item: FeaturedProduct) => {
+    if (!detailMarket.current[item.name]) {
+      const seeded = seedCandles(40, item.simStart ?? SIM_START_NAV);
+      detailMarket.current[item.name] = { candles: seeded.candles, price: seeded.price };
+    }
+    setDetail(item);
+  };
   const allowedUrls = useMemo(() => [
     ...holdings.map(item => item.official).filter((url): url is string => Boolean(url)),
     ...marketFunds.map(fund => `https://${fund.host}`),
@@ -136,7 +157,7 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
   const periodFirst = market.current!.candles.slice(-chartCount)[0]?.o ?? price;
   const periodChange = periodFirst > 0 ? (price / periodFirst - 1) * 100 : 0;
   const quickEntries: { key: string; icon: string; title: Copy; onPress: () => void }[] = [
-    { key: 'cash', icon: '💰', title: ['现金宝', 'Cash'], onPress: () => setPage('funds') },
+    { key: 'cash', icon: '💰', title: ['现金宝', 'Cash'], onPress: () => openDetail(featuredProducts[0]) },
     { key: 'funds', icon: '📈', title: ['基金', 'Funds'], onPress: () => setPage('funds') },
     { key: 'term', icon: '🏦', title: ['定期理财', 'Term'], onPress: () => setPage('shelf') },
     { key: 'protect', icon: '🛡', title: ['保障', 'Protect'], onPress: () => setPage('protection') },
@@ -146,9 +167,9 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
     { key: 'hold', icon: '📋', title: ['持仓', 'Holdings'], onPress: () => setPage('holdings') },
   ];
   const productCard = (item: FeaturedProduct) => (
-    <Pressable key={item.name} accessibilityRole={item.official ? 'button' : undefined}
-      accessibilityLabel={text(`${item.name}，近一年业绩基准 ${item.bench}`, `${item.name}, 1Y benchmark ${item.bench}`)}
-      onPress={item.official ? () => gotoOutbound(item.org, item.official!) : undefined}
+    <Pressable key={item.name} accessibilityRole="button"
+      accessibilityLabel={text(`${item.name}，近一年业绩基准 ${item.bench}，查看走势与数据`, `${item.name}, 1Y benchmark ${item.bench}, view trend and data`)}
+      onPress={() => openDetail(item)}
       style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.line, opacity: pressed ? 0.7 : 1 })}>
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -160,10 +181,54 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Type selectable weight="600" size={17} style={{ color: /%/.test(item.bench) ? UP_RED : colors.ink }}>{item.bench}</Type>
-        <Type size={10} muted>{text('近一年业绩基准 · 非承诺收益', '1Y benchmark · not a promise')}</Type>
+        <Type size={10} muted>{text('近一年业绩基准 · 点看走势', '1Y benchmark · tap for trend')}</Type>
       </View>
     </Pressable>
   );
+  const detailView = () => {
+    const item = detail!;
+    const series = detailMarket.current[item.name];
+    const detailPrice = series?.price ?? item.simStart ?? SIM_START_NAV;
+    const detailCandles = series?.candles ?? [];
+    const window = sliceWindow(detailCandles, 30);
+    const first = window[0]?.o ?? detailPrice;
+    const detailChange = first > 0 ? (detailPrice / first - 1) * 100 : 0;
+    return <>
+      <Action kind="ghost" label={text('← 返回', '← Back')} onPress={() => setDetail(null)} />
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Type size={20} weight="600">{item.name}</Type>
+          <Tag accent={item.risk === 'R1' || item.risk === 'R2'}>{RISK_LABEL[item.risk]}</Tag>
+          {item.code !== '—' ? <Tag>{item.code}</Tag> : null}
+        </View>
+        <Type size={12} muted selectable>{item.org} · {item.term} · {text('起投', 'From')} {item.min} · {text('公开资料核对', 'Reviewed')} 2026-11-05</Type>
+      </View>
+      <View style={{ gap: 8, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <Type weight="600" size={14}>{text('净值走势 · 实时（模拟）', 'NAV candles · live (demo)')}</Type>
+          <Type size={10} muted>{clock()}</Type>
+        </View>
+        <CandleChart candles={detailCandles} price={detailPrice} count={30} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18 }}>
+          <View><Type size={11} muted>{text('当前净值', 'NAV')}</Type><Type selectable weight="600">{detailPrice.toFixed(4)}</Type></View>
+          <View><Type size={11} muted>{text('区间涨跌', 'Period change')}</Type><Type selectable weight="600" style={{ color: detailChange >= 0 ? UP_RED : DOWN_GREEN }}>{detailChange >= 0 ? '+' : ''}{detailChange.toFixed(2)}%</Type></View>
+          <View><Type size={11} muted>{text('近一年业绩基准', '1Y benchmark')}</Type><Type selectable weight="600" style={{ color: UP_RED }}>{item.bench}</Type></View>
+          <Type size={10} muted>{text('基准非承诺收益 · 红涨绿跌', 'Benchmark is not a promise · red up, green down')}</Type>
+        </View>
+      </View>
+      <View style={{ gap: 8, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <View><Type size={11} muted>{text('管理人 / 类别', 'Manager')}</Type><Type selectable weight="500">{item.org}</Type></View>
+          <View><Type size={11} muted>{text('期限', 'Term')}</Type><Type selectable weight="500">{item.term}</Type></View>
+          <View><Type size={11} muted>{text('起投', 'Minimum')}</Type><Type selectable weight="500">{item.min}</Type></View>
+        </View>
+        {item.official
+          ? <Action icon={ArrowUpRight} label={text(`前往${item.org}官方申购入口`, `${item.org} official subscription entry`)} onPress={() => gotoOutbound(item.org, item.official!)} />
+          : <Type size={12} muted>{text('示例类别，用于流程演示；实际投资请通过持牌销售机构办理。', 'Demo category; invest via licensed distributors.')}</Type>}
+      </View>
+      <Type size={12} muted>{text('走势为模拟数据，仅展示页面能力；业绩基准非承诺收益。申购在管理人直销或持牌销售机构完成，小Q不代销、不代收款。', 'The trend is simulated to demonstrate the page; benchmarks are not promised returns. Subscriptions happen via the manager or licensed distributors; Q neither distributes funds nor collects payments.')}</Type>
+    </>;
+  };
   const overview = () => <>
     <View style={{ gap: 12, padding: 20, borderRadius: 20, backgroundColor: colors.accentBg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -377,9 +442,9 @@ export function WealthCenterPage({ onOpenDataService, onOpenChat }: { onOpenData
     action={<Action kind="ghost" label={text('模拟账本', 'Demo ledger')} onPress={() => setRiskSheet(true)} />}
     description={text('模拟持仓、公开基金资料与按次数据服务在一个页面。不构成投资建议。', 'A demo portfolio, public fund directory and pay-per-use data on one screen. Not investment advice.')}>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      {tabs.map(tab => <Choice key={tab.id} label={text(tab.title[0], tab.title[1])} selected={page === tab.id} onPress={() => setPage(tab.id)} />)}
+      {tabs.map(tab => <Choice key={tab.id} label={text(tab.title[0], tab.title[1])} selected={page === tab.id && !detail} onPress={() => { setDetail(null); setPage(tab.id); }} />)}
     </View>
-    {views[page]()}
+    {detail ? detailView() : views[page]()}
     <Sheet visible={!!outbound} title={text('前往官方网站', 'Visit official website')} onClose={() => setOutbound(null)}>
       {outbound ? <>
         <Type>{text('即将离开小Q，打开以下官方页面：', 'You are leaving Q for this official page:')}</Type>
