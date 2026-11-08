@@ -1,10 +1,10 @@
 # 金融插件
 
-2026-11-02实施，部署事实更新于2026-11-04。用户要求实施《小Q开放插件生态白皮书》第04节，在银行插件旁增加金融分类，并让用户通过个人连接调用同花顺 iFinD、金十、Massive、Alpha Vantage、Twelve Data、CoinGecko。相关后端已随2026-11-03的`ac920275`发布部署；代码合入本身不构成部署、发包、购买数据或共享平台密钥。
+2026-11-02实施，部署事实更新于2026-11-08。用户要求实施《小Q开放插件生态白皮书》第04节，在银行插件旁增加金融分类，并让用户通过个人连接调用同花顺 iFinD、金十、Massive、Alpha Vantage、Twelve Data、CoinGecko。原六家后端于2026-11-03部署，当前服务器为`ad7dc65`；代码合入本身不构成发包、购买数据或共享平台密钥。
 
-2026-11-04通过普通Q会话读取`/v1/plugins/financial/providers`返回200、六家目录，`available`、`credentials_configured`、`oauth_configured`均为true。这些字段表示宿主目录、凭据加密和OAuth基础配置已就绪；`credentials_configured`不表示六家供应商的个人密钥已录入，也不能解释为供应商都已授权或通过实账调用。现有管理网页仍是静态demo，见[部署状态](../../backend/deploy/STATUS.md)。
+2026-11-04通过普通Q会话读取`/v1/plugins/financial/providers`返回200、六家目录，`available`、`credentials_configured`、`oauth_configured`均为true。这些字段表示宿主目录、凭据加密和OAuth基础配置已就绪；`credentials_configured`不表示六家供应商的个人密钥已录入，也不能解释为供应商都已授权或通过实账调用。当时管理网页仍是静态demo，最新状态见[部署状态](../../backend/deploy/STATUS.md)。
 
-2026-11-08源码扩展：新增 Tavily 搜索/正文提取和 FRED 临时宏观研究，重整为原生分组目录与按连接阶段显示的主操作。该扩展尚未部署或发包；下面明确区分原六家已部署目录与本轮新增源码，验证见[本轮记录](research-2026-11-08.md)。
+2026-11-08扩展：新增Tavily搜索/正文提取和FRED临时宏观研究，重整原生分组目录与连接阶段主操作。后端已部署，公网鉴权目录默认六家、v2八家检查通过，手机安装包未更新。真实个人授权及供应商业务仍分别验收；实施验证见[本轮记录](research-2026-11-08.md)，服务器事实见[发布记录](../../backend/deploy/RESEARCH-2026-11-08.md)。
 
 ## 使用路径
 
@@ -57,7 +57,7 @@ FRED 进入独立临时研究页。页面明确告知：查询和返回内容仅
 
 FRED 页面提供[使用条款](https://fred.stlouisfed.org/legal/#MCPConnector)及非背书说明。授权采用固定 `https://mcp.stlouisfed.org/` 发行者和资源，保留尾斜杠、S256 PKCE 与 state；其专用 confidential DCR 客户端秘密只在现有加密封装内存储并绑定账号、连接、版本、发行者和资源，换码/刷新不接受上游替换秘密。此例外不改变 Massive/Alpha 的公开客户端或通用 CIMD 规则。
 
-本轮公开探测：Tavily 匿名初始化、工具发现和公开搜索已取得结果；正文提取遇到共享额度错误，未记为成功。FRED 仅取得公开授权元数据，尚无真实个人授权后的工具/业务验收。SEC 正文能力及边界见[公司研究](company-research.md)。新增源码不能据此宣称已上线或八家均已实账验证。
+实施阶段公开探测：Tavily匿名初始化、工具发现和公开搜索取得结果；正文提取遇到共享额度错误，未记为成功。FRED仅取得公开授权元数据，尚无真实个人授权后的工具/业务验收。后续部署已验证FRED未授权响应的no-store，未调用其真实业务。SEC正文能力及边界见[公司研究](company-research.md)。目录上线不代表八家均完成授权或实账验证。
 
 ## 验收边界
 
