@@ -20,6 +20,8 @@ export type MascotPresentationInput = {
   messageError?: string;
   authError?: string;
   hasSession?: boolean;
+  appPhase?: 'reading' | 'analyzing';
+  canResumeAppResult?: boolean;
 };
 
 const copy = (state: MascotState, zh: string, en: string, detailZh: string, detailEn: string, busy = false): MascotPresentation => ({
@@ -30,8 +32,26 @@ const interrupted = () => copy('interrupted', '回答已中断', 'Answer interru
 const stopped = () => copy('paused', '已停止', 'Stopped',
   '已停止接收，内容保留。重试会重新生成回答。', 'Receiving has stopped; the text is preserved. Retrying generates a new answer.');
 
-function failure(code: string): MascotPresentation {
+function failure(code: string, canResumeAppResult = false): MascotPresentation {
+  if (['APP_EXPLANATION_FAILED', 'APP_ANALYSIS_TIMEOUT', 'APP_ANALYSIS_BUSY'].includes(code) && !canResumeAppResult) return copy('paused', '分析未完成', 'Analysis not completed',
+    '原记录与来源保留，可以重新整理原问题。', 'The record and sources are preserved. Prepare the original question to continue.');
   switch (code) {
+    case 'APP_EXPLANATION_FAILED': case 'APP_ANALYSIS_TIMEOUT': case 'APP_ANALYSIS_BUSY':
+      return copy('paused', code === 'APP_ANALYSIS_TIMEOUT' ? '分析等待超时' : code === 'APP_ANALYSIS_BUSY' ? '分析服务繁忙' : '分析暂时中断',
+        code === 'APP_ANALYSIS_TIMEOUT' ? 'Analysis timed out' : code === 'APP_ANALYSIS_BUSY' ? 'Analysis service is busy' : 'Analysis interrupted',
+        '已取得的资料保留，可以继续分析，无需重复查询。', 'Retrieved material is preserved. Continue the analysis without repeating the lookup.');
+    case 'APP_QUERY_INTERRUPTED':
+      return copy('paused', '查询已中断', 'Lookup interrupted',
+        '尚未完成资料读取。你可以整理原问题后重新查询。', 'The lookup did not finish. Prepare your original question to try again.');
+    case 'APP_QUERY_TIMEOUT':
+      return copy('paused', '查询等待超时', 'Lookup timed out',
+        '来源尚未完整返回资料，可以稍后重新查询。', 'The source did not finish returning the material. Try the lookup again later.');
+    case 'DRAFT_NOT_EMPTY':
+      return copy('paused', '草稿尚未发送', 'Unsent draft',
+        '请先处理输入框中的草稿，再恢复原问题。', 'Finish the current draft before preparing the original question.');
+    case 'APP_RESULT_RELOAD': case 'APP_CONTEXT_TOO_LARGE':
+      return copy('paused', '可重新整理问题', 'Prepare your question',
+        '原记录保留。重新提问后才会开始新的查询。', 'The original record is preserved. A new lookup starts only when you send again.');
     case 'NETWORK_ERROR':
       // A failed transport does not establish that the device itself is offline.
       return copy('offline', '连接异常', 'Connection problem',
@@ -84,6 +104,12 @@ function failure(code: string): MascotPresentation {
 /** Presentation only: never starts, retries, or interprets configuration as live health. */
 export function getMascotPresentation(input: MascotPresentationInput): MascotPresentation {
   const message = input.message?.role === 'assistant' ? input.message : undefined;
+  if (input.phase !== 'idle' && input.appPhase && message && ['pending', 'streaming'].includes(message.status)) {
+    if (input.appPhase === 'reading') return copy('thinking', '正在查资料', 'Looking up information',
+      '正在读取相关公开资料，你可以随时停止。', 'Reading relevant public information. You can stop at any time.', true);
+    if (input.phase !== 'responding') return copy('thinking', '正在分析资料', 'Analyzing the results',
+      '资料已取得，正在整理回答。', 'The material is ready. Preparing the answer.', true);
+  }
   // The request now awaits the final history write before becoming idle. A
   // terminal message means receiving ended, even while phase still looks active.
   if (input.phase !== 'idle' && message && ['complete', 'incomplete', 'error', 'cancelled'].includes(message.status)) {
@@ -121,7 +147,7 @@ export function getMascotPresentation(input: MascotPresentationInput): MascotPre
       '请查看插件卡片中的状态与可用操作。',
       'Review the status and available actions in the plugin card.');
     if (message.status === 'cancelled') return stopped();
-    if (message.status === 'error') return failure(message.errorCode ?? 'AI_UPSTREAM_ERROR');
+    if (message.status === 'error') return failure(message.errorCode ?? 'AI_UPSTREAM_ERROR', input.canResumeAppResult);
     if (message.status === 'pending' || message.status === 'streaming') return interrupted();
     if (message.status === 'incomplete' || (message.finishReason && message.finishReason !== 'stop')) {
       return copy('interrupted', '回答未完整结束', 'Answer incomplete',

@@ -281,17 +281,23 @@ pub(super) struct ProposedCall {
     pub name: String,
     pub arguments: String,
     id: Option<String>,
+    index: Option<u64>,
 }
 impl ProposedCall {
     pub(super) fn append(&mut self, value: &Value) -> Result<(), super::StreamFailure> {
         let fail = || super::StreamFailure::Upstream;
-        if value.get("index").and_then(Value::as_u64) != Some(0)
+        let index = value
+            .get("index")
+            .and_then(Value::as_u64)
+            .ok_or_else(fail)?;
+        if self.index.is_some_and(|prior| prior != index)
             || value
                 .get("type")
                 .is_some_and(|value| !value.is_null() && value.as_str() != Some("function"))
         {
             return Err(fail());
         }
+        self.index = Some(index);
         if let Some(id) = value.get("id").filter(|value| !value.is_null()) {
             let id = id
                 .as_str()
@@ -318,9 +324,13 @@ impl ProposedCall {
         Ok(())
     }
     pub(super) fn valid(&self) -> bool {
-        self.id.is_some()
+        self.index.is_some()
+            && self.id.is_some()
             && !self.name.is_empty()
             && serde_json::from_str::<Value>(&self.arguments).is_ok_and(|value| value.is_object())
+    }
+    pub(super) fn id(&self) -> Option<&str> {
+        self.id.as_deref()
     }
 }
 

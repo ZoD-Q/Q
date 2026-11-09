@@ -29,8 +29,8 @@ function nodes(tree, result = []) {
 const buttonName = node => typeof node.type === 'function' && node.type.name === 'Button' ? node.props.label : null;
 
 /** Runs actual TSX actions and React state/effect transitions, not native layout or transport. */
-function harness({ locale = 'zh', analyze = async () => true, result = report(), market = {}, props = {}, platform = 'ios', selectedTopic = 'fed' } = {}) {
-  const slots = [], analyses = [], historyLoads = [], openedUrls = [];
+function harness({ locale = 'zh', analyze = async () => true, result = report(), market = {}, props = {}, platform = 'ios', selectedTopic = 'fed', startAtNews = true } = {}) {
+  const slots = [], analyses = [], historyLoads = [], openedUrls = [], marketSelections = [], requests = [];
   let cursor = 0, tree, effects = [], dirty = true, mounted = true, writesAfterUnmount = 0;
   let currentProps = { active: true, signedIn: true, conversations: [{ id: 'history-fixture', title: 'Existing research' }],
     onAnalyze: (...args) => { analyses.push(args); return analyze(...args); }, onLoadHistory: more => historyLoads.push(more), ...props };
@@ -67,9 +67,10 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
     'react-native': { View: 'View', Pressable: 'Pressable', Linking: { openURL: async url => openedUrls.push(url) } },
     'lucide-react-native': { ExternalLink: 'ExternalLink', MessageSquare: 'MessageSquare' },
     '../design': design, './core': core, '../company-research/page': { CompanyResearchPanel: 'CompanyResearchPanel' },
-    './use-market-data': { useMarketData(selected) {
+    './use-market-data': { useMarketData(selected, enabled) {
+      marketSelections.push({ selected, enabled });
       return { report: result && core.marketQueryKey(selected) === core.marketQueryKey(result.query) ? result : null, phase: 'ready', stale: false, fromCache: false,
-        coolingDown: false, nextAllowedAt: null, run: noop, cancel: noop, ...market };
+        coolingDown: false, nextAllowedAt: null, run: () => requests.push(selected), cancel: noop, ...market };
     } },
   };
   const module = { exports: {} };
@@ -100,13 +101,35 @@ function harness({ locale = 'zh', analyze = async () => true, result = report(),
     native.props.onPress(); render();
   };
   const sheet = () => render().find(node => node.type === 'Sheet' && node.props.title === (locale === 'zh' ? '选择对话' : 'Choose a chat'));
-  render(); press(locale === 'zh' ? '新闻热点' : 'News themes');
-  if (selectedTopic === 'fed') press(locale === 'zh' ? '美联储' : 'Federal Reserve');
-  return { render, button, press, sheet, analyses, historyLoads, openedUrls, get writesAfterUnmount() { return writesAfterUnmount; },
+  render();
+  if (startAtNews) {
+    press(locale === 'zh' ? '新闻热点' : 'News themes');
+    if (selectedTopic === 'fed') press(locale === 'zh' ? '美联储' : 'Federal Reserve');
+  }
+  return { render, button, press, sheet, analyses, historyLoads, openedUrls, marketSelections, requests, get writesAfterUnmount() { return writesAfterUnmount; },
     async flush() { for (let i = 0; i < 10; i++) { await Promise.resolve(); if (mounted && dirty) render(); } },
     unmount() { mounted = false; slots.forEach(slot => slot.cleanup?.()); },
   };
 }
+
+test('company navigation opens company research directly and passes its conditions without a market request', () => {
+  for (const locale of ['zh', 'en']) {
+    const props = { initialCompanyQuery: 'Alphabet', initialCompanyIssuerId: 'sec:0001652044', initialCompanyView: 'filings', initialCompanyAccession: '0001652044-26-000001' };
+    const h = harness({ locale, startAtNews: false, props });
+    const all = h.render();
+    const panel = all.find(node => node.type === 'CompanyResearchPanel');
+    assert.ok(panel);
+    assert.equal(panel.props.initialCompanyQuery, props.initialCompanyQuery);
+    assert.equal(panel.props.initialCompanyIssuerId, props.initialCompanyIssuerId);
+    assert.equal(panel.props.initialCompanyView, 'filings');
+    assert.equal(panel.props.initialCompanyAccession, props.initialCompanyAccession);
+    assert.equal(h.button(locale === 'zh' ? '全球公司研究' : 'Global companies').props.selected, true);
+    assert.equal(h.button(locale === 'zh' ? '加密货币行情' : 'Crypto quotes').props.selected, false);
+    assert.equal(all.some(node => buttonName(node) === 'BTC'), false);
+    assert.ok(h.marketSelections.every(selection => selection.enabled === false));
+    assert.equal(h.requests.length, 0); assert.equal(h.analyses.length, 0);
+  }
+});
 
 test('Web Fed selection reads Q cache instead of asking the user to switch platforms', () => {
   const h = harness({ locale: 'en', platform: 'web', result: null, market: { phase: 'idle' } });

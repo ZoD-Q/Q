@@ -6,7 +6,7 @@ mod recommendation_rank;
 use app_turn::AppContext;
 use plugin_turn::{PluginTurn, ProposedCall};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -337,7 +337,7 @@ impl AiRuntime {
             };
             let mut upstream = None;
             let mut terminal = Err(StreamFailure::Upstream);
-            let mut proposed = None;
+            let mut proposed = Vec::new();
             let result = timeout_at(deadline, self.client.post(self.endpoint.clone())
                 .header(header::AUTHORIZATION, self.authorization.clone())
                 .header(header::ACCEPT, "text/event-stream")
@@ -353,7 +353,12 @@ impl AiRuntime {
             }
             if let Some(bytes) = upstream.as_mut() {
                 let mut decoder = SseDecoder::default();
-                let mut parser = CompletionParser { allow_tools: plugin.is_some() || app_tools, ..CompletionParser::default() };
+                // A provider can emit a parallel batch despite parallel_tool_calls=false.
+                // Only app reads tolerate a small batch; plugin proposals stay single.
+                let mut parser = CompletionParser {
+                    max_tool_calls: if plugin.is_some() { 1 } else if app_tools { app_turn::MAX_UPSTREAM_PROPOSALS } else { 0 },
+                    ..CompletionParser::default()
+                };
                 let mut phase = if thinking { "thinking" } else { "responding" };
                 let mut input_bytes = 0usize;
                 yield Ok(event("status", json!({"phase":phase})));
@@ -375,7 +380,7 @@ impl AiRuntime {
                     for frame in frames {
                         if frame.trim().is_empty() { continue; }
                         if frame.trim() == "[DONE]" {
-                            proposed = parser.tool_call.clone();
+                            proposed = parser.tool_calls.values().cloned().collect();
                             terminal = parser.finish();
                             break 'receive;
                         }
@@ -401,7 +406,7 @@ impl AiRuntime {
             match terminal {
                 Ok((finish_reason, usage)) => {
                     if finish_reason == "tool_calls" {
-                        let Some(call) = proposed.as_ref() else {
+                        let Some(call) = proposed.first() else {
                             yield Ok(event("error", json!({"code":"AI_UPSTREAM_ERROR","message":"The model returned an invalid tool proposal."}))); return;
                         };
                         if let Some(plugin) = plugin.as_ref() {
@@ -411,7 +416,7 @@ impl AiRuntime {
                                 Err(_) => { yield Ok(event("error", json!({"code":"AI_TIMEOUT","message":"Tool proposal preparation timed out."}))); return; }
                             }
                         } else if app_tools {
-                            match app_turn::proposal(call, request.company_research_version == Some(1), request.filing_research_version == Some(1)) {
+                            match app_turn::first_proposal(&proposed, request.company_research_version == Some(1), request.filing_research_version == Some(1)) {
                                 Ok(proposal) => yield Ok(event("app_tool", proposal)),
                                 Err(error) => { yield Ok(event("error", json!({"code":error.code(),"message":error.message()}))); return; }
                             }
@@ -647,8 +652,8 @@ struct CompletionParser {
     has_answer: bool,
     finish_reason: Option<String>,
     usage: Option<Usage>,
-    allow_tools: bool,
-    tool_call: Option<ProposedCall>,
+    max_tool_calls: usize,
+    tool_calls: BTreeMap<usize, ProposedCall>,
 }
 struct Update {
     text: Option<String>,
@@ -688,12 +693,24 @@ impl CompletionParser {
         if let Some(calls) = delta.get("tool_calls").filter(|value| !value.is_null()) {
             let calls = calls.as_array().ok_or(StreamFailure::Upstream)?;
             if !calls.is_empty() {
-                if !self.allow_tools || calls.len() != 1 || self.finish_reason.is_some() {
+                if calls.len() > self.max_tool_calls || self.finish_reason.is_some() {
                     return Err(StreamFailure::Upstream);
                 }
-                self.tool_call
-                    .get_or_insert_with(ProposedCall::default)
-                    .append(&calls[0])?;
+                let mut frame_indexes = HashSet::new();
+                for call in calls {
+                    let index = call
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .and_then(|index| usize::try_from(index).ok())
+                        .filter(|index| *index < self.max_tool_calls)
+                        .ok_or(StreamFailure::Upstream)?;
+                    // Repeated indexes across frames are argument fragments. Repeated
+                    // indexes within one frame are ambiguous and never merged.
+                    if !frame_indexes.insert(index) {
+                        return Err(StreamFailure::Upstream);
+                    }
+                    self.tool_calls.entry(index).or_default().append(call)?;
+                }
             }
         }
         if delta
@@ -726,7 +743,7 @@ impl CompletionParser {
         if let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null()) {
             let reason = reason.as_str().ok_or(StreamFailure::Upstream)?;
             if !["stop", "length", "content_filter"].contains(&reason)
-                && !(self.allow_tools && reason == "tool_calls")
+                && !(self.max_tool_calls > 0 && reason == "tool_calls")
             {
                 return Err(StreamFailure::Upstream);
             }
@@ -743,10 +760,20 @@ impl CompletionParser {
     }
     fn finish(self) -> Result<(String, Option<Usage>), StreamFailure> {
         if self.finish_reason.as_deref() == Some("tool_calls") {
-            if !self.allow_tools || self.tool_call.as_ref().is_none_or(|call| !call.valid()) {
+            let mut ids = HashSet::new();
+            if self.tool_calls.is_empty()
+                || self.tool_calls.len() > self.max_tool_calls
+                || self
+                    .tool_calls
+                    .iter()
+                    .enumerate()
+                    .any(|(expected, (index, call))| {
+                        *index != expected || !call.valid() || !ids.insert(call.id())
+                    })
+            {
                 return Err(StreamFailure::Upstream);
             }
-        } else if !self.has_answer || self.tool_call.is_some() {
+        } else if !self.has_answer || !self.tool_calls.is_empty() {
             return Err(StreamFailure::Upstream);
         }
         Ok((
@@ -1049,6 +1076,145 @@ mod tests {
         assert!(parser.accept(&json!({"choices":[{"delta":{"content":"x".repeat(MAX_OUTPUT_BYTES + 1)},"finish_reason":null}]}).to_string()).is_err());
     }
 
+    // Matches the observed provider shape: two separately indexed searches,
+    // with function headers and JSON arguments split across many SSE deltas.
+    fn parallel_search_deltas() -> Vec<Value> {
+        let mut deltas = Vec::new();
+        for (index, fragments) in [
+            (
+                0,
+                vec![
+                    "{\"", "query", "\"", ": \"", "Al", "phabet", " Inc", "\"", "}",
+                ],
+            ),
+            (1, vec!["{\"", "query", "\"", ": \"", "Google", "\"", "}"]),
+        ] {
+            deltas.push(json!({"tool_calls":[{"index":index,"id":format!("fixture_search_{index}"),"type":"function","function":{"name":"q_company_search","arguments":""}}]}));
+            for fragment in fragments {
+                deltas.push(
+                    json!({"tool_calls":[{"index":index,"function":{"arguments":fragment}}]}),
+                );
+            }
+        }
+        deltas
+    }
+
+    fn accept_tool_delta(
+        parser: &mut CompletionParser,
+        delta: Value,
+    ) -> Result<Update, StreamFailure> {
+        parser.accept(
+            &json!({"choices":[{"index":0,"delta":delta,"finish_reason":null}]}).to_string(),
+        )
+    }
+
+    fn end_tool_stream(parser: &mut CompletionParser) -> Result<Update, StreamFailure> {
+        parser.accept(
+            &json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}).to_string(),
+        )
+    }
+
+    #[test]
+    fn provider_parallel_fragments_are_app_only_and_select_one_ordered_proposal() {
+        let mut parser = CompletionParser {
+            max_tool_calls: app_turn::MAX_UPSTREAM_PROPOSALS,
+            ..CompletionParser::default()
+        };
+        for delta in parallel_search_deltas() {
+            assert!(
+                accept_tool_delta(&mut parser, delta)
+                    .unwrap()
+                    .text
+                    .is_none()
+            );
+        }
+        end_tool_stream(&mut parser).unwrap();
+        let calls: Vec<_> = parser.tool_calls.values().cloned().collect();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            serde_json::from_str::<Value>(&calls[1].arguments).unwrap(),
+            json!({"query":"Google"})
+        );
+        assert_eq!(
+            app_turn::first_proposal(&calls, true, false).unwrap(),
+            json!({"name":"company_search","arguments":{"query":"Alphabet Inc"}})
+        );
+        assert!(app_turn::first_proposal(&calls, false, false).is_err());
+        assert_eq!(parser.finish().unwrap().0, "tool_calls");
+
+        // The same unsolicited batch is still rejected for ordinary chat and
+        // for the single-proposal plugin path, including potential writes.
+        for max_tool_calls in [0, 1] {
+            let mut parser = CompletionParser {
+                max_tool_calls,
+                ..CompletionParser::default()
+            };
+            assert!(
+                parallel_search_deltas()
+                    .into_iter()
+                    .any(|delta| accept_tool_delta(&mut parser, delta).is_err())
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_tool_batches_reject_ambiguous_indexes_ids_and_invalid_tails() {
+        let call = |index, id: &str, arguments: &str| json!({"index":index,"id":id,"type":"function","function":{"name":"q_app_info","arguments":arguments}});
+        for calls in [
+            vec![call(0, "a", "{}"), call(0, "b", "{}")],
+            vec![call(3, "a", "{}")],
+            vec![
+                call(0, "a", "{}"),
+                call(1, "b", "{}"),
+                call(2, "c", "{}"),
+                call(3, "d", "{}"),
+            ],
+            vec![call(0, "a", "{}"), call(1, "b", &"x".repeat(8001))],
+            vec![json!({"index":-1,"id":"a","function":{"name":"q_app_info","arguments":"{}"}})],
+            vec![json!({"index":0.5,"id":"a","function":{"name":"q_app_info","arguments":"{}"}})],
+            vec![
+                json!({"index":u64::MAX,"id":"a","function":{"name":"q_app_info","arguments":"{}"}}),
+            ],
+            vec![
+                json!({"index":0,"id":"a","type":"other","function":{"name":"q_app_info","arguments":"{}"}}),
+            ],
+        ] {
+            let mut parser = CompletionParser {
+                max_tool_calls: app_turn::MAX_UPSTREAM_PROPOSALS,
+                ..CompletionParser::default()
+            };
+            assert!(accept_tool_delta(&mut parser, json!({"tool_calls":calls})).is_err());
+        }
+        for calls in [
+            vec![call(1, "b", "{}")],
+            vec![call(0, "a", "{}"), call(2, "c", "{}")],
+            vec![call(0, "same", "{}"), call(1, "same", "{}")],
+            vec![call(0, "a", "{}"), call(1, "b", "not JSON")],
+        ] {
+            let mut parser = CompletionParser {
+                max_tool_calls: app_turn::MAX_UPSTREAM_PROPOSALS,
+                ..CompletionParser::default()
+            };
+            accept_tool_delta(&mut parser, json!({"tool_calls":calls})).unwrap();
+            end_tool_stream(&mut parser).unwrap();
+            assert!(parser.finish().is_err());
+        }
+        let mut parser = CompletionParser {
+            max_tool_calls: app_turn::MAX_UPSTREAM_PROPOSALS,
+            ..CompletionParser::default()
+        };
+        for (index, module) in [(2, "video"), (0, "insurance"), (1, "wallet")] {
+            accept_tool_delta(&mut parser, json!({"tool_calls":[call(index, &format!("id_{index}"), &json!({"module":module}).to_string())]})).unwrap();
+        }
+        let calls: Vec<_> = parser.tool_calls.values().cloned().collect();
+        assert_eq!(
+            app_turn::first_proposal(&calls, false, false).unwrap(),
+            json!({"name":"app_info","arguments":{"module":"insurance"}})
+        );
+        end_tool_stream(&mut parser).unwrap();
+        assert_eq!(parser.finish().unwrap().0, "tool_calls");
+    }
+
     #[test]
     fn admission_is_user_scoped_global_bounded_and_rate_limited() {
         let runtime = AiRuntime::test_fixture(
@@ -1121,13 +1287,28 @@ mod tests {
                     if mode == "quota" { return (StatusCode::PAYMENT_REQUIRED, "UPSTREAM_SECRET_BODY").into_response(); }
                     if mode == "redirect" { return (StatusCode::TEMPORARY_REDIRECT, [("location", "/chat")]).into_response(); }
                     if mode == "slow" { tokio::time::sleep(Duration::from_secs(2)).await; }
+                    if mode == "app_parallel_fragments" {
+                        let mut wire = parallel_search_deltas().into_iter().map(|delta| chunk(delta, Value::Null)).collect::<String>();
+                        wire.push_str(&chunk(json!({}), json!("tool_calls")));
+                        wire.push_str("data: [DONE]\n\n");
+                        return ([("content-type", "text/event-stream")], wire).into_response();
+                    }
                     if mode.starts_with("app_") {
                         let name = if mode == "app_unknown" { "q_bank_balance" } else if mode == "app_company" { "q_company_search" } else if mode == "app_filing" { "q_company_filing" } else { "q_app_info" };
                         let arguments = if mode == "app_filing" { json!({"issuerId":"sec:0000320193","accession":"0001140361-26-015711"}) } else if mode == "app_company" { json!({"query":"Toyota"}) } else if mode == "app_arguments" { json!({"module":"insurance","url":"https://example.com"}) } else { json!({"module":"insurance"}) };
                         let mut call = json!({"index":0,"id":"fixture_call","type":"function","function":{"name":name,"arguments":arguments.to_string()}});
                         if mode == "app_no_id" { call.as_object_mut().unwrap().remove("id"); }
                         let mut calls = vec![call];
-                        if mode == "app_parallel" { calls.push(json!({"index":1,"id":"second","type":"function","function":{"name":"q_app_info","arguments":"{\"module\":\"all\"}"}})); }
+                        if mode.starts_with("app_parallel") {
+                            let (name, arguments) = match mode {
+                                "app_parallel_unknown" => ("q_bank_transfer", json!({})),
+                                "app_parallel_company" => ("q_company_search", json!({"query":"Google"})),
+                                "app_parallel_filing" => ("q_company_filings", json!({"issuerId":"sec:0001652044"})),
+                                "app_parallel_arguments" => ("q_app_info", json!({"module":"insurance","url":"https://example.com"})),
+                                _ => ("q_app_info", json!({"module":"all"})),
+                            };
+                            calls.push(json!({"index":1,"id":"second","type":"function","function":{"name":name,"arguments":arguments.to_string()}}));
+                        }
                         let wire = format!("{}{}data: [DONE]\n\n", chunk(json!({"tool_calls":calls}), Value::Null), chunk(json!({}), json!("tool_calls")));
                         return ([("content-type", "text/event-stream")], wire).into_response();
                     }
@@ -1302,7 +1483,11 @@ mod tests {
             ("app_unknown", Some(1), false, false),
             ("app_arguments", Some(1), false, false),
             ("app_no_id", Some(1), false, false),
-            ("app_parallel", Some(1), false, false),
+            ("app_parallel", Some(1), false, true),
+            ("app_parallel_unknown", Some(1), false, false),
+            ("app_parallel_company", Some(1), false, false),
+            ("app_parallel_filing", Some(1), false, false),
+            ("app_parallel_arguments", Some(1), false, false),
         ] {
             let stub = Stub::start(mode).await;
             let runtime = stub.runtime(Duration::from_secs(3), Duration::from_secs(1));
@@ -1325,6 +1510,10 @@ mod tests {
             let events = decode_public(&to_bytes(response.into_body(), 1_000_000).await.unwrap());
             assert!(!events.iter().any(|(name, _)| name == "tool_proposal"));
             if success {
+                assert_eq!(
+                    events.iter().filter(|(name, _)| name == "app_tool").count(),
+                    1
+                );
                 let app = events
                     .iter()
                     .position(|(name, _)| name == "app_tool")
@@ -1355,6 +1544,54 @@ mod tests {
                     .is_some(),
                 version.is_some() && !exhausted
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_batch_does_not_expand_the_remaining_application_budget() {
+        for (contexts, final_only, allowed) in [
+            (0, false, true),
+            (2, false, true),
+            (3, false, false),
+            (1, true, false),
+        ] {
+            let stub = Stub::start("app_parallel_fragments").await;
+            let runtime = stub.runtime(Duration::from_secs(3), Duration::from_secs(1));
+            let mut input = request();
+            input.app_tools_version = Some(1);
+            input.company_research_version = Some(1);
+            input.app_final_only = final_only;
+            input.app_context = (0..contexts)
+                .map(|_| app_turn::AppContext {
+                    name: "app_info".into(),
+                    arguments: json!({"module":"insurance"}),
+                    result: "Prior public catalogue".into(),
+                })
+                .collect();
+            input.validate().unwrap();
+            let response =
+                runtime
+                    .clone()
+                    .response(input, runtime.reserve(Uuid::new_v4()).unwrap(), None);
+            let events = decode_public(&to_bytes(response.into_body(), 1_000_000).await.unwrap());
+            let proposals: Vec<_> = events
+                .iter()
+                .filter(|(name, _)| name == "app_tool")
+                .collect();
+            assert_eq!(proposals.len(), usize::from(allowed));
+            if allowed {
+                assert_eq!(
+                    proposals[0].1,
+                    json!({"name":"company_search","arguments":{"query":"Alphabet Inc"}})
+                );
+                assert_eq!(events.last().unwrap().1["finish_reason"], "tool_calls");
+            } else {
+                assert_eq!(events.last().unwrap().1["code"], "AI_UPSTREAM_ERROR");
+                assert!(!events.iter().any(|(name, _)| name == "done"));
+            }
+            assert!(!events.iter().any(|(name, _)| name == "tool_proposal"));
+            assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(runtime.admissions.lock().unwrap().active, 0);
         }
     }
 
