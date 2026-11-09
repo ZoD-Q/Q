@@ -53,6 +53,7 @@
 - API 类型重新生成，无生成差异；没有手工编辑共享生成类型。
 - Rust fmt、默认和全功能 all-targets Clippy、默认 cargo test 通过；默认测试中原有忽略项没有计为通过。
 - 独立 PostgreSQL 的 `ai_chat` 8 项、`ai_history` 3 项、`ai_plugins` 5 项、`plugins` 12 项，共 28 项通过。
+- 远端检查暴露既有删除竞态测试对状态码的过窄假设。凭据请求在鉴权后遇到已删除连接可安全返回 `404 / PLUGIN_NOT_FOUND`；测试仍严格校验该组合或 `401 / UNAUTHORIZED`，连接创建仍只接受后者，零连接／零凭据断言保留。追加 `financial_plugins` 11 项及该竞态连续十次隔离复测通过，生产权限实现未改动。
 - 独立代码 review 复核了流式多提案权限边界、来源与导航、恢复状态、Unicode／Markdown、私人财务隔离；指出的阻断项均修复并重测。
 
 本机原始请求轨迹、构建与测试日志保留在忽略目录。远端自动检查必须以提交后的 GitHub／GitLab 最新提交为准；合并与正式部署继续由人工执行。
