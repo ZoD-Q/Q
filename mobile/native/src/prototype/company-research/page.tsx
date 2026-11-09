@@ -3,15 +3,18 @@ import { AppState, Linking, Pressable, View } from 'react-native';
 import { fetch as expoFetch } from 'expo/fetch';
 import { Input, Sheet, Type, useDesign } from '../design';
 import { listCompanyFilings, readCompanyFiling, filingErrorText } from './filings-client';
-import { buildFilingEvidenceText, type FilingCatalog, type FilingDocument } from './filings-core';
+import { buildFilingEvidenceText, isFilingAccession, isFilingIssuerId, type FilingCatalog, type FilingDocument } from './filings-core';
 import { searchCompanies, researchCompany } from './client';
-import { buildCompanyResearchText, companyGapText, companyOfficialFilingsPage, SEC_PUBLIC_SEARCH, type CompanySearchReport, type CompanyResearchReport } from './core';
+import { buildCompanyResearchText, companyGapText, companyOfficialFilingsPage, CompanyResearchError, SEC_PUBLIC_SEARCH, validateCompanyQuery, validateIssuerId, type CompanySearchReport, type CompanyResearchReport } from './core';
+import { forgetCompanyFilingResult, readCompanyFilingResult, readCompanyResult, rememberCompanyFilingResult, rememberCompanyResult } from './handoff';
 
 type Report = CompanySearchReport | CompanyResearchReport;
 type Props = {
   active: boolean; onAnalyze: (draft: string, conversationId?: string, signal?: AbortSignal) => Promise<boolean>;
   conversations?: { id: string; title: string }[]; historyBusy?: boolean; historyError?: boolean; hasMoreHistory?: boolean;
   onLoadHistory?: (more: boolean) => void; signedIn?: boolean;
+  initialCompanyQuery?: string; initialCompanyIssuerId?: string;
+  initialCompanyView?: 'overview' | 'filings'; initialCompanyAccession?: string;
 };
 function Button({ label, onPress, disabled = false, primary = false, selected }: { label: string; onPress: () => void; disabled?: boolean; primary?: boolean; selected?: boolean }) {
   const { colors } = useDesign();
@@ -56,12 +59,30 @@ const filingLimitations: Record<string, string> = {
 const trustedLink = (value: string) => {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && !url.port && ['www.sec.gov', 'data.sec.gov', 'www.wikidata.org', 'query.wikidata.org'].includes(url.hostname); } catch { return false; }
 };
-export function CompanyResearchPanel({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false }: Props) {
+const readableMarket = (value: string, locale: 'zh' | 'en') => /^(?:Q[1-9][0-9]*|unknown)$/i.test(value)
+  ? locale === 'zh' ? '交易所待核对' : 'Exchange unverified' : value;
+const fetchedTime = (value: string, locale: 'zh' | 'en') => Number.isFinite(Date.parse(value))
+  ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : locale === 'zh' ? '未提供' : 'Not provided';
+export function CompanyResearchPanel({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false, initialCompanyQuery, initialCompanyIssuerId, initialCompanyView, initialCompanyAccession }: Props) {
   const { text, colors, locale } = useDesign();
   const browser = process.env.EXPO_OS === 'web';
-  const [query, setQuery] = useState('');
-  const [search, setSearch] = useState<CompanySearchReport | null>(null);
-  const [report, setReport] = useState<CompanyResearchReport | null>(null);
+  const [entry] = useState(() => readCompanyResult({ query: initialCompanyQuery, issuerId: initialCompanyIssuerId }));
+  const [filingEntry] = useState(() => {
+    if (!isFilingIssuerId(initialCompanyIssuerId)) return { catalog: null, document: null };
+    const catalog = readCompanyFilingResult({ issuerId: initialCompanyIssuerId });
+    const document = isFilingAccession(initialCompanyAccession) ? readCompanyFilingResult({ issuerId: initialCompanyIssuerId, accession: initialCompanyAccession }) : null;
+    return { catalog: catalog && 'filings' in catalog ? catalog : null, document: document && 'filing' in document ? document : null };
+  });
+  const [query, setQuery] = useState(() => {
+    const value = initialCompanyQuery ?? (entry?.kind === 'company-search' ? entry.query : entry?.company?.name) ?? filingEntry.document?.company_name ?? filingEntry.catalog?.company_name;
+    return validateCompanyQuery(value) ? value.trim() : '';
+  });
+  const [pendingIssuer, setPendingIssuer] = useState(() => validateIssuerId(initialCompanyIssuerId) ? initialCompanyIssuerId : null);
+  const [pendingAccession, setPendingAccession] = useState(() => isFilingAccession(initialCompanyAccession) ? initialCompanyAccession : null);
+  const [search, setSearch] = useState<CompanySearchReport | null>(entry?.kind === 'company-search' ? entry : null);
+  const [report, setReport] = useState<CompanyResearchReport | null>(entry?.kind === 'company-research' ? entry : null);
+  const [reusedResult, setReusedResult] = useState(Boolean(entry || filingEntry.catalog || filingEntry.document));
+  const [sourceDetails, setSourceDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [cancelled, setCancelled] = useState(false);
@@ -70,9 +91,9 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
   const [handoffError, setHandoffError] = useState(false);
   const [outbound, setOutbound] = useState<string | null>(null);
   const [linkError, setLinkError] = useState(false);
-  const [reportTab, setReportTab] = useState<'overview' | 'filings'>('overview');
-  const [filingCatalog, setFilingCatalog] = useState<FilingCatalog | null>(null);
-  const [filingDocument, setFilingDocument] = useState<FilingDocument | null>(null);
+  const [reportTab, setReportTab] = useState<'overview' | 'filings'>(initialCompanyView === 'filings' || initialCompanyAccession ? 'filings' : 'overview');
+  const [filingCatalog, setFilingCatalog] = useState<FilingCatalog | null>(filingEntry.catalog);
+  const [filingDocument, setFilingDocument] = useState<FilingDocument | null>(filingEntry.document);
   const [filingBusy, setFilingBusy] = useState(false);
   const [filingError, setFilingError] = useState<unknown>(null);
   const [sectionPicker, setSectionPicker] = useState(false);
@@ -101,33 +122,40 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
   const run = async (issuerId?: string) => {
     if (!enabled.current || AppState.currentState !== 'active' || controller.current || handoff) return;
     const request = new AbortController(); controller.current = request;
-    setBusy(true); setError(false); setCancelled(false); setReport(null); setReportTab('overview'); setFilingCatalog(null); setFilingDocument(null); setFilingError(null); filingController.current?.abort(); filingController.current = null;
+    const keepFilings = issuerId && (filingDocument?.issuer_id === issuerId || filingCatalog?.issuer_id === issuerId);
+    setBusy(true); setError(false); setCancelled(false); setReport(null); setPendingIssuer(issuerId ?? null); setReusedResult(false); setSourceDetails(false); setReportTab('overview'); setFilingError(null); filingController.current?.abort(); filingController.current = null;
+    if (!keepFilings) { setPendingAccession(null); setFilingCatalog(null); setFilingDocument(null); }
     if (!issuerId) setSearch(null);
     try {
       const options = { signal: request.signal, transport: expoFetch };
       const result = issuerId ? await researchCompany(issuerId, options) : await searchCompanies(query.trim(), options);
       if (!mounted.current || !enabled.current || request.signal.aborted || controller.current !== request) return;
+      rememberCompanyResult(result);
       if (result.kind === 'company-search') setSearch(result); else setReport(result);
     } catch { if (mounted.current && enabled.current && !request.signal.aborted) setError(true); }
     finally { if (mounted.current && controller.current === request) { controller.current = null; setBusy(false); } }
   };
   const filingIssuer = report?.issuerId.startsWith('sec:') ? report.issuerId
-    : report?.company?.cik && report.sources.some(source => source.source === 'sec-submissions' && source.status === 'available') ? `sec:${report.company.cik}` : null;
+    : report?.company?.cik && report.sources.some(source => source.source === 'sec-submissions' && source.status === 'available') ? `sec:${report.company.cik}`
+      : isFilingIssuerId(pendingIssuer) ? pendingIssuer : null;
   const readFilings = async (accession?: string, offset = 0, expectedSha256?: string) => {
     if (!filingIssuer || !enabled.current || AppState.currentState !== 'active' || filingController.current || handoff) return;
     const request = new AbortController(); filingController.current = request;
-    setFilingBusy(true); setFilingError(null); setSectionPicker(false); setCancelled(false);
+    setFilingBusy(true); setFilingError(null); setSectionPicker(false); setCancelled(false); setPendingAccession(accession ?? null); setReusedResult(false);
     try {
       const options = { signal: request.signal, transport: expoFetch, offset, expectedSha256 };
       if (accession) {
         const value = await readCompanyFiling(filingIssuer, accession, options);
-        if (mounted.current && enabled.current && !request.signal.aborted && filingController.current === request) setFilingDocument(value);
+        if (mounted.current && enabled.current && !request.signal.aborted && filingController.current === request) { rememberCompanyFilingResult(value); setFilingDocument(value); }
       } else {
         const value = await listCompanyFilings(filingIssuer, options);
-        if (mounted.current && enabled.current && !request.signal.aborted && filingController.current === request) { setFilingCatalog(value); setFilingDocument(null); }
+        if (mounted.current && enabled.current && !request.signal.aborted && filingController.current === request) { rememberCompanyFilingResult(value); setFilingCatalog(value); setFilingDocument(null); }
       }
     } catch (failure) {
-      if (mounted.current && enabled.current && !request.signal.aborted && filingController.current === request) { setFilingError(failure); setFilingDocument(null); }
+      if (mounted.current && enabled.current && !request.signal.aborted && filingController.current === request) {
+        if (accession && failure instanceof CompanyResearchError && failure.code === 'RESEARCH_DOCUMENT_CHANGED') forgetCompanyFilingResult({ issuerId: filingIssuer, accession });
+        setFilingError(failure); setFilingDocument(null);
+      }
     } finally { if (mounted.current && filingController.current === request) { filingController.current = null; setFilingBusy(false); } }
   };
   const preview = (url: string) => { if (trustedLink(url)) { setLinkError(false); setOutbound(url); } };
@@ -144,31 +172,45 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
     finally { if (mounted.current && draftController.current === request) { draftController.current = null; setHandoffBusy(false); } }
   };
   const current = report ?? search;
+  const showCompany = Boolean(report || pendingIssuer && (initialCompanyView === 'filings' || initialCompanyAccession || filingCatalog || filingDocument));
+  const companyName = report?.company?.name ?? filingDocument?.company_name ?? filingCatalog?.company_name ?? (query.trim() || text('已选公司', 'Selected company'));
+  const financialIssuer = report?.issuerId ?? pendingIssuer;
+  const missingFinancialData = report?.company?.cik === null
+    ? text('目前未接入这家公司的年度财务数据，不能据此分析业绩。可在“来源与范围”查看公司来源资料。', 'Annual financial data is not connected for this company, so its performance cannot be analyzed here. Review its issuer sources under Sources and coverage.')
+    : !report?.company
+      ? text('尚未确认这家公司对应的财报，暂时不能给出业绩结论。请核对公司后重新选择。', 'The matching company financials have not been verified, so no performance conclusion can be drawn. Check the company and select it again.')
+      : report.sources.some(source => source.status === 'error')
+        ? text('财报来源暂时未能读取，当前没有可分析的年度数据。可以重试读取或查看官方披露。', 'The financial source could not be read, so annual data is unavailable for analysis. Retry the read or review official disclosures.')
+        : text('本次披露中未取得可展示的年度指标，不能把缺失值当作零。可以查看披露原文。', 'No supported annual measures were retrieved from these disclosures. Missing values are not zero; review the original disclosures.');
   return <View style={{ gap: 18 }}>
     <Type header size={24} weight="600">{text('全球公司研究', 'Global company research')}</Type>
-    <Type size={14} muted>{text('输入公司名或证券代码，核对交易所后选择研究对象。公开目录并不覆盖全部上市公司；上市记录和财报可用范围会分别显示。', 'Search by company name or ticker, then check the exchange and select a candidate. Public directories do not cover every listed company; listing records and financial coverage are shown separately.')}</Type>
+    <Type size={14} muted>{text('查找公司，查看公开财务数据和披露文件。', 'Find a company and review its public financial data and disclosures.')}</Type>
     {browser ? <View style={{ gap: 8 }}>
-      <Type size={14} muted>{text('浏览器查询 Wikidata 公司与上市资料；SEC 目录和财报不允许网页直接读取，本页不会请求。可在小Q App的「金融数据」中查询财报，或前往 SEC 官网核对。', 'Browser searches read Wikidata issuer and listing records. SEC directories and financial data do not allow direct browser reads and will not be requested here. Use Financial data in the Q app or check the SEC site.')}</Type>
+      <Type size={14} muted>{text('浏览器暂不能直接读取 SEC 年度财务数据，可在小Q App查询财务概览，或查看官方披露。', 'SEC annual financial data cannot be read directly in the browser. Use the Q app for the financial overview, or view official disclosures.')}</Type>
       <Button label={text('查看 SEC 官方披露', 'View official SEC disclosures')} onPress={() => preview(SEC_PUBLIC_SEARCH)} />
     </View> : null}
     <Input label={text('公司名称或代码', 'Company name or ticker')} value={query} maxLength={120} autoCapitalize="none" autoCorrect={false}
       returnKeyType="search" onSubmitEditing={() => { if (!busy && !handoff && query.trim()) void run(); }}
       placeholder={text('例如 Toyota、腾讯、TSM', 'For example Toyota, Tencent, TSM')} editable={!busy && !handoff}
-      onChangeText={value => { filingController.current?.abort(); filingController.current = null; setFilingBusy(false); setQuery(value); setSearch(null); setReport(null); setFilingCatalog(null); setFilingDocument(null); setFilingError(null); setError(false); setCancelled(false); }} />
+      onChangeText={value => { controller.current?.abort(); controller.current = null; setBusy(false); filingController.current?.abort(); filingController.current = null; setFilingBusy(false); setQuery(value); setPendingIssuer(null); setPendingAccession(null); setReusedResult(false); setSourceDetails(false); setSearch(null); setReport(null); setFilingCatalog(null); setFilingDocument(null); setFilingError(null); setError(false); setCancelled(false); }} />
     <Button primary label={busy ? text('正在读取公开来源…', 'Reading public sources…') : text('搜索公司', 'Search companies')} disabled={!active || busy || !query.trim() || Boolean(handoff)} onPress={() => void run()} />
+    {!current && pendingIssuer && !browser && !showCompany ? <View style={{ gap: 8 }}>
+      <Type size={14} muted>{text('刚才的资料需要重新读取，所选公司已保留。', 'The previous material needs to be read again. Your selected company is preserved.')}</Type>
+      <Button label={text('读取已选公司的财报资料', 'Read the selected company’s financial data')} disabled={!active || busy || Boolean(handoff)} onPress={() => void run(pendingIssuer)} />
+    </View> : null}
     {busy ? <Button label={text('取消查询', 'Cancel query')} onPress={cancel} /> : null}
-    {!current && !busy && !error && !cancelled ? <Type muted size={13}>{text('尚未查询；只有点击搜索才会访问公开来源。', 'Not queried. Public sources are requested only after you tap search.')}</Type> : null}
+    {!current && !busy && !error && !cancelled && !pendingIssuer ? <Type muted size={13}>{text('输入公司后点击搜索，打开此页不会自动查询。', 'Enter a company and tap search. Opening this page does not start a query.')}</Type> : null}
+    {(current || filingCatalog || filingDocument) && reusedResult ? <Type size={13} muted>{text('已接续本次会话取得的资料，没有重新查询。', 'Continuing with material retrieved in this session; no new query was made.')}</Type> : null}
     {error ? <Type color={colors.danger}>{text('公开来源暂时无法读取，请稍后手动重试。未生成替代数据。', 'Public sources could not be read. Retry manually later; no substitute data was generated.')}</Type> : null}
     {cancelled ? <Type muted>{text('查询已取消。下方已取得的资料仍保留原获取时间。', 'Query cancelled. Any previously retrieved data retains its original retrieval time.')}</Type> : null}
-    {search && !report ? <View style={{ gap: 14 }}>
+    {search && !showCompany ? <View style={{ gap: 14 }}>
       <Type weight="600">{text('公司候选', 'Company candidates')} · {search.candidates.length}</Type>
-      {!search.candidates.length ? <Type muted>{text('本次没有匹配候选。请结合下方来源状态判断；这不代表该公司不存在。', 'No candidate matched this search. Check source status below; this does not establish that the company does not exist.')}</Type> : null}
+      {!search.candidates.length ? <Type muted>{text('暂未找到匹配公司。可以改用公司英文名或证券代码搜索。', 'No matching company was found. Try its English name or ticker.')}</Type> : null}
       {search.candidates.map(candidate => <View key={candidate.issuerId} style={{ gap: 10, backgroundColor: colors.surface, borderRadius: 18, borderCurve: 'continuous', padding: 18 }}>
         <Type size={18} weight="600" selectable>{candidate.name}</Type>
-        <Type size={12} muted selectable>{candidate.issuerId} · {candidate.source}</Type>
+        <Type size={12} muted>{candidate.source === 'sec' ? text('SEC 申报公司', 'SEC reporting company') : text('Wikidata 公司候选', 'Wikidata company candidate')}</Type>
         {candidate.listings.map((listing, index) => <View key={`${listing.exchange}:${listing.ticker}:${index}`} style={{ gap: 4 }}>
-          <Type size={13} selectable>{/^Q[1-9][0-9]*$/.test(listing.exchange) ? text('交易所资料 ', 'Exchange record ') : ''}{listing.exchange} · {listing.ticker} · {listing.status === 'historical' ? text('历史上市记录', 'Historical listing') : text('当前上市状态未核验', 'Current listing status unverified')}</Type>
-          {/^Q[1-9][0-9]*$/.test(listing.exchange) ? <Button label={text('核对交易所', 'Check exchange')} onPress={() => preview(`https://www.wikidata.org/wiki/${listing.exchange}`)} /> : null}
+          <Type size={13} selectable>{listing.ticker} · {readableMarket(listing.exchange, locale)}{listing.status === 'historical' ? text(' · 历史记录', ' · Historical record') : ''}</Type>
         </View>)}
         {browser ? <>
           <Button label={text('查看公司来源资料', 'View issuer source')} onPress={() => preview(candidate.sourceUrl)} />
@@ -176,27 +218,37 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
         </> : <Button label={text('读取此公司公开财报资料', 'Read this company’s public financial data')} disabled={busy || !active || Boolean(handoff)} onPress={() => void run(candidate.issuerId)} />}
       </View>)}
     </View> : null}
-    {report ? <View style={{ gap: 14 }}>
-      {search ? <Button label={text('返回公司候选', 'Back to candidates')} disabled={busy || Boolean(handoff)} onPress={() => { filingController.current?.abort(); filingController.current = null; setFilingBusy(false); setReport(null); setFilingCatalog(null); setFilingDocument(null); setReportTab('overview'); }} /> : null}
-      <Type size={20} weight="600" selectable>{report.company?.name ?? report.issuerId}</Type>
+    {showCompany ? <View style={{ gap: 14 }}>
+      {search ? <Button label={text('返回公司候选', 'Back to candidates')} disabled={busy || Boolean(handoff)} onPress={() => { filingController.current?.abort(); filingController.current = null; setFilingBusy(false); setPendingIssuer(null); setPendingAccession(null); setReport(null); setFilingCatalog(null); setFilingDocument(null); setReportTab('overview'); }} /> : null}
+      <Type size={20} weight="600" selectable>{companyName}</Type>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button label={text('财务概览', 'Financial overview')} selected={reportTab === 'overview'} disabled={filingBusy || Boolean(handoff)} onPress={() => setReportTab('overview')} />
         <Button label={text('披露原文', 'Original disclosures')} selected={reportTab === 'filings'} disabled={busy || Boolean(handoff)} onPress={() => setReportTab('filings')} />
       </View>
-      {reportTab === 'overview' ? <>
-      <Type size={13} muted>{text('财务指标来自结构化申报；不代表已读取财报全文、风险讨论或全球实时行情。', 'Financial values come from structured filings. Full report text, risk discussions and global live quotes have not been read.')}</Type>
-      {!report.facts.length ? <Type muted>{text('本次未取得可展示的年度财务数据；缺失值不按零处理。', 'No annual financial values are available in this result; missing values are not zero.')}</Type> : null}
+      {reportTab === 'overview' ? report ? <>
+      {!report.facts.length ? <Type muted>{missingFinancialData}</Type> : null}
+      {!browser && report.company?.cik !== null ? <Button label={report.facts.length ? text('更新财务数据', 'Refresh financial data') : text('重试读取财务数据', 'Retry financial data')} disabled={!active || busy || Boolean(handoff)} onPress={() => void run(report.issuerId)} /> : null}
       {report.facts.map((fact, index) => <View key={`${fact.accession}:${fact.tag}:${index}`} style={{ gap: 5, paddingBottom: 14, borderBottomWidth: 1, borderColor: colors.line }}>
-        <Type weight="600" selectable>{metricLabels[fact.metric] ? text(...metricLabels[fact.metric]) : fact.metric} · {fact.value.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')} {fact.unit}</Type>
+        <Type weight="600" selectable>{metricLabels[fact.metric] ? text(...metricLabels[fact.metric]) : text('财务指标', 'Financial measure')} · {fact.value.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')} {fact.unit}</Type>
         <Type size={13} muted selectable>{fact.start ? `${fact.start} → ` : ''}{fact.end} · {fact.form}</Type>
-        <Type size={12} muted selectable>{text('申报日期：', 'Filed: ')}{fact.filed} · {fact.taxonomy}:{fact.tag}</Type>
+        <Type size={12} muted selectable>{text('申报日期：', 'Filed: ')}{fact.filed}</Type>
         <Button label={text('查看指标来源', 'View value source')} onPress={() => preview(fact.sourceUrl)} />
       </View>)}
       {report.calculations.map((item, index) => <View key={`${item.name}:${index}`} style={{ gap: 4 }}><Type selectable>{calculationLabels[item.name] ? text(...calculationLabels[item.name]) : text('计算指标', 'Calculated measure')}: {item.value === null ? text('不可计算', 'Unavailable') : `${item.value.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { maximumFractionDigits: 2 })}%`}</Type><Type size={13} muted selectable>{reasonLabels[item.reason] ? text(...reasonLabels[item.reason]) : text('请核对可比期间、币种及原始申报。', 'Check comparable periods, currency and original filings.')}</Type></View>)}
-      </> : <View style={{ gap: 16 }}>
-        <Type size={14} muted>{text('读取已核验 SEC 申报中的原始披露。段落编号用于引用，不是原文件页码。', 'Read original disclosures from verified SEC filings. Paragraph references are extraction identifiers, not source page numbers.')}</Type>
+      </> : <View style={{ gap: 8 }}>
+        <Type muted>{text('财务概览尚未读取。已取得的披露文件不等于年度财务数据。', 'The financial overview has not been read. Retrieved disclosure documents are not annual financial data.')}</Type>
+        {financialIssuer && !browser ? <Button label={text('读取财务概览', 'Read financial overview')} disabled={!active || busy || Boolean(handoff)} onPress={() => void run(financialIssuer)} /> : null}
+      </View> : <View style={{ gap: 16 }}>
+        <Type size={14} muted>{text('查看公司的官方披露。', 'Review the company’s official disclosures.')}</Type>
         {!filingIssuer ? <Type muted>{text('此公司尚未有已核验的 SEC 身份。中港等其他披露来源仍需独立接入。', 'This company has no verified SEC identity. Other disclosure sources require separate integration.')}</Type>
-          : !filingCatalog ? <Button primary label={text('读取披露目录', 'Load disclosure list')} disabled={filingBusy || !active} onPress={() => void readFilings()} /> : null}
+          : !filingBusy && !filingDocument && pendingAccession ? <View style={{ gap: 8 }}>
+            <Type muted>{text('已保留所选披露文件。点击读取正文后继续，打开此页不会自动读取。', 'Your selected disclosure is preserved. Read its text to continue; opening this page does not start the read.')}</Type>
+            <Button primary label={text('读取已选披露', 'Read selected disclosure')} disabled={filingBusy || !active} onPress={() => void readFilings(pendingAccession)} />
+            {!filingCatalog ? <Button label={text('选择其他披露', 'Choose another disclosure')} disabled={filingBusy || !active} onPress={() => { setPendingAccession(null); setFilingError(null); }} /> : null}
+          </View> : !filingBusy && !filingCatalog && !filingDocument ? <View style={{ gap: 8 }}>
+            <Type muted>{text('披露目录尚未读取，所选公司已保留。', 'The disclosure list has not been read. Your selected company is preserved.')}</Type>
+            <Button primary label={text('读取披露目录', 'Load disclosure list')} disabled={filingBusy || !active} onPress={() => void readFilings()} />
+          </View> : null}
         {filingBusy ? <><Type>{text('正在读取官方披露…', 'Reading official disclosures…')}</Type><Button label={text('取消读取', 'Cancel reading')} onPress={cancel} /></> : null}
         {!!filingError && <View accessibilityLiveRegion="polite"><Type selectable color={colors.danger}>{filingErrorText(filingError, locale)}</Type></View>}
         {filingCatalog && !filingDocument ? <View style={{ gap: 12 }}>
@@ -212,11 +264,11 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
           <Button label={text('刷新披露目录', 'Refresh disclosure list')} disabled={filingBusy || !active} onPress={() => void readFilings()} />
         </View> : null}
         {filingDocument && <View style={{ gap: 16 }}>
-          <Button label={text('返回披露目录', 'Back to disclosures')} disabled={filingBusy} onPress={() => { setFilingDocument(null); setFilingError(null); }} />
+          <Button label={text('返回披露目录', 'Back to disclosures')} disabled={filingBusy} onPress={() => { setFilingDocument(null); setPendingAccession(null); setFilingError(null); }} />
           <View style={{ padding: 18, borderRadius: 18, backgroundColor: colors.soft, gap: 8 }}>
             <Type size={20} weight="600">{filingDocument.filing.form} · {filingDocument.company_name}</Type>
             <Type size={14}>{text('报告期：', 'Report period: ')}{filingDocument.filing.report_date ?? text('未提供', 'Not provided')}</Type>
-            <Type size={13} muted>{text('申报：', 'Filed: ')}{filingDocument.filing.filed_at} · {text('获取：', 'Retrieved: ')}{filingDocument.fetched_at}</Type>
+            <Type size={13} muted>{text('申报：', 'Filed: ')}{filingDocument.filing.filed_at}</Type>
             <Button label={text('打开 SEC 原始文件', 'Open original SEC filing')} onPress={() => preview(filingDocument.filing.document_url)} />
           </View>
           {filingDocument.status === 'not_read' ? <Type muted>{text('当前格式尚未解析，不能将原文件链接当作已读取的正文。请打开原始文件核对。', 'This format has not been parsed. Its link is not evidence that the text was read. Open the original file to review it.')}</Type> : <>
@@ -239,18 +291,48 @@ export function CompanyResearchPanel({ active, onAnalyze, conversations = [], hi
             <Button primary label={text('将本页原文用于对话', 'Use these paragraphs in chat')} disabled={filingBusy} onPress={() => { setCitationIds(undefined); setHandoffError(false); setHandoff(filingDocument); }} />
             <Type size={13} muted>{text('仅准备带原文引用的草稿；超过对话长度时会明确省略段落。', 'Prepares a draft with source citations. Paragraphs omitted for length are clearly identified.')}</Type>
           </>}
-          {filingDocument.limitations.map((limitation, index) => <Type key={index} muted size={13}>{locale === 'zh' ? filingLimitations[limitation] ?? limitation : limitation}</Type>)}
         </View>}
       </View>}
     </View> : null}
-    {current && (!report || reportTab === 'overview') ? <View style={{ gap: 10 }}>
-      <Type size={13} muted selectable>{text('获取时间：', 'Retrieved: ')}{current.fetchedAt}</Type>
-      <Type weight="600">{text('本次来源与覆盖缺口', 'Sources and coverage gaps')}</Type>
-      {current.sources.map((source, index) => <View key={`${source.source}:${index}`} style={{ gap: 4 }}><Type size={13} selectable>{sourceLabels[source.source] ? text(...sourceLabels[source.source]) : text('公开来源', 'Public source')} · {source.status === 'available' ? text('读取成功', 'Read successfully') : source.status === 'not_read' ? text('浏览器不可直读 · 未请求', 'Not requested · browser restriction') : text('读取失败', 'Read failed')}{source.error ? ` · ${errorLabels[source.error] ? text(...errorLabels[source.error]) : text('来源暂时无法提供可用资料', 'Source cannot supply usable data right now')}` : ''}</Type><Button label={source.status === 'not_read' ? text('查看 SEC 官方披露', 'View official SEC disclosures') : text('查看公开来源', 'View public source')} onPress={() => preview(source.status === 'not_read' ? SEC_PUBLIC_SEARCH : source.url)} /></View>)}
-      {current.gaps.map((gap, index) => <Type key={index} size={13} muted selectable>{companyGapText(gap, locale)}</Type>)}
-      <Button label={text('用于对话', 'Use in chat')} disabled={!active || busy} onPress={() => { setCitationIds(undefined); setHandoffError(false); setHandoff(current); }} />
-      <Type size={13} muted>{text('仅准备草稿，由你确认发送。', 'Prepares a draft for you to review and send.')}</Type>
-    </View> : null}
+    <View style={{ gap: 10 }}>
+      <Button label={sourceDetails ? text('收起来源与范围', 'Hide sources and coverage') : text('来源与范围', 'Sources and coverage')} selected={sourceDetails} onPress={() => setSourceDetails(value => !value)} />
+      {sourceDetails ? <View style={{ gap: 12 }}>
+        <Type size={13} muted>{text('公开目录并不覆盖全部公司，上市状态需核对。财务概览来自已取得的标准年度申报数据，不包含实时股价；原文只代表实际读取的片段。', 'Public directories do not cover every company, and listing status needs verification. The overview uses retrieved standard annual filings, without live stock prices; excerpts cover only the text actually read.')}</Type>
+        <Type size={13} muted>{text('查询时，公司关键词和网络地址会发送给选定的公开来源；不会发送小Q登录凭据或私人财务记录。', 'Queries send the company search term and network address to the selected public sources, without Q credentials or private financial records.')}</Type>
+        {current ? <>
+          <Type size={13} muted selectable>{text('获取时间：', 'Retrieved: ')}{fetchedTime(current.fetchedAt, locale)}</Type>
+          {current.sources.map((source, index) => <View key={`${source.source}:${index}`} style={{ gap: 4 }}><Type size={13} selectable>{sourceLabels[source.source] ? text(...sourceLabels[source.source]) : text('公开来源', 'Public source')} · {source.status === 'available' ? text('读取成功', 'Read successfully') : source.status === 'not_read' ? text('浏览器不可直读 · 未请求', 'Not requested · browser restriction') : text('读取失败', 'Read failed')}{source.error ? ` · ${errorLabels[source.error] ? text(...errorLabels[source.error]) : text('来源暂时无法提供可用资料', 'Source cannot supply usable data right now')}` : ''}</Type><Button label={source.status === 'not_read' ? text('查看 SEC 官方披露', 'View official SEC disclosures') : text('查看公开来源', 'View public source')} onPress={() => preview(source.status === 'not_read' ? SEC_PUBLIC_SEARCH : source.url)} /></View>)}
+          {current.gaps.map((gap, index) => <Type key={index} size={13} muted selectable>{companyGapText(gap, locale)}</Type>)}
+          {report ? <Type size={12} muted selectable>{text('查询主体：', 'Queried issuer: ')}{report.issuerId}</Type> : null}
+          {(report ? report.company ? [report.company] : [] : search?.candidates ?? []).map(candidate => <View key={candidate.issuerId} style={{ gap: 6 }}>
+            <Type size={13} weight="600">{candidate.name}</Type>
+            <Type size={12} muted selectable>{text('来源主体：', 'Source issuer: ')}{candidate.issuerId}</Type>
+            <Button label={text('查看公司来源资料', 'View issuer source')} onPress={() => preview(candidate.sourceUrl)} />
+            {candidate.listings.map((listing, index) => <View key={`${listing.exchange}:${listing.ticker}:${index}`} style={{ gap: 4 }}>
+              <Type size={12} muted selectable>{listing.exchange} · {listing.ticker} · {listing.status === 'historical' ? text('历史上市记录', 'Historical listing') : text('当前上市状态未核验', 'Current listing status unverified')}</Type>
+              {/^Q[1-9][0-9]*$/.test(listing.exchange) ? <Button label={text('核对交易所', 'Check exchange')} onPress={() => preview(`https://www.wikidata.org/wiki/${listing.exchange}`)} /> : null}
+            </View>)}
+          </View>)}
+          {report?.facts.map((fact, index) => <Type key={`${fact.accession}:${fact.tag}:${index}`} size={12} muted selectable>{metricLabels[fact.metric] ? text(...metricLabels[fact.metric]) : text('财务指标', 'Financial measure')} · {fact.end} · {fact.taxonomy}:{fact.tag} · {fact.accession}</Type>)}
+        </> : null}
+        {filingCatalog && !filingDocument ? <View style={{ gap: 6 }}>
+          <Type size={13} muted selectable>{text('目录获取：', 'Directory retrieved: ')}{fetchedTime(filingCatalog.fetched_at, locale)}</Type>
+          <Type size={12} muted selectable>{text('来源主体：', 'Source issuer: ')}{filingCatalog.issuer_id}</Type>
+          <Type size={13} muted>{text('这里只取得披露目录，文件正文需要单独读取。', 'This is a disclosure directory; document text requires a separate read.')}</Type>
+        </View> : null}
+        {filingDocument ? <View style={{ gap: 8 }}>
+          <Type size={13} muted selectable>{text('原文获取：', 'Document retrieved: ')}{fetchedTime(filingDocument.fetched_at, locale)}</Type>
+          <Type size={12} muted selectable>{text('申报编号：', 'Filing identifier: ')}{filingDocument.filing.accession}</Type>
+          {filingDocument.sha256 ? <Type size={12} muted selectable>SHA-256: {filingDocument.sha256}</Type> : null}
+          <Type size={13} muted>{text('段落编号用于引用，不是原文件页码。', 'Paragraph numbers identify excerpts, not original document pages.')}</Type>
+          {filingDocument.limitations.map((limitation, index) => <Type key={index} muted size={13}>{locale === 'zh' ? filingLimitations[limitation] ?? limitation : limitation}</Type>)}
+        </View> : null}
+      </View> : null}
+      {current && (!report || reportTab === 'overview') ? <>
+        <Button label={text('用于对话', 'Use in chat')} disabled={!active || busy} onPress={() => { setCitationIds(undefined); setHandoffError(false); setHandoff(current); }} />
+        <Type size={13} muted>{text('仅准备草稿，由你确认发送。', 'Prepares a draft for you to review and send.')}</Type>
+      </> : null}
+    </View>
     <Sheet visible={active && Boolean(handoff)} title={text('选择对话', 'Choose a chat')} onClose={closeHandoff}>
       <Button label={text('新建小Q对话', 'New chat with Q')} disabled={handoffBusy || historyBusy} onPress={() => void send()} />
       {!signedIn ? <Type muted>{text('登录后可选择历史对话。', 'Sign in to choose an existing chat.')}</Type> : null}

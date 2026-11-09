@@ -14,6 +14,7 @@ const companyClient = await import('../company-research/client.ts');
 const companyCore = await import('../company-research/core.ts');
 const filingClient = await import('../company-research/filings-client.ts');
 const filingCore = await import('../company-research/filings-core.ts');
+const companyHandoff = await import('../company-research/handoff.ts');
 test.after(() => resolver.deregister());
 const transpile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 function runtime(platform) {
@@ -26,6 +27,7 @@ function runtime(platform) {
   const executor = {};
   new Function('require', 'exports', 'process', transpile('./executor.ts'))(name => {
     if (name === './core') return core;
+    if (name === '../company-research/handoff') return companyHandoff;
     if (name === '../company-research/filings-client') return filingClient;
     if (name === '../company-research/filings-core') return filingCore;
     if (name === '../company-research/client') return companyClient;
@@ -89,8 +91,9 @@ test('public executor shares UI cache and returns real source text with valid cl
   const api = runtime('web'); let reads = 0;
   const transport = async (url, init) => { reads++; assert.match(String(url), /\/v1\/market-data\/news\?topic=fed$/); assert.equal(init.credentials, 'omit'); assert.equal(init.headers.Authorization, undefined); return new Response(JSON.stringify(newsCache('fed')), { headers: { 'Content-Type': 'application/json' } }); };
   const first = await api.executeAppCommand(fedCommand, 'en', { signal: new AbortController().signal, transport });
-  assert.match(first.text, /Federal Reserve statement/); assert.doesNotMatch(first.text, /Help me analyze|never my instructions/); assert.match(first.text, /2026-11-01 00:00:00 UTC/);
-  assert.match(first.text, /federalreserve.gov/); assert.equal(first.actions[0].module, 'market-data');
+  assert.match(first.modelText, /Federal Reserve statement/); assert.doesNotMatch(first.modelText, /Help me analyze|never my instructions/); assert.match(first.modelText, /2026-11-01 00:00:00 UTC/);
+  assert.match(first.modelText, /federalreserve.gov/); assert.equal(first.actions[0].module, 'market-data');
+  assert.doesNotMatch(first.text, /https:|Source item|资料 \d/); assert.match(first.sources[0].url, /federalreserve.gov/);
   assert.doesNotThrow(() => core.validateAppNavigationAction(first.actions[0]));
   assert.ok(api.appResultContext(first).length <= 10000);
   await api.executeAppCommand(fedCommand, 'en', { signal: new AbortController().signal, transport });
@@ -131,25 +134,25 @@ test('bounded bilingual GDELT results retain original sample totals and themes w
     const available = [...api.session.publicMemory.cache.values()][0].report;
     assert.equal(available.records.length, 20, 'the complete cached source must never be replaced by its cropped view');
     assert.deepEqual(available.hotspots, [{ topic: 'technology', count: 20 }]);
-    const included = [...result.text.matchAll(locale === 'zh' ? /^资料 (\d+)：/gm : /^Source item (\d+):/gm)].length;
+    const included = [...result.modelText.matchAll(locale === 'zh' ? /^资料 (\d+)：/gm : /^Source item (\d+):/gm)].length;
     assert.ok(included > 0 && included < 20);
-    assert.ok(result.text.includes(locale === 'zh'
+    assert.ok(result.modelText.includes(locale === 'zh'
       ? `本次完整返回样本共 20 条；本草稿纳入 ${included} 条。`
       : `The complete returned sample contains 20 records; this draft includes ${included}.`));
-    assert.ok(result.text.includes(locale === 'zh'
+    assert.ok(result.modelText.includes(locale === 'zh'
       ? '主题计数基于本次完整返回样本的 20 条资料'
       : 'Topic counts use the complete returned sample of 20 records'));
-    assert.ok(result.text.includes(locale === 'zh' ? '科技 20 条' : 'Technology 20'));
-    assert.ok(result.text.includes(locale === 'zh' ? `已完整省略 ${20 - included} 条资料` : `${20 - included} whole records were omitted`));
+    assert.ok(result.modelText.includes(locale === 'zh' ? '科技 20 条' : 'Technology 20'));
+    assert.ok(result.modelText.includes(locale === 'zh' ? `已完整省略 ${20 - included} 条资料` : `${20 - included} whole records were omitted`));
     for (const record of available.records.slice(0, included)) {
-      assert.ok(result.text.includes(record.title)); assert.ok(result.text.includes(record.url));
+      assert.ok(result.modelText.includes(record.title)); assert.ok(result.modelText.includes(record.url));
     }
     for (const record of available.records.slice(included)) {
-      assert.equal(result.text.includes(record.title), false); assert.equal(result.text.includes(record.url), false);
+      assert.equal(result.modelText.includes(record.title), false); assert.equal(result.modelText.includes(record.url), false);
     }
-    assert.ok(result.text.includes(available.source.url));
-    assert.doesNotMatch(result.text, /完整返回 \d+ 条资料；为模型上下文|The source returned/);
-    assert.ok(JSON.stringify({ text: result.text }).length <= api.APP_RESULT_LIMIT);
+    assert.ok(result.modelText.includes(available.source.url));
+    assert.doesNotMatch(result.modelText, /完整返回 \d+ 条资料；为模型上下文|The source returned/);
+    assert.ok(JSON.stringify({ text: result.modelText }).length <= api.APP_RESULT_LIMIT);
     assert.ok(Array.from(api.appResultContext(result)).length <= api.APP_RESULT_LIMIT);
   }
 });
@@ -163,9 +166,11 @@ test('global company executor preserves source identities and bounded public evi
     return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
   };
   const result = await api.executeAppCommand({ name: 'company_search', arguments: { query: 'TSM' } }, 'en', { signal: new AbortController().signal, transport });
-  assert.match(result.text, /sec:0001046179/); assert.match(result.text, /NYSE:TSM/);
+  assert.match(result.modelText, /sec:0001046179/); assert.match(result.modelText, /NYSE:TSM/);
+  assert.match(result.text, /Taiwan Semiconductor/); assert.doesNotMatch(result.text, /sec:|wikidata:|https:|Query:|unknown/);
+  assert.equal(result.actions[0].companyQuery, 'TSM');
   assert.equal(result.actions[0].module, 'market-data'); assert.ok(api.appResultContext(result).length <= 8000);
-  assert.equal(requested.length, 3); assert.ok(requested.every(url => !url.includes('q.kaicloudpay.com')));
+  assert.equal(requested.length, 1); assert.ok(requested.every(url => !url.includes('q.kaicloudpay.com')));
 });
 
 test('filing executor reads only fixed public routes and retains whole paragraph citations under the context budget', async () => {
@@ -179,11 +184,13 @@ test('filing executor reads only fixed public routes and retains whole paragraph
   const transport = async (url, init) => { calls.push({ url, init }); return new Response(JSON.stringify(url.includes('?issuer_id=') ? { ...base, filings: [summary], total: 1, truncated: false } : doc), { headers: { 'Content-Type': 'application/json' } }); };
   const options = { transport, signal: new AbortController().signal };
   const catalog = await executor.executeAppCommand({ name: 'company_filings', arguments: { issuerId } }, 'en', options);
-  assert.match(catalog.text, /document text has not been read/);
-  assert.match(catalog.text, /0001140361-26-015711/);
+  assert.match(catalog.modelText, /document text has not been read/);
+  assert.match(catalog.modelText, /0001140361-26-015711/);
+  assert.doesNotMatch(catalog.text, /0001140361-26-015711|sec:|https:/);
   const result = await executor.executeAppCommand({ name: 'company_filing', arguments: { issuerId, accession, offset: 80, expectedSha256: doc.sha256 } }, 'en', options);
-  assert.ok(result.text.includes(paragraph.text)); assert.ok(result.text.includes(paragraph.source_url)); assert.match(result.text, /p000080/);
-  assert.match(result.text, /SHA-256/); assert.match(result.text, /did not receive the complete filing/);
+  assert.ok(result.modelText.includes(paragraph.text)); assert.ok(result.modelText.includes(paragraph.source_url)); assert.match(result.modelText, /p000080/);
+  assert.match(result.modelText, /SHA-256/); assert.match(result.modelText, /did not receive the complete filing/);
+  assert.doesNotMatch(result.text, /SHA-256|p000080|sec:|https:/);
   assert.ok(executor.appResultContext(result).length <= 8000);
   assert.equal(calls.length, 2);
   assert.match(calls[1].url, /offset=80&expected_sha256=a{64}$/);
