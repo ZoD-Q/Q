@@ -60,6 +60,8 @@
 
 ## 验证与未覆盖事项
 
+源码准备阶段的 GitLab HTTPS 读取使用作业内临时的 `http.https://gitlab.kai.com/.version=HTTP/1.1`。2026-11-09 的分支流水线在执行测试前多次出现 HTTP/2 stream reset／early EOF；此设置按 [GitLab 官方排障建议](https://docs.gitlab.com/ci/jobs/job_troubleshooting/#get_sources-job-section-fails-because-of-an-http2-problem)兼容该传输路径。钩子追加已有 `GIT_CONFIG_COUNT` 配置、校验计数并保留已有凭据；只影响源码准备阶段及同一主机的子模块读取，不写主机／Runner 配置，不改变 TLS 校验、测试或部署门禁。后续独立脚本阶段不会继承钩子临时导出的变量，见[作业执行顺序](https://docs.gitlab.com/ci/jobs/job_execution/)。需要由包含该配置的新提交触发流水线验证；重试旧作业仍使用旧配置，不能作为新设置已通过的证据。
+
 本地执行 `python3 -m unittest discover -s backend/deploy -p 'test_*.py'`、网页发布工具测试与 shell 语法检查。它们不代替真实 GitLab token、Runner、服务器和手动发布验收。
 
 启用后的首次真实验收必须记录：配置合入的 main SHA、流水线/作业 ID、两个环境的实际成功记录、健康及版本回执。未完成这些步骤前只能报告代码/安装/配置已完成，不能报告端到端部署通过。iOS/Android 真机、真实支付和供应商实账均不在此部署流程验收范围。
