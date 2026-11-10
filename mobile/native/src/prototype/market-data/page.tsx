@@ -90,15 +90,19 @@ function ResultRecords({ report, preview }: { report: MarketReport; preview: (li
   </View>;
 }
 
-export function MarketDataPage({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false, initialQuery }: {
+export function MarketDataPage({ active, onAnalyze, conversations = [], historyBusy = false, historyError = false, hasMoreHistory = false, onLoadHistory, signedIn = false, initialQuery, initialCompanyQuery, initialCompanyIssuerId, initialCompanyView, initialCompanyAccession }: {
   active: boolean; onAnalyze: (draft: string, conversationId?: string, signal?: AbortSignal) => Promise<boolean>;
   conversations?: { id: string; title: string }[]; historyBusy?: boolean; historyError?: boolean; hasMoreHistory?: boolean;
   onLoadHistory?: (more: boolean) => void; signedIn?: boolean;
   initialQuery?: MarketQuery;
+  initialCompanyQuery?: string;
+  initialCompanyIssuerId?: string;
+  initialCompanyView?: 'overview' | 'filings';
+  initialCompanyAccession?: string;
 }) {
   const { text, colors, locale } = useDesign();
   const [query, setQuery] = useState<MarketQuery>(initialQuery ?? { kind: 'crypto', asset: 'BTC' });
-  const [companies, setCompanies] = useState(false);
+  const [companies, setCompanies] = useState(Boolean(initialCompanyQuery || initialCompanyIssuerId || initialCompanyView || initialCompanyAccession));
   const [outbound, setOutbound] = useState<Outbound | null>(null);
   const [sourceDetails, setSourceDetails] = useState(false);
   const [linkError, setLinkError] = useState(false);
@@ -150,7 +154,7 @@ export function MarketDataPage({ active, onAnalyze, conversations = [], historyB
       <Button label={text('全球公司研究', 'Global companies')} selected={companies} onPress={() => { market.cancel(); closeHandoff(); setCompanies(true); }} />
       <Button label={text('新闻热点', 'News themes')} selected={!companies && query.kind === 'news'} onPress={() => choose({ kind: 'news', topic: 'central_banks' })} />
     </Group>
-    {companies ? <CompanyResearchPanel active={active} onAnalyze={onAnalyze} conversations={conversations} historyBusy={historyBusy} historyError={historyError} hasMoreHistory={hasMoreHistory} onLoadHistory={onLoadHistory} signedIn={signedIn} /> : <>
+    {companies ? <CompanyResearchPanel active={active} onAnalyze={onAnalyze} conversations={conversations} historyBusy={historyBusy} historyError={historyError} hasMoreHistory={hasMoreHistory} onLoadHistory={onLoadHistory} signedIn={signedIn} initialCompanyQuery={initialCompanyQuery} initialCompanyIssuerId={initialCompanyIssuerId} initialCompanyView={initialCompanyView} initialCompanyAccession={initialCompanyAccession} /> : <>
     <View style={{ gap: 12 }}>
       <Type size={15} weight="600">{query.kind === 'crypto' ? text('选择资产', 'Choose an asset') : query.kind === 'filings' ? text('选择公司', 'Choose a company') : text('选择主题', 'Choose a topic')}</Type>
       <Group>

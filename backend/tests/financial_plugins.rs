@@ -590,13 +590,23 @@ async fn deletion_race_cannot_resurrect_connections_or_credentials() {
             .unwrap();
         sqlx::query("UPDATE identities SET status='deleted',deleted_at=now(),deleted_handle_hash=sha256(convert_to(handle,'UTF8')) WHERE id=$1").bind(owner).execute(&mut *tx).await.unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(
-            tokio::time::timeout(std::time::Duration::from_secs(3), pending)
-                .await
-                .unwrap()
-                .unwrap()
-                .status(),
-            StatusCode::UNAUTHORIZED
+        let response = tokio::time::timeout(std::time::Duration::from_secs(3), pending)
+            .await
+            .unwrap()
+            .unwrap();
+        let status = response.status();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 10000).await.unwrap()).unwrap();
+        let error_code = body["error"]["code"].as_str();
+        // Credential lookup can observe deletion after Q authentication but before
+        // store::owned. That is a refusal before any credential write or refresh.
+        // Connect always reaches lock_active first and must remain unauthorized.
+        assert!(
+            (status == StatusCode::UNAUTHORIZED && error_code == Some("UNAUTHORIZED"))
+                || (mode == "credential"
+                    && status == StatusCode::NOT_FOUND
+                    && error_code == Some("PLUGIN_NOT_FOUND")),
+            "unexpected {mode} deletion-race response: {status}, {error_code:?}"
         );
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM plugin_connections WHERE user_id=$1")

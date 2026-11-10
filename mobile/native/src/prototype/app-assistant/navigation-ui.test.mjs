@@ -10,6 +10,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const app = await import('./core.ts');
+const appPresentation = await import('./presentation.ts');
 const insurance = await import('../insurance/catalog.ts');
 const market = await import('../market-data/core.ts');
 const messages = await import('../ai-chat/messages.ts');
@@ -94,6 +95,7 @@ function chatHarness(overrides = {}, options = {}) {
     './motion': { Reveal: 'Reveal', selectionFeedback: noop }, './app-assistant/core': app,
     './ai-chat/state-model': stateModel, './ai-chat/auth-sheet': { ChatAuthSheet: 'ChatAuthSheet' },
     './ai-chat/mascot-state': mascot, './ai-chat/q-companion': { QCompanion: 'QCompanion' },
+    './ai-chat/readable-answer': { ReadableAnswer: 'ReadableAnswer' }, './app-assistant/presentation': appPresentation,
     './ai-chat/messages': messages, './plugin-host/chat-proposal': { ChatProposal: 'ChatProposal' },
     './plugin-host/core': plugins, './banking/transfer-composer': { BankTransferComposer: 'BankTransferComposer' },
     './privacy': { openPrivacyPolicy: noop }, './finance-agent/panel': { FinanceTaskSheet: 'FinanceTaskSheet' },
@@ -126,10 +128,10 @@ test('saved result actions and explanation retry invoke their own callbacks with
     appActions: { a: [action] }, canResumeAppResult: id => id === 'a' });
   const tree = h.render(); assert.deepEqual(h.calls, []);
   tree.find(node => node.type === 'Action' && node.props.label === action.label).props.onPress();
-  tree.find(node => node.type === 'Action' && node.props.label === '继续解释已取得资料').props.onPress();
+  tree.find(node => node.type === 'Action' && node.props.label === '继续分析').props.onPress();
   assert.deepEqual(h.calls, [['open', action], ['resume', 'a']]);
   h.controller.busy = true;
-  assert.ok(h.render().filter(node => node.type === 'Action' && [action.label, '继续解释已取得资料'].includes(node.props.label)).every(node => node.props.disabled));
+  assert.ok(h.render().filter(node => node.type === 'Action' && [action.label, '继续分析'].includes(node.props.label)).every(node => node.props.disabled));
 });
 
 test('insurance entry applies actual query/group filters and only opens comparisons with at least two selected types', () => {

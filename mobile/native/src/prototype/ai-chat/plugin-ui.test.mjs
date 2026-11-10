@@ -14,6 +14,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 const core = await import('../plugin-host/core.ts');
 const workbench = await import('../api-workbench/core.ts');
 const appAssistant = await import('../app-assistant/core.ts');
+const appPresentation = await import('../app-assistant/presentation.ts');
 const recommendations = await import('../recommendations/core.ts');
 test.after(() => resolver.deregister());
 
@@ -63,6 +64,7 @@ test('selected-bank chat keeps model availability and its working refresh action
     './design': { ...design, useLayoutDimensions: () => ({ width: 1024, height: 768, fontScale: 1, scale: 1 }) }, './motion': { Reveal: 'Reveal', selectionFeedback: noop },
     './ai-chat/state-model': stateModel, './ai-chat/auth-sheet': { ChatAuthSheet: 'ChatAuthSheet' },
     './ai-chat/mascot-state': mascotState, './ai-chat/q-companion': { QCompanion: 'QCompanion' },
+    './ai-chat/readable-answer': { ReadableAnswer: 'ReadableAnswer' }, './app-assistant/presentation': appPresentation,
     './ai-chat/messages': messages, './plugin-host/chat-proposal': { ChatProposal: 'ChatProposal' },
     './plugin-host/core': core, './banking/transfer-composer': { BankTransferComposer: 'BankTransferComposer' },
     './privacy': { openPrivacyPolicy: noop },

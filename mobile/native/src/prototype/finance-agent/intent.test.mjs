@@ -89,6 +89,16 @@ test('public market and company income questions remain research requests, while
   assert.ok(respondToFinanceText('账单 CNY\n收入 工资 12000\n新闻说比特币上涨', 'zh'));
 });
 
+test('company financial performance and arbitrary tickers are not reduced to a cash-flow definition', () => {
+  for (const prompt of ['请详细分析GOOGL的年度财务表现，按营收、利润和现金流解释', '分析IBM的现金流', '腾讯控股的经营现金流怎么样', 'Compare TSM annual financial results', 'Explain GOOGL cash flow']) {
+    assert.equal(respondToFinanceText(prompt, 'zh'), null, prompt);
+  }
+  for (const prompt of ['什么是现金流？', 'Explain cash flow', '现金流和ROE是什么？']) assert.equal(respondToFinanceText(prompt, 'zh')?.result?.kind, 'knowledge');
+  for (const prompt of ['我的现金流怎么样', '分析GOOGL，账单 CNY\n收入 工资 12000\n支出 房租 3000', 'Explain GOOGL cash flow and my income PRIVATE_SALARY 12000', '分析GOOGL的年度财务，我的储蓄目标是10000', '分析GOOGL的年度财务表现，帮我做储蓄目标，我现在有十万，目标二十万', 'Explain IBM annual financial performance and set a savings goal of eight thousand']) {
+    assert.ok(respondToFinanceText(prompt, 'zh'), prompt);
+  }
+});
+
 test('application capability questions reach the assistant without weakening private record isolation', () => {
   for (const question of ['小Q分期模块能做什么', '介绍小Q的储蓄功能', 'Q的保险模块', 'What can the Q installments module do?', 'Open the Q insurance module']) {
     assert.equal(respondToFinanceText(question, 'zh'), null, question);

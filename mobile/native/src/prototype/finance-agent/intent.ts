@@ -17,6 +17,17 @@ const topics: readonly [string, RegExp][] = [
 const legacyTask = /账单|分期|储蓄|存钱|借款|还款|\bbills?\b|\binstallments?\b|\bsavings?\b/i;
 const financialInput = /账单|分期|储蓄|存钱|收入|支出|保险|基金|投资|理财|借款|还款|本金|手续费|总费用|年利率|现金流|金融|市场|美股|加密货币|\bbills?\b|\binstallments?\b|\bsavings?\b|\bincome\b|\bexpenses?\b|\bapr\b|\bfinance\b|\bmarkets?\b|\bstocks?\b|\bcrypto\b/i;
 
+function publicCompanyFinancialQuestion(value: string): boolean {
+  // Personal records retain priority, including when a public ticker occurs in the same input.
+  if (legacyTask.test(value)) return false;
+  if (/我的|本人|个人|家庭|工资|房租|\b(?:my|personal|household|salary|rent)\b/i.test(value)) return false;
+  if (/年度财务|财务表现|公司财务|财务报表|企业业绩|年度业绩|\bannual\s+(?:financial|results|performance)|\bfinancial\s+(?:statements|performance|results)\b/i.test(value)) return true;
+  if (!/营收|利润|现金流|\brevenue\b|\bnet income\b|\bcash\s*flows?\b/i.test(value)) return false;
+  if (/公司|集团|控股|股份|\b(?:company|corporation|holdings|inc|ltd)\b/i.test(value)) return true;
+  const concepts = new Set(['APR', 'APY', 'USD', 'HKD', 'CNY', 'TWD', 'EUR', 'JPY', 'GDP', 'CPI', 'ROE', 'ROA', 'EPS', 'EBITDA', 'GAAP', 'IFRS']);
+  return [...value.matchAll(/\b[A-Z][A-Z0-9]{1,7}(?:\.[A-Z]{1,3})?\b/g)].some(match => !concepts.has(match[0]));
+}
+
 /** Product questions are not retired personal calculation requests. This only
  * chooses the normal assistant path; it never grants access to any module. */
 function appCapabilityQuestion(value: string): boolean {
@@ -57,6 +68,7 @@ export function respondToFinanceText(prompt: string, locale: Locale): LocalFinan
     || (/(?:本金|手续费|总费用)/u.test(value) && /\d/u.test(value))
     || (legacyTask.test(value) && /\d/u.test(value))) return unavailableTask(prompt, locale);
   if (appCapabilityQuestion(value)) return null;
+  if (publicCompanyFinancialQuestion(value)) return null;
   // Public-company and market research must not be mistaken for a personal budget task.
   if (/美股|A股|港股|财报|公告|宏观|新闻|热点|行情|股价|币价|加密货币|比特币|英伟达|苹果公司|微软|\bstocks?\b|\bcrypto\b|\bfilings?\b|\bearnings\b|\bnews\b|\bNVDA\b|\bAAPL\b|\bMSFT\b/i.test(value)) return null;
   const topic = topics.find(([, pattern]) => pattern.test(value));

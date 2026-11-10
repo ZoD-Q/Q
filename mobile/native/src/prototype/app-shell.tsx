@@ -594,6 +594,8 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
             <ChatPage controller={chat} onOpenPlugins={() => navigate("plugins")} onOpenFinancialService={navigate} onOpenMarketData={() => navigate('market-data')} onOpenAppAction={openAppAction} onSelectRecommendation={(recordId, candidateId, continueExisting) => { void openRecommendation(recordId, candidateId, continueExisting); }} />
           ) : page === 'market-data' ? (
             <MarketDataPage key={`${chat.privacyEpoch}:${JSON.stringify(entry)}`} active={active} signedIn={Boolean(chat.session)} initialQuery={entry?.module === 'market-data' ? entry.marketQuery : undefined}
+              initialCompanyQuery={entry?.module === 'market-data' ? entry.companyQuery : undefined} initialCompanyIssuerId={entry?.module === 'market-data' ? entry.companyIssuerId : undefined}
+              initialCompanyView={entry?.module === 'market-data' ? entry.companyView : undefined} initialCompanyAccession={entry?.module === 'market-data' ? entry.companyAccession : undefined}
               conversations={chat.items.filter(item => !item.localOnly && !item.plugin && !item.messages.some(message => message.localFinance || message.financeResult)).map(item => ({ id: item.id, title: item.title }))}
               historyBusy={chat.historyBusy} historyError={Boolean(chat.historyError)} hasMoreHistory={Boolean(chat.historyCursor)} onLoadHistory={more => { void chat.loadHistory(more); }}
               onAnalyze={async (draft, conversationId, signal) => {

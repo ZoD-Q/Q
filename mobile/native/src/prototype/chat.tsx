@@ -50,6 +50,8 @@ import { ChatAuthSheet } from "./ai-chat/auth-sheet";
 import { chatErrorMessage, chatStatusErrorMessage, historyErrorMessage } from "./ai-chat/messages";
 import { getMascotPresentation, type MascotPresentation } from "./ai-chat/mascot-state";
 import { QCompanion } from "./ai-chat/q-companion";
+import { ReadableAnswer } from './ai-chat/readable-answer';
+import { isAppRecoveryError } from './app-assistant/presentation';
 import type { AiModel } from "@xiaoq/shared";
 import { ChatProposal } from './plugin-host/chat-proposal';
 import { bankIdForPlugin } from './plugin-host/core';
@@ -108,6 +110,8 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
     detail: { zh: '财务记录仅保留本次会话，不上传云端。', en: 'Financial notes stay on this device for this session.' },
   } : getMascotPresentation({
     phase: controller.phase,
+    appPhase: controller.appPhase,
+    canResumeAppResult: latestAnswer ? controller.canResumeAppResult?.(latestAnswer.id) : false,
     message: latestAnswer,
     authBusy: controller.authBusy,
     historyBusy: controller.historyBusy,
@@ -428,7 +432,7 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
                     </Type>
                   </View>
                 ) : null}
-                {message.content ? <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
+                {message.content ? message.role === 'assistant' ? <ReadableAnswer content={message.content} sources={controller.appSources?.[message.id]} /> : <Type selectable size={16} style={{ lineHeight: 28 }}>{message.content}</Type> : null}
                 {onOpenAppAction && controller.appActions?.[message.id]?.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {controller.appActions[message.id].map((action, index) => <Action key={`${action.module}:${index}`} kind="secondary" label={action.label} disabled={controller.busy || controller.historyBusy} onPress={() => onOpenAppAction(action)} />)}
                 </View> : null}
@@ -443,12 +447,12 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
                 {message.id === conversation?.messages.at(-1)?.id && message.id === controller.toolResumeTarget?.messageId && message.toolProposalId
                   ? <Action kind="ghost" label={text('继续回答', 'Continue answer')} disabled={controller.busy || controller.historyBusy || !!controller.historyError} onPress={() => { void controller.resumeTool(message.id, message.toolProposalId!); }} style={{ alignSelf: 'flex-start' }} /> : null}
                 {message.status === "cancelled" ? <Type size={13} muted>{message.errorCode === "INTERRUPTED" ? text("上次回答已中断，已收到的内容保留。", "The previous answer was interrupted. Received text is preserved.") : text("已停止接收，已收到的内容保留。", "Stopped receiving. The text received so far is preserved.")}</Type> : null}
-                {message.status === "error" ? <Type selectable size={13} color={colors.danger}>{chatErrorMessage(message.errorCode ?? "AI_UPSTREAM_ERROR", text)}</Type> : null}
+                {message.status === "error" ? <Type selectable size={13} color={colors.danger}>{chatErrorMessage(message.errorCode ?? "AI_UPSTREAM_ERROR", text, controller.canResumeAppResult?.(message.id) === true)}</Type> : null}
                 {message.status === "incomplete" ? <Type size={13} muted>{message.finishReason === "length"
                   ? text("回答达到本次长度上限，内容未完整结束。", "The answer reached this request’s length limit and is incomplete.")
                   : text("供应商未完整返回本次回答。", "The provider did not complete this answer.")}</Type> : null}
                 {message.role === "assistant" && message.id === conversation?.messages.at(-1)?.id && ["error", "incomplete", "cancelled"].includes(message.status)
-                  ? <Action kind="ghost" icon={RotateCcw} label={controller.canResumeAppResult?.(message.id) ? text('继续解释已取得资料', 'Explain the saved results') : text("重试回答", "Retry answer")} onPress={() => { if (controller.canResumeAppResult?.(message.id)) void controller.resumeAppResult(message.id); else controller.retry(); }} disabled={controller.busy || controller.authBusy || controller.historyBusy} style={{ alignSelf: "flex-start" }} /> : null}
+                  ? <Action kind="ghost" icon={RotateCcw} label={controller.canResumeAppResult?.(message.id) ? text('继续分析', 'Continue analysis') : isAppRecoveryError(message.errorCode) ? text('重新整理原问题', 'Prepare original question') : text("重试回答", "Retry answer")} onPress={() => { if (controller.canResumeAppResult?.(message.id)) void controller.resumeAppResult(message.id); else controller.retry(); }} disabled={controller.busy || controller.authBusy || controller.historyBusy || Boolean(controller.historyError)} style={{ alignSelf: "flex-start" }} /> : null}
               </Reveal>
             ))}
             {controller.recommendationCursor || controller.recommendationHistoryError ? <Action kind="ghost" label={controller.recommendationHistoryError ? text('重试同步推荐', 'Retry loading recommendations') : text('显示更早的推荐', 'Earlier recommendations')}
