@@ -77,7 +77,7 @@ function ProfileEditor() {
           <Action kind="ghost" label={text('重试', 'Retry')} onPress={() => void account.refresh()} />
         </View> : null}
         {account.logoutPending ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}>
-          <Type color={colors.danger}>{account.logoutBusy ? text('正在确认账号退出…', 'Confirming sign out…')
+          <Type muted>{account.logoutBusy ? text('正在确认账号退出…', 'Confirming sign out…')
             : text('有一次退出尚未完成。重试只处理原账号，不会退出当前账号。', 'A previous sign out is unconfirmed. Retry it without signing out the current account.')}</Type>
           <Action kind="ghost" label={text('重试原退出', 'Retry previous sign out')} disabled={account.logoutBusy} onPress={() => void account.retryLogout()} />
         </View> : null}

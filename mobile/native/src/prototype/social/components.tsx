@@ -10,15 +10,15 @@ import { socialErrorCode, useSocial } from './state';
 import { usePendingReportMeta, useReport } from './use-report';
 import type { ReportMeta } from './report-core';
 
-export function SocialButton({ label, onPress, icon: Icon, disabled = false, quiet = false, danger = false }: {
-  label: string; onPress: () => void; icon?: LucideIcon; disabled?: boolean; quiet?: boolean; danger?: boolean;
+export function SocialButton({ label, onPress, icon: Icon, disabled = false, quiet = false }: {
+  label: string; onPress: () => void; icon?: LucideIcon; disabled?: boolean; quiet?: boolean;
 }) {
   const { colors } = useDesign();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     style={({ pressed }) => ({ minHeight: 48, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
       backgroundColor: quiet ? colors.soft : colors.accent, opacity: disabled ? 0.4 : pressed ? 0.7 : 1 })}>
-    {Icon ? <Icon size={18} color={quiet ? (danger ? colors.danger : colors.ink) : colors.onAccent} /> : null}
-    <Type size={14} weight="500" color={quiet ? (danger ? colors.danger : colors.ink) : colors.onAccent}>{label}</Type>
+    {Icon ? <Icon size={18} color={quiet ? colors.ink : colors.onAccent} /> : null}
+    <Type size={14} weight="500" color={quiet ? colors.ink : colors.onAccent}>{label}</Type>
   </Pressable>;
 }
 export function SocialScreen({ title, children, right, keyboard = false }: { title: string; children: ReactNode; right?: ReactNode; keyboard?: boolean }) {
