@@ -17,6 +17,8 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
 } });
 const stream = await import('./stream.ts');
 const appCore = await import('../app-assistant/core.ts');
+const appPresentation = await import('../app-assistant/presentation.ts');
+const companyHandoff = await import('../company-research/handoff.ts');
 const history = await import('./history.ts');
 const pluginCore = await import('../plugin-host/core.ts');
 const bankIntent = await import('../banking/intent.ts');
@@ -106,6 +108,8 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     '../finance-agent/conversation': financeConversation,
     '../finance-agent/intent': financeIntent,
     '../app-assistant/core': appCore,
+    '../app-assistant/presentation': appPresentation,
+    '../company-research/handoff': companyHandoff,
     '../recommendations/core': recommendationCore,
     '../recommendations/pending': {
       readPendingRecommendation: async () => savedRecommendation,
@@ -113,7 +117,7 @@ function harness({ stored = token, statusFetch = async () => json(configured), m
     },
     '../app-assistant/executor': {
       executeAppCommand: async (command, locale, options) => { appCalls.push({ command, signal: options.signal }); return appExecute ? appExecute(command, locale, options) : appCore.executeLocalAppCommand(command, locale); },
-      appResultContext: result => JSON.stringify({ text: result.text, data: result.data }),
+      appResultContext: result => JSON.stringify({ text: result.modelText ?? result.text, data: result.data }),
     },
     './stream': { ...stream, streamChat: options => {
       streams.push(options); ordering.push('chat:POST');
@@ -1338,12 +1342,76 @@ test('ordinary app-capable chat executes public reads, saves readable results an
   assert.ok(view.current.appActions[answerId].some(action => action.module === 'insurance'));
   const savedPublicResult = view.historyPosts.find(post => post.body.messages.at(-1).content.includes('保险')).body.messages.at(-1);
   assert.equal(savedPublicResult.status, 'incomplete');
-  assert.equal(savedPublicResult.errorCode, 'APP_EXPLANATION_FAILED');
+  assert.equal(savedPublicResult.errorCode, 'APP_QUERY_INTERRUPTED');
+  assert.equal(view.current.conversation.messages.at(-1).status, 'pending');
+  assert.equal(view.current.conversation.messages.at(-1).errorCode, undefined);
   assert.ok(view.historyPosts.every(post => post.body.messages.every(message => !('appActions' in message))));
   assert.equal(view.calls.some(call => /plugins|banking|social|video/.test(call.path)), false);
   view.finishStream(1, 'These are coverage directions, not product quotations.'); await view.flush();
   assert.equal(view.current.conversation.messages.at(-1).status, 'complete');
+  assert.equal(view.current.conversation.messages.at(-1).content, 'These are coverage directions, not product quotations.');
   assert.equal(view.current.canResumeAppResult(answerId), false);
+});
+
+test('company evidence stays out of the visible and saved answer while the actual analysis streams', async t => {
+  const action = appCore.createAppNavigationAction('market-data', 'zh');
+  const evidence = '> Query: GOOGL\n> sec:0001652044 | Alphabet\n> https://www.wikidata.org/w/api.php?action=wbsearchentities';
+  const view = harness({ statusFetch: () => json({ ...configured, app_tools_version: 1, company_research_version: 1 }), historyFetch: cloudHistory,
+    appExecute: async () => ({ text: '已找到 Alphabet，尚未读取财报。', modelText: evidence, actions: [action], sources: [{ label: 'Alphabet 年报', url: 'https://www.sec.gov/report.htm' }] }),
+  });
+  t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('分析一下谷歌的财报'); await view.flush();
+  view.finishAppStream({ name: 'company_search', arguments: { query: 'GOOGL' } }); await view.flush();
+  const first = view.current.conversation.messages.at(-1);
+  assert.equal(first.status, 'pending'); assert.equal(first.errorCode, undefined);
+  assert.equal(view.current.appPhase, 'analyzing');
+  assert.doesNotMatch(first.content, /sec:|Query:|https:/);
+  assert.match(view.streams[1].request.app_context[0].result, /sec:0001652044/);
+  view.finishAppStream({ name: 'company_research', arguments: { issuerId: 'sec:0001652044' } }, 1); await view.flush();
+  assert.equal(view.current.appActions[first.id].length, 1);
+  assert.equal(view.current.appSources[first.id].length, 1);
+  view.finishStream(2, 'Alphabet 2025 年营业收入增长，利润率也有所改善。'); await view.flush();
+  const answer = view.current.conversation.messages.at(-1);
+  assert.equal(answer.status, 'complete'); assert.equal(appPresentation.splitSourceReferences(answer.content).text, 'Alphabet 2025 年营业收入增长，利润率也有所改善。');
+  assert.equal(appPresentation.splitSourceReferences(answer.content).sources[0].label, 'Alphabet 年报');
+  assert.match(view.historyPosts.at(-1).body.messages.at(-1).content, /https:\/\/www.sec.gov\/report.htm/);
+  assert.ok(view.historyPosts.every(post => post.body.messages.every(message => !message.content.includes('sec:0001652044'))));
+  assert.equal(view.current.canResumeAppResult(answer.id), false);
+});
+
+test('company cash-flow requests reach AI but mixed private savings still never reach a stream or cloud history', async t => {
+  const research = harness({ statusFetch: appConfigured, historyFetch: cloudHistory }); t.after(research.close);
+  await research.flush(); research.grantConsent();
+  research.current.send('请详细分析GOOGL的年度财务表现，按营收、利润和现金流解释'); await research.flush();
+  assert.equal(research.streams.length, 1); assert.equal(research.current.conversation.localOnly, undefined);
+  for (const question of ['分析GOOGL的年度财务表现，帮我做储蓄目标，我现在有十万，目标二十万', 'Explain IBM annual financial performance and set a savings goal of eight thousand']) {
+    const local = harness({ statusFetch: appConfigured, historyFetch: cloudHistory }); t.after(local.close);
+    await local.flush(); local.grantConsent(); local.current.send(question); await local.flush();
+    assert.equal(local.current.conversation.localOnly, true); assert.equal(local.streams.length, 0); assert.equal(local.historyPosts.length, 0);
+  }
+});
+
+test('a final stop without any explanation is incomplete even when readable results exist', async t => {
+  const view = harness({ statusFetch: appConfigured, appExecute: async () => ({ text: '已取得保障目录。', modelText: 'Coverage evidence', actions: [] }) });
+  t.after(view.close); await view.flush(); view.grantConsent(); view.current.send('解释保障差别'); await view.flush();
+  view.finishAppStream(appInfo); await view.flush(); view.finishStream(1, ''); await view.flush();
+  const answer = view.current.conversation.messages.at(-1);
+  assert.notEqual(answer.status, 'complete'); assert.equal(answer.errorCode, 'APP_EXPLANATION_FAILED');
+  assert.equal(view.current.canResumeAppResult(answer.id), true);
+  view.current.retry(); await view.flush();
+  assert.equal(view.appCalls.length, 1); assert.equal(view.streams[2].request.app_final_only, true);
+  view.finishStream(2, '这是已有资料的解释。'); await view.flush();
+  assert.equal(view.current.conversation.messages.at(-1).content, '这是已有资料的解释。');
+});
+
+test('analysis timeout and capacity errors preserve results with an accurate recovery state', async t => {
+  for (const [cause, expected] of [['AI_TIMEOUT', 'APP_ANALYSIS_TIMEOUT'], ['AI_BUSY', 'APP_ANALYSIS_BUSY']]) {
+    const view = harness({ statusFetch: appConfigured }); t.after(view.close); await view.flush(); view.grantConsent();
+    view.current.send('介绍保险'); await view.flush(); view.finishAppStream(appInfo); await view.flush(); view.failStream(1, cause); await view.flush();
+    const answer = view.current.conversation.messages.at(-1);
+    assert.equal(answer.errorCode, expected); assert.equal(view.current.canResumeAppResult(answer.id), true);
+    view.current.resumeAppResult(answer.id); await view.flush();
+    assert.equal(view.appCalls.length, 1); assert.equal(view.streams[2].request.app_final_only, true);
+  }
 });
 
 test('legacy servers and thinking mode omit every app wire field', async t => {
@@ -1422,7 +1490,8 @@ test('cancelled app history reload never replays a read, while repeated explanat
     { id: 'a1', role: 'assistant', status: 'error', content: 'Previously obtained public source facts.', errorCode: 'APP_EXPLANATION_FAILED' },
   ] }) }); t.after(restored.close); await restored.flush(); restored.grantConsent(); await restored.current.openConversation(savedId); await restored.flush();
   assert.equal(restored.appCalls.length, 0); assert.equal(restored.streams.length, 0);
-  restored.current.retry(); await restored.flush(); assert.equal(restored.current.messageError, 'APP_RESULT_RELOAD');
+  restored.current.retry(); await restored.flush(); assert.equal(restored.current.messageError, '');
+  assert.equal(restored.current.draft, 'Read public data'); assert.equal(restored.current.conversation, null);
   assert.equal(restored.appCalls.length, 0); assert.equal(restored.streams.length, 0);
 });
 
@@ -1529,6 +1598,7 @@ test('filing results use independent opt-in and explanation recovery never repea
   view.failStream(2, 'AI_UPSTREAM_ERROR'); await view.flush();
   filingAvailable = false; view.current.reconnect(); await view.flush();
   view.current.retry(); await view.flush();
-  assert.equal(view.current.messageError, 'APP_RESULT_RELOAD');
+  assert.equal(view.current.messageError, '');
+  assert.equal(view.current.draft, 'Read the SEC filing');
   assert.equal(view.streams.length, 3); assert.equal(view.appCalls.length, 1);
 });

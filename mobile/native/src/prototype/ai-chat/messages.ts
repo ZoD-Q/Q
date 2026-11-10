@@ -1,10 +1,15 @@
 type Translate = (zh: string, en: string) => string;
-export function chatErrorMessage(code: string, text: Translate) {
+export function chatErrorMessage(code: string, text: Translate, canResumeAppResult = false) {
+  if (['APP_EXPLANATION_FAILED', 'APP_ANALYSIS_TIMEOUT', 'APP_ANALYSIS_BUSY'].includes(code) && !canResumeAppResult) return text('这条记录的分析未完成，已取得的资料与来源仍保留。可以重新整理原问题，发送后再查询。', 'This record has no completed analysis. Its material and sources are preserved. Prepare and send the original question to look it up again.');
   switch (code) {
+    case 'DRAFT_NOT_EMPTY': return text('输入框里还有未发送的内容。请先发送或整理草稿，再恢复原问题。', 'There is an unsent draft. Send or clear it before preparing the original question.');
     case 'APP_CONTEXT_TOO_LARGE': return text('本次问题与资料超出发送上限，已取得的资料保留在上方。请缩短问题或选择更少资料后重新提问。', 'This question and its material exceed the send limit. Retrieved material is kept above; shorten the question or select less material before asking again.');
-    case 'APP_EXPLANATION_FAILED': return text('已取得的资料保留在上方，解释暂未完成。可继续解释这些资料，不会重新查询。', 'The retrieved material is kept above. Continue explaining it without querying again.');
+    case 'APP_EXPLANATION_FAILED': return text('资料已保留，分析暂时中断。可以继续分析，无需重新查询。', 'The material is preserved. Continue the interrupted analysis without repeating the lookup.');
+    case 'APP_ANALYSIS_TIMEOUT': return text('分析等待超时。资料已保留，可以稍后继续分析。', 'Analysis timed out. The material is preserved; you can continue later.');
+    case 'APP_ANALYSIS_BUSY': return text('分析服务暂时繁忙。资料已保留，请稍后继续分析。', 'The analysis service is busy. The material is preserved; continue shortly.');
+    case 'APP_QUERY_TIMEOUT': return text('来源响应超时，本次资料尚未读取完整。可以稍后重新查询。', 'The source timed out before the lookup finished. You can try the lookup again later.');
     case 'APP_QUERY_INTERRUPTED': return text('应用查询已中断；已有资料仍保留。不会自动重新查询，需要更新时请重新提出查询。', 'The app query was interrupted. Existing material is kept; request a new lookup if needed.');
-    case 'APP_RESULT_RELOAD': return text('这次查询的临时续答状态已结束。可复制上方保留的资料重新提问；历史不会自动重放查询。', 'This query’s temporary continuation has ended. Copy the retained material into a new question; history does not replay queries automatically.');
+    case 'APP_RESULT_RELOAD': return text('原记录已保留。可以重新整理原问题，发送后再查询。', 'The original record is preserved. Prepare and send the original question to look it up again.');
     case 'LOCAL_FINANCE_PRIVATE': return text('本地财务记录不会发送到云端。请新建 AI 问答，并重新填写要分享的问题。', 'Local financial notes cannot be sent to the cloud. Start a new AI question and enter only what you want to share.');
     case 'LOCAL_FINANCE_LIMIT': return text('这段本地记录已满，请新建财务任务继续。现有记录仍保留在本次会话。', 'This local task is full. Start a new financial task; existing notes remain available for this session.');
     case 'FINANCE_MESSAGE_TOO_LONG': return text('问题加上财务问答说明超过本次长度上限，请缩短后发送。', 'The question plus financial guidance exceeds this request’s length limit. Please shorten it.');

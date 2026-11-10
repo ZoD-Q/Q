@@ -64,7 +64,26 @@ impl Harness {
                 counter.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(headers["authorization"], "Bearer q-ai-test-fixture-only");
                 captured.lock().unwrap().push(body.clone());
-                if mode.starts_with("app") && (mode != "app" || !body["messages"].as_array().unwrap().iter().any(|m| m["role"] == "tool")) {
+                let has_results = body["messages"].as_array().unwrap().iter().any(|m| m["role"] == "tool");
+                if mode.starts_with("app_parallel") && !has_results {
+                    // Observed provider behavior despite parallel_tool_calls=false:
+                    // two indexed searches, with arguments streamed in fragments.
+                    assert_eq!(body["parallel_tool_calls"], false);
+                    let mut wire = String::new();
+                    for (index, fragments) in [
+                        (0, vec!["{\"", "query", "\"", ": \"", "Al", "phabet", " Inc", "\"", "}"]),
+                        (1, vec!["{\"", "query", "\"", ": \"", "Google", "\"", "}"]),
+                    ] {
+                        let name = if index == 1 && mode == "app_parallel_unknown" { "q_bank_transfer" } else { "q_company_search" };
+                        wire.push_str(&format!("data: {}\n\n", json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":index,"id":format!("fixture_search_{index}"),"type":"function","function":{"name":name,"arguments":""}}]},"finish_reason":null}]})));
+                        for fragment in fragments {
+                            wire.push_str(&format!("data: {}\n\n", json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":index,"function":{"arguments":fragment}}]},"finish_reason":null}]})));
+                        }
+                    }
+                    wire.push_str(&format!("data: {}\n\ndata: [DONE]\n\n", json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]})));
+                    return ([("content-type", "text/event-stream")], wire).into_response();
+                }
+                if mode.starts_with("app") && !mode.starts_with("app_parallel") && (mode != "app" || !has_results) {
                     let name = if mode == "app_wrong" { "q_bank_transfer" } else { "q_insurance_search" };
                     let wire = format!("data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
                         json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"fixture_app_call","type":"function","function":{"name":name,"arguments":"{\"query\":\"宠物\"}"}}]},"finish_reason":null}]}),
@@ -158,6 +177,120 @@ async fn read_json(response: Response) -> Value {
 }
 fn request_body(content: &str) -> Value {
     json!({"model":"deepseek-flash","thinking":false,"messages":[{"role":"user","content":content}]})
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated TEST_DATABASE_URL; only contacts a loopback fixture"]
+async fn parallel_application_provider_calls_continue_from_only_the_emitted_result() {
+    let h = Harness::with_mode("app_parallel").await;
+    let token = h.register("app_parallel").await;
+    let mut body = request_body("Analyze Alphabet annual financial performance");
+    body["app_tools_version"] = json!(1);
+    body["company_research_version"] = json!(1);
+    let response = h
+        .request("POST", "/v1/ai/chat", Some(&token), Some(body.clone()))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let wire = String::from_utf8(
+        to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(wire.matches("event: app_tool").count(), 1);
+    assert!(wire.contains("\"name\":\"company_search\""));
+    assert!(wire.contains("\"query\":\"Alphabet Inc\""));
+    assert!(!wire.contains("Google"));
+    assert!(wire.contains("\"finish_reason\":\"tool_calls\""));
+    assert!(!wire.contains("event: tool_proposal"));
+
+    body["app_context"] = json!([{"name":"company_search","arguments":{"query":"Alphabet Inc"},"result":"A public candidate from the one completed lookup."}]);
+    let response = h
+        .request("POST", "/v1/ai/chat", Some(&token), Some(body))
+        .await;
+    let wire = String::from_utf8(
+        to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(wire.contains("Fixture answer"));
+    assert!(wire.contains("\"finish_reason\":\"stop\""));
+    assert!(!wire.contains("event: app_tool"));
+    let captured = h.requests.lock().unwrap().clone();
+    assert_eq!(captured.len(), 2);
+    let represented_calls: Vec<_> = captured[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|message| message.get("tool_calls"))
+        .collect();
+    assert_eq!(represented_calls.len(), 1);
+    assert_eq!(represented_calls[0].as_array().unwrap().len(), 1);
+    assert_eq!(
+        represented_calls[0][0]["function"]["name"],
+        "q_company_search"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            represented_calls[0][0]["function"]["arguments"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        json!({"query":"Alphabet Inc"})
+    );
+    for table in [
+        "plugin_invocations",
+        "plugin_connections",
+        "ai_conversations",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "app planning must not create {table}");
+    }
+    let ledger: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(ledger, 2, "only registration may issue demo units");
+    h.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated TEST_DATABASE_URL; only contacts a loopback fixture"]
+async fn invalid_unselected_application_proposals_fail_before_any_public_proposal() {
+    let h = Harness::with_mode("app_parallel_unknown").await;
+    let token = h.register("app_bad_parallel").await;
+    let mut body = request_body("Analyze Alphabet annual financial performance");
+    body["app_tools_version"] = json!(1);
+    body["company_research_version"] = json!(1);
+    let response = h
+        .request("POST", "/v1/ai/chat", Some(&token), Some(body))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let wire = String::from_utf8(
+        to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(wire.contains("AI_UPSTREAM_ERROR"));
+    assert!(!wire.contains("event: app_tool"));
+    assert!(!wire.contains("event: tool_proposal"));
+    assert!(!wire.contains("event: done"));
+    let invocations: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_invocations")
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(invocations, 0);
+    assert_eq!(h.calls.load(Ordering::SeqCst), 1);
+    h.finish().await;
 }
 
 #[tokio::test]

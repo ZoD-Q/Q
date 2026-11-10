@@ -24,6 +24,28 @@ default:
     - linux
   interruptible: true
   timeout: 30 minutes
+  hooks:
+    pre_get_sources_script:
+      - |
+        # Avoid this host's HTTP/2 fetch resets without changing TLS or Runner files.
+        # Append to any command-scope Git configuration already supplied by Runner.
+        q_git_config_index="${GIT_CONFIG_COUNT:-0}"
+        case "$q_git_config_index" in
+          *[!0-9]*) echo "Invalid inherited Git configuration count." >&2; exit 1 ;;
+        esac
+        if [ "${#q_git_config_index}" -gt 6 ]; then
+          echo "Inherited Git configuration count exceeds the supported bound." >&2; exit 1
+        fi
+        while [ "${q_git_config_index#0}" != "$q_git_config_index" ]; do
+          q_git_config_index="${q_git_config_index#0}"
+        done
+        q_git_config_index="${q_git_config_index:-0}"
+        if [ "$q_git_config_index" -ge 64 ]; then
+          echo "Inherited Git configuration count exceeds the supported bound." >&2; exit 1
+        fi
+        export "GIT_CONFIG_KEY_${q_git_config_index}=http.https://gitlab.kai.com/.version"
+        export "GIT_CONFIG_VALUE_${q_git_config_index}=HTTP/1.1"
+        export GIT_CONFIG_COUNT="$((q_git_config_index + 1))"
 
 variables:
   GIT_DEPTH: "0"

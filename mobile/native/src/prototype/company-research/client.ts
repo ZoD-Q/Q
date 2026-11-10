@@ -1,19 +1,24 @@
-import { CompanyResearchError, SEC_DIRECTORY, BROWSER_SEC_GAP, companyDirectReadAllowed, buildCompanyResearchText, calculateFacts, entityUrl, factsUrl, parseDirectory, parseEntity, parseFinancialFacts, parseSubmissions, record, submissionsUrl, validateCompanyQuery, validateIssuerId } from './core';
+import { CompanyResearchError, SEC_DIRECTORY, BROWSER_SEC_GAP, COMPANY_SEARCH_TIMEOUT_GAP, companyDirectReadAllowed, buildCompanyResearchText, calculateFacts, entityUrl, factsUrl, isExactCompanyCandidate, parseDirectory, parseEntity, parseFinancialFacts, parseSubmissions, record, submissionsUrl, validateCompanyQuery, validateIssuerId } from './core';
 import type { CompanyCandidate, CompanyResearchReport, CompanySearchReport, SourceName, SourceStatus } from './core';
 export { buildCompanyResearchText, validateCompanyQuery, validateIssuerId, CompanyResearchError };
 export type { CompanyCandidate, CompanyResearchReport, CompanySearchReport };
-export type CompanyRequestOptions = { signal: AbortSignal; transport: typeof fetch; platform?: string };
+export type CompanyRequestOptions = { signal: AbortSignal; transport: typeof fetch; platform?: string; purpose?: 'assistant' };
 export const COMPANY_TIMEOUT_MS = 12_000;
+export const COMPANY_ASSISTANT_SEARCH_TIMEOUT_MS = 20_000;
+export const COMPANY_SEARCH_TIMEOUT_MS = 45_000;
 export const COMPANY_FACTS_LIMIT = 12 * 1024 * 1024;
 const MAX_JSON = 2 * 1024 * 1024;
+type SourceRequestOptions = CompanyRequestOptions & { deadlineAt?: number };
+const remainingTime = (options: SourceRequestOptions): number => options.deadlineAt === undefined ? Infinity : Math.max(0, options.deadlineAt - Date.now());
 // Shared by requests using the same transport; no stored queries or responses.
 const hostLimits = new WeakMap<typeof fetch, Map<string, { next: number; blockedUntil: number }>>();
-async function reserveHost(host: string, options: CompanyRequestOptions): Promise<void> {
+async function reserveHost(host: string, options: SourceRequestOptions): Promise<void> {
   const limits = hostLimits.get(options.transport) ?? new Map<string, { next: number; blockedUntil: number }>();
   hostLimits.set(options.transport, limits);
   const state = limits.get(host) ?? { next: 0, blockedUntil: 0 };
   if (Date.now() < state.blockedUntil) throw new CompanyResearchError('rate_limited');
   const delay = Math.max(0, state.next - Date.now());
+  if (delay >= remainingTime(options)) throw new CompanyResearchError('timeout');
   state.next = Date.now() + delay + 1000; limits.set(host, state);
   if (delay) await new Promise<void>((resolve, reject) => {
     const finish = () => { options.signal.removeEventListener('abort', stop); resolve(); };
@@ -21,6 +26,7 @@ async function reserveHost(host: string, options: CompanyRequestOptions): Promis
     const stop = () => { clearTimeout(timer); options.signal.removeEventListener('abort', stop); reject(new CompanyResearchError('cancelled')); };
     if (options.signal.aborted) stop(); else options.signal.addEventListener('abort', stop, { once: true });
   });
+  if (remainingTime(options) <= 0) throw new CompanyResearchError('timeout');
   if (Date.now() < state.blockedUntil) throw new CompanyResearchError('rate_limited');
 }
 function abortable<T>(promise: Promise<T>, signal: AbortSignal, error: () => Error): Promise<T> {
@@ -31,17 +37,19 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal, error: () => Err
     promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop));
   });
 }
-async function getJson(url: string, options: CompanyRequestOptions, maxBytes = MAX_JSON): Promise<unknown> {
+async function getJson(url: string, options: SourceRequestOptions, maxBytes = MAX_JSON): Promise<unknown> {
   const u = new URL(url);
   if (u.protocol !== 'https:' || !['www.sec.gov', 'data.sec.gov', 'www.wikidata.org', 'query.wikidata.org'].includes(u.hostname) || u.username || u.password || u.port) throw new CompanyResearchError('invalid_source');
   if (options.signal.aborted) throw new CompanyResearchError('cancelled');
   await reserveHost(u.hostname, options);
   if (options.signal.aborted) throw new CompanyResearchError('cancelled');
+  const timeoutMs = Math.min(COMPANY_TIMEOUT_MS, remainingTime(options));
+  if (timeoutMs <= 0) throw new CompanyResearchError('timeout');
   const controller = new AbortController(); let timeout = false;
   const error = () => new CompanyResearchError(timeout ? 'timeout' : 'cancelled');
   const cancel = () => controller.abort();
   options.signal.addEventListener('abort', cancel, { once: true });
-  const timer = setTimeout(() => { timeout = true; cancel(); }, COMPANY_TIMEOUT_MS);
+  const timer = setTimeout(() => { timeout = true; cancel(); }, timeoutMs);
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
     // Browser fetch must not receive the options object as its `this` value.
@@ -49,7 +57,7 @@ async function getJson(url: string, options: CompanyRequestOptions, maxBytes = M
     const headers: Record<string, string> = { Accept: 'application/json' };
     if ((options.platform ?? process.env.EXPO_OS) !== 'web') headers['User-Agent'] = 'Q-Public-Research/0.1 (+https://q.kaicloudpay.com)';
     const pending = transport(url, { method: 'GET', credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: controller.signal, headers }).then(response => {
-      if (controller.signal.aborted) { void response.body?.cancel().catch(() => undefined); throw error(); } return response;
+      if (controller.signal.aborted || remainingTime(options) <= 0) { void response.body?.cancel().catch(() => undefined); throw controller.signal.aborted ? error() : new CompanyResearchError('timeout'); } return response;
     });
     const response = await abortable(pending, controller.signal, error);
     const fail = (code: string): never => { void response.body?.cancel().catch(() => undefined); throw new CompanyResearchError(code); };
@@ -71,6 +79,7 @@ async function getJson(url: string, options: CompanyRequestOptions, maxBytes = M
     while (true) {
       const chunk = await abortable(reader!.read(), controller.signal, error);
       if (controller.signal.aborted) throw error();
+      if (remainingTime(options) <= 0) throw new CompanyResearchError('timeout');
       if (chunk.done) break;
       if (!(chunk.value instanceof Uint8Array)) throw new CompanyResearchError('invalid_data');
       size += chunk.value.byteLength; if (size > maxBytes) throw new CompanyResearchError('too_large'); chunks.push(chunk.value);
@@ -87,7 +96,7 @@ async function getJson(url: string, options: CompanyRequestOptions, maxBytes = M
     clearTimeout(timer); options.signal.removeEventListener('abort', cancel); controller.abort();
   }
 }
-async function source<T>(statuses: SourceStatus[], name: SourceName, url: string, options: CompanyRequestOptions, parse: (data: unknown) => T, maxBytes?: number): Promise<T | null> {
+async function source<T>(statuses: SourceStatus[], name: SourceName, url: string, options: SourceRequestOptions, parse: (data: unknown) => T, maxBytes?: number): Promise<T | null> {
   if (options.signal.aborted) throw new CompanyResearchError('cancelled');
   if (!companyDirectReadAllowed(name, options.platform ?? process.env.EXPO_OS)) { statuses.push({ source: name, status: 'not_read', url }); return null; }
   try { const value = parse(await getJson(url, options, maxBytes)); statuses.push({ source: name, status: 'available', url }); return value; }
@@ -107,7 +116,15 @@ function idsFromQuery(data: unknown): string[] {
 }
 export async function searchCompanies(query: string, options: CompanyRequestOptions): Promise<CompanySearchReport> {
   if (!validateCompanyQuery(query)) throw new CompanyResearchError('invalid_query');
+  const deadlineAt = Date.now() + (options.purpose === 'assistant' ? COMPANY_ASSISTANT_SEARCH_TIMEOUT_MS : COMPANY_SEARCH_TIMEOUT_MS);
+  const requestOptions: SourceRequestOptions = { ...options, deadlineAt };
   const report: CompanySearchReport = { kind: 'company-search', query: query.trim(), fetchedAt: new Date().toISOString(), candidates: [], sources: [], gaps: [...publicGaps, 'Results are bounded to 12 SEC and 6 Wikidata candidates; no result does not establish that an issuer does not exist.'] };
+  const finish = () => {
+    if (options.signal.aborted) throw new CompanyResearchError('cancelled');
+    if (Date.now() >= deadlineAt) report.gaps.push(COMPANY_SEARCH_TIMEOUT_GAP);
+    report.fetchedAt = new Date().toISOString();
+    return report;
+  };
   if ((options.platform ?? process.env.EXPO_OS) === 'web') report.gaps.push(BROWSER_SEC_GAP);
   const q = query.trim();
   const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(q)}&language=${/[\u3400-\u9fff]/u.test(q) ? 'zh' : 'en'}&uselang=en&type=item&limit=6&format=json&origin=*`;
@@ -115,20 +132,34 @@ export async function searchCompanies(query: string, options: CompanyRequestOpti
   const tickerLike = /^[A-Za-z0-9][A-Za-z0-9.\-]{0,19}$/.test(ticker);
   const sparql = `SELECT DISTINCT ?item WHERE { ?item p:P414 ?s . ?s pq:P249 ${JSON.stringify(ticker.toUpperCase())} . } LIMIT 6`;
   const tickerUrl = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`;
+  let directory: CompanyCandidate[] | null | undefined;
+  if (options.purpose === 'assistant') {
+    // An interactive research turn has a shared deadline. Once the SEC directory
+    // supplies one exact identity, unrelated global discovery must not hold up its financial read.
+    directory = await source(report.sources, 'sec-directory', SEC_DIRECTORY, requestOptions, data => parseDirectory(data, q));
+    const exact = (directory ?? []).filter(candidate => isExactCompanyCandidate(candidate, q));
+    if (exact.length === 1) {
+      if (options.signal.aborted) throw new CompanyResearchError('cancelled');
+      report.candidates = exact;
+      report.gaps.push('Assistant lookup stopped after a unique exact SEC match; other public directories were not queried.');
+      return finish();
+    }
+  }
   const results = await Promise.all([
-    source(report.sources, 'sec-directory', SEC_DIRECTORY, options, data => parseDirectory(data, q)),
-    source(report.sources, 'wikidata-search', searchUrl, options, idsFromSearch),
-    tickerLike ? source(report.sources, 'wikidata-ticker', tickerUrl, options, idsFromQuery) : Promise.resolve([]),
+    directory === undefined ? source(report.sources, 'sec-directory', SEC_DIRECTORY, requestOptions, data => parseDirectory(data, q)) : Promise.resolve(directory),
+    source(report.sources, 'wikidata-search', searchUrl, requestOptions, idsFromSearch),
+    tickerLike ? source(report.sources, 'wikidata-ticker', tickerUrl, requestOptions, idsFromQuery) : Promise.resolve([]),
   ]);
   report.candidates.push(...(results[0] ?? []));
   const ids = [...new Set([...(results[2] ?? []), ...(results[1] ?? [])])].slice(0, 6);
   // Bounded batches avoid flooding the public entity service; each candidate is validated before display.
   for (let i = 0; i < ids.length; i += 2) {
-    const batch = await Promise.all(ids.slice(i, i + 2).map(id => source(report.sources, 'wikidata-entity', entityUrl(id), options, data => parseEntity(data, id))));
+    if (Date.now() >= deadlineAt) break;
+    const batch = await Promise.all(ids.slice(i, i + 2).map(id => source(report.sources, 'wikidata-entity', entityUrl(id), requestOptions, data => parseEntity(data, id))));
     for (const item of batch) if (item && item.candidate.listings.length) report.candidates.push(item.candidate);
   }
   if (q.includes(':')) report.gaps.push('SEC exchange filters use exchange names. Wikidata exchange IDs are shown as candidates; verify the requested venue before choosing.');
-  report.fetchedAt = new Date().toISOString(); return report;
+  return finish();
 }
 export async function researchCompany(issuerId: string, options: CompanyRequestOptions): Promise<CompanyResearchReport> {
   if (!validateIssuerId(issuerId)) throw new CompanyResearchError('invalid_issuer');
