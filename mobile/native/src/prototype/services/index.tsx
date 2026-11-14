@@ -18,7 +18,6 @@ export function ServicePage({
     | "wallet"
     | "keys"
     | "finance"
-    | "installments"
     | "insurance";
 }) {
   switch (page) {
@@ -29,7 +28,6 @@ export function ServicePage({
     case "keys":
       return <KeysPage />;
     case "finance":
-    case "installments":
       return <FinancialCatalogPage key={page} category={page} />;
     case "insurance":
       return <InsuranceDashboard initialEntry={insuranceEntry} />;

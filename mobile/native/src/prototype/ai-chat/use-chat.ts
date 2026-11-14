@@ -7,7 +7,7 @@ import { API_URL } from '../../services/api';
 import { readSessionSnapshot, getSessionRevision, invalidateToken, removeToken, writeToken, subscribeSession } from '../../services/session-store';
 import { decodeAuth, decodeUser, workbenchRequest, WorkbenchError } from '../api-workbench/core';
 import { ChatError, decodeAiStatus, streamChat, fitChatRequestHistory, type AppToolContext } from './stream';
-import { CAPABILITY_GUIDANCE, validateAppCommand, type AppCommand, type AppNavigationAction, type AppResultSource } from '../app-assistant/core';
+import { CAPABILITY_GUIDANCE, isRetiredModuleId, validateAppCommand, type AppCommand, type AppNavigationAction, type AppResultSource } from '../app-assistant/core';
 import { executeAppCommand, appResultContext } from '../app-assistant/executor';
 import { isAppRecoveryError, mergeAppActions, mergeAppSources, splitSourceReferences, withSourceReferences } from '../app-assistant/presentation';
 import { clearCompanyResults } from '../company-research/handoff';
@@ -21,7 +21,7 @@ import { getBank } from '../banking/catalog';
 import { decodeBankWallet } from '../banking/client';
 import { appendLocalFinanceTurn, financialAiTitle, isFinancialAiConversation, localFinanceHelp, type LocalFinanceTurn } from '../finance-agent/conversation';
 import { FINANCIAL_AI_GUIDANCE, respondToFinanceText } from '../finance-agent/intent';
-import { canContinueRecommendation, completedRecommendationModule, decodeRecommendation, decodeRecommendationPage, decodeSelection, mergeRecommendations, recommendationTurnKey, type PendingRecommendation, type Recommendation, type RecommendationMap, type RecommendationSelection } from '../recommendations/core';
+import { canContinueRecommendation, completedRecommendationModule, decodeRecommendation, decodeRecommendationPage, decodeSelection, isRetiredRecommendationId, mergeRecommendations, recommendationTurnKey, type PendingRecommendation, type Recommendation, type RecommendationMap, type RecommendationSelection } from '../recommendations/core';
 import { readPendingRecommendation, savePendingRecommendation } from '../recommendations/pending';
 
 type ActiveRequest = { id: string; conversationId: string; assistantId: string; controller: AbortController; generation: number; automaticInvocationId?: string; appToolAttempted?: boolean; appPhase?: 'reading' | 'analyzing'; timedOut?: boolean };
@@ -973,8 +973,10 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh', recommenda
   };
 
   const selectRecommendation = async (recordId: string, candidateId: string, continueExisting = false): Promise<RecommendationSelection | null> => {
+    if (isRetiredRecommendationId(candidateId)) return null;
     const account = sessionRef.current;
     const record = recommendationsRef.current[recordId], pending = pendingRecommendationRef.current;
+    if (record?.candidates.some(candidate => candidate.id === candidateId && candidate.kind === 'module' && isRetiredModuleId(candidate.module))) return null;
     const sourceId = record?.conversation_id ?? (pending?.recordId === recordId && pending.candidateId === candidateId ? pending.sourceConversationId : null);
     if (!account || !recommendationsVisible || AppState.currentState !== 'active' || status?.recommendations_version !== 1 || !sourceId
       || (record && !record.candidates.some(candidate => candidate.id === candidateId))
@@ -1001,6 +1003,7 @@ export function useChat(visible: boolean, locale: 'zh' | 'en' = 'zh', recommenda
       const result = await workbenchRequest({ baseUrl: API_URL, path: `/v1/ai/recommendations/${recordId}/select`, token: account.token,
         method: 'POST', body: { candidate_id: candidateId }, signal: controller.signal, timeoutMs: 12000, decode: decodeSelection, transport: expoFetch });
       if (result.candidate.id !== candidateId) throw new WorkbenchError('INVALID_RESPONSE');
+      if (result.candidate.kind === 'module' && isRetiredModuleId(result.candidate.module)) throw new WorkbenchError('RECOMMENDATION_STALE');
       if (!current()) return null;
       if (record) rememberRecommendations([{ ...record, candidates: record.candidates.map(candidate => candidate.id === candidateId ? result.candidate : candidate) }]);
       if (result.conversation) {

@@ -14,7 +14,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -194,6 +194,67 @@ pub(crate) const PROVIDERS: &[Provider] = &[
         initial: "2025-11-25",
     },
 ];
+const SHARED_PROFILE_VERSION: &str = "financial-profile-1";
+const PERSONAL_PROFILE_VERSION: &str = "financial-profile-2-personal";
+const TAVILY_PERSONAL: Provider = Provider {
+    id: "tavily",
+    name: "Tavily · 个人额度",
+    description: "使用个人 Tavily API Key 的额度搜索公开网页与提取正文；额度与费用按个人账号。请使用支持个人额度设置的新版小Q配置密钥；不提供爬取或自动购买。",
+    endpoint: "https://mcp.tavily.com/mcp/",
+    homepage: "https://docs.tavily.com/documentation/keyless",
+    auth: "api_key",
+    issuer: None,
+    registration: None,
+    tools: &["tavily_search", "tavily_extract"],
+    initial: "2025-11-25",
+};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AccessMode {
+    Shared,
+    Personal,
+}
+
+fn profile_mode(id: &str, version: &str) -> ApiResult<AccessMode> {
+    match (id, version) {
+        (_, SHARED_PROFILE_VERSION) => Ok(AccessMode::Shared),
+        ("tavily", PERSONAL_PROFILE_VERSION) => Ok(AccessMode::Personal),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn profile_for_mode(id: &str, mode: AccessMode) -> ApiResult<&'static Provider> {
+    match mode {
+        AccessMode::Shared => provider(id),
+        AccessMode::Personal if id == "tavily" => Ok(&TAVILY_PERSONAL),
+        AccessMode::Personal => Err(ApiError::validation("Unsupported provider access mode.")),
+    }
+}
+
+fn profile_card(p: &Provider, mode: AccessMode) -> ApiResult<Candidate> {
+    let card_json = json!({"name":p.name,"description":p.description});
+    Ok(Candidate {
+        card_url: p.homepage.into(),
+        discovery_url: p.homepage.into(),
+        card_origin: reqwest::Url::parse(p.homepage)
+            .map_err(|_| ApiError::internal())?
+            .origin()
+            .ascii_serialization(),
+        endpoint_url: p.endpoint.into(),
+        name: p.id.into(),
+        title: p.name.into(),
+        version: match mode {
+            AccessMode::Shared => SHARED_PROFILE_VERSION,
+            AccessMode::Personal => PERSONAL_PROFILE_VERSION,
+        }
+        .into(),
+        description: p.description.into(),
+        fingerprint: fingerprint(&card_json)?,
+        card_json,
+    })
+}
+
 pub(crate) fn provider(id: &str) -> ApiResult<&'static Provider> {
     PROVIDERS
         .iter()
@@ -201,12 +262,12 @@ pub(crate) fn provider(id: &str) -> ApiResult<&'static Provider> {
         .ok_or_else(|| ApiError::validation("Unknown financial provider."))
 }
 pub(crate) fn binding(c: &StoredConnection) -> ApiResult<&'static Provider> {
-    let p = provider(
-        c.financial_provider_id
-            .as_deref()
-            .ok_or_else(ApiError::internal)?,
-    )?;
+    let id = c
+        .financial_provider_id
+        .as_deref()
+        .ok_or_else(ApiError::internal)?;
     let card = c.card()?;
+    let p = profile_for_mode(id, profile_mode(id, &card.version)?)?;
     if c.connection_kind != "remote_mcp"
         || c.builtin_service_id.is_some()
         || card.endpoint_url != p.endpoint
@@ -266,14 +327,48 @@ pub async fn providers(
         .await?
         .0
         .items;
+    let providers = PROVIDERS
+        .iter()
+        .filter(|p| query.catalog_version == Some(2) || !research_profile(p.id))
+        .map(|p| {
+            let connection = connections.iter().find(|c| {
+                c.financial_provider_id
+                    .as_deref()
+                    .or(c.research_provider_id.as_deref())
+                    == Some(p.id)
+            });
+            // auth_mode remains the original default for older catalog clients.
+            let mut entry = json!({"id":p.id,"name":p.name,"description":p.description,"homepage_url":p.homepage,"auth_mode":p.auth,"connection":connection});
+            if p.id == "tavily" {
+                entry["access_modes"] = json!([
+                    {"id":"shared","auth_mode":"none"},
+                    {"id":"personal","auth_mode":"api_key"}
+                ]);
+                entry["connection_access_mode"] = json!(
+                    connection
+                        .map(|c| profile_mode(p.id, &c.version))
+                        .transpose()?
+                );
+            }
+            Ok(entry)
+        })
+        .collect::<ApiResult<Vec<_>>>()?;
     Ok(Json(
-        json!({"available":state.plugins.is_some(),"credentials_configured":state.plugins.as_ref().is_some_and(|r|r.key.is_some()),"oauth_configured":state.plugins.as_ref().is_some_and(|r|r.oauth_configured()),"providers":PROVIDERS.iter().filter(|p| query.catalog_version == Some(2) || !research_profile(p.id)).map(|p|json!({"id":p.id,"name":p.name,"description":p.description,"homepage_url":p.homepage,"auth_mode":p.auth,"connection":connections.iter().find(|c|(c.financial_provider_id.as_deref().or(c.research_provider_id.as_deref()))==Some(p.id))})).collect::<Vec<_>>()}),
+        json!({"available":state.plugins.is_some(),"credentials_configured":state.plugins.as_ref().is_some_and(|r|r.key.is_some()),"oauth_configured":state.plugins.as_ref().is_some_and(|r|r.oauth_configured()),"providers":providers}),
     ))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectRequest {
     provider_id: String,
+    #[serde(default, deserialize_with = "requested_access_mode")]
+    access_mode: Option<AccessMode>,
+}
+fn requested_access_mode<'de, D>(deserializer: D) -> Result<Option<AccessMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    AccessMode::deserialize(deserializer).map(Some)
 }
 pub async fn connect(
     State(state): State<AppState>,
@@ -281,40 +376,72 @@ pub async fn connect(
     ApiJson(req): ApiJson<ConnectRequest>,
 ) -> ApiResult<Json<Connection>> {
     state.limit_auth(format!("financial-connect:{}", auth.user_id), 20)?;
-    let p = provider(&req.provider_id)?;
+    let default = provider(&req.provider_id)?;
+    if req.access_mode.is_some() && default.id != "tavily" {
+        return Err(ApiError::validation("Unsupported provider access mode."));
+    }
     runtime(&state)?;
-    let card_json = json!({"name":p.name,"description":p.description});
-    let card = Candidate {
-        card_url: p.homepage.into(),
-        discovery_url: p.homepage.into(),
-        card_origin: reqwest::Url::parse(p.homepage)
-            .map_err(|_| ApiError::internal())?
-            .origin()
-            .ascii_serialization(),
-        endpoint_url: p.endpoint.into(),
-        name: p.id.into(),
-        title: p.name.into(),
-        version: "financial-profile-1".into(),
-        description: p.description.into(),
-        fingerprint: fingerprint(&card_json)?,
-        card_json: card_json.clone(),
-    };
     let mut tx = state.pool.begin().await?;
     crate::account_lifecycle::lock_active(&mut tx, auth.user_id).await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('q.plugins:' || $1::text,731291))")
         .bind(auth.user_id.to_string())
         .execute(&mut *tx)
         .await?;
-    let existing:Option<(Uuid,String)>=sqlx::query_as("SELECT id,status FROM plugin_connections WHERE user_id=$1 AND financial_provider_id=$2 FOR UPDATE").bind(auth.user_id).bind(p.id).fetch_optional(&mut *tx).await?;
+    let existing: Option<StoredConnection> = sqlx::query_as(&format!(
+        "SELECT {} FROM plugin_connections WHERE user_id=$1 AND financial_provider_id=$2 FOR UPDATE",
+        store::CONNECTION_FIELDS
+    ))
+    .bind(auth.user_id)
+    .bind(default.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let previous_mode = existing
+        .as_ref()
+        .map(|c| {
+            binding(c)?;
+            profile_mode(default.id, &c.card()?.version)
+        })
+        .transpose()?;
+    let mode = req
+        .access_mode
+        .or(previous_mode)
+        .unwrap_or(AccessMode::Shared);
+    if existing.as_ref().is_some_and(|c| c.status != "revoked") && previous_mode != Some(mode) {
+        return Err(ApiError::conflict(
+            "PLUGIN_ACCESS_MODE_CONFLICT",
+            "Disconnect the existing connection before choosing another provider access mode.",
+        ));
+    }
+    let p = profile_for_mode(default.id, mode)?;
+    let card = profile_card(p, mode)?;
     let status = if p.auth == "none" {
         "ready"
     } else {
         "auth_required"
     };
     let auth_status = if p.auth == "none" { "none" } else { "required" };
-    let id = if let Some((id, old)) = existing {
-        if old == "revoked" {
-            sqlx::query("UPDATE plugin_connections SET candidate=$3,status=$4,auth_status=$5,revision=revision+1,tools_snapshot=NULL,schema_fingerprint=NULL,pending_tools=NULL,pending_candidate=NULL,last_error_code=NULL,updated_at=now() WHERE id=$1 AND user_id=$2").bind(id).bind(auth.user_id).bind(json!(card)).bind(status).bind(auth_status).execute(&mut *tx).await?;
+    let id = if let Some(existing) = existing {
+        let id = existing.id;
+        if existing.status == "revoked" {
+            sqlx::query("UPDATE plugin_connections SET candidate=$3,status=$4,auth_status=$5,revision=revision+1,tools_snapshot=NULL,schema_fingerprint=NULL,pending_tools=NULL,pending_candidate=NULL,auth_challenge=NULL,requested_scopes='{}',last_error_code=NULL,updated_at=now() WHERE id=$1 AND user_id=$2").bind(id).bind(auth.user_id).bind(json!(card)).bind(status).bind(auth_status).execute(&mut *tx).await?;
+            // A mode change is possible only after disconnect. Keep the cleanup
+            // transactional here too, including for old-client reconnects.
+            sqlx::query(
+                "DELETE FROM plugin_financial_credentials WHERE connection_id=$1 AND user_id=$2",
+            )
+            .bind(id)
+            .bind(auth.user_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("DELETE FROM plugin_oauth_tokens WHERE connection_id=$1 AND user_id=$2")
+                .bind(id)
+                .bind(auth.user_id)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("UPDATE plugin_oauth_attempts SET status='failed',encrypted_verifier=NULL,error_code='PLUGIN_AUTH_CHANGED',updated_at=now() WHERE connection_id=$1 AND user_id=$2 AND status IN ('pending','exchanging')")
+                .bind(id).bind(auth.user_id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE plugin_invocations SET status='cancelled',error_code='PLUGIN_AUTH_CHANGED',updated_at=now() WHERE connection_id=$1 AND user_id=$2 AND status='awaiting_confirmation'")
+                .bind(id).bind(auth.user_id).execute(&mut *tx).await?;
         }
         id
     } else {
@@ -329,7 +456,8 @@ pub async fn connect(
                 "Saved connection limit reached.",
             ));
         }
-        let service:Uuid=sqlx::query_scalar("INSERT INTO plugin_services(id,card_url,card_url_hash,anonymous_card) VALUES($1,$2,$3,$4) ON CONFLICT(card_url_hash) DO UPDATE SET updated_at=now() WHERE plugin_services.card_url=EXCLUDED.card_url RETURNING id").bind(Uuid::new_v4()).bind(p.homepage).bind(hash(p.homepage.as_bytes())).bind(card_json).fetch_one(&mut *tx).await?;
+        let public_card = json!({"name":default.name,"description":default.description});
+        let service:Uuid=sqlx::query_scalar("INSERT INTO plugin_services(id,card_url,card_url_hash,anonymous_card) VALUES($1,$2,$3,$4) ON CONFLICT(card_url_hash) DO UPDATE SET updated_at=now() WHERE plugin_services.card_url=EXCLUDED.card_url RETURNING id").bind(Uuid::new_v4()).bind(p.homepage).bind(hash(p.homepage.as_bytes())).bind(public_card).fetch_one(&mut *tx).await?;
         let id = Uuid::new_v4();
         sqlx::query("INSERT INTO plugin_connections(id,user_id,service_id,candidate,financial_provider_id,status,auth_status) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(id).bind(auth.user_id).bind(service).bind(json!(card)).bind(p.id).bind(status).bind(auth_status).execute(&mut *tx).await?;
         id
@@ -716,7 +844,7 @@ fn validate_tavily_result(result: &Value) -> Result<(), McpError> {
                 return Err(McpError::new(
                     "MCP_RATE_LIMITED",
                     super::types::ErrorCategory::Limit,
-                    "The search provider's free usage limit was reached. Try again later.",
+                    "The search provider's usage limit was reached. Check the selected access mode and quota.",
                 )
                 .with_status(429));
             }
@@ -782,6 +910,77 @@ pub async fn probe_tavily(extract: bool) -> Result<Value, McpError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn financial_modes_are_selected_only_by_trusted_profile_and_exact_binding() {
+        let p = provider("tavily").unwrap();
+        let now = chrono::Utc::now();
+        let mut c = StoredConnection {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            connection_kind: "remote_mcp".into(),
+            builtin_service_id: None,
+            financial_provider_id: Some("tavily".into()),
+            candidate: json!(profile_card(p, AccessMode::Shared).unwrap()),
+            pending_candidate: None,
+            tools_snapshot: None,
+            pending_tools: None,
+            schema_fingerprint: None,
+            revision: 1,
+            status: "ready".into(),
+            auth_status: "none".into(),
+            auth_challenge: None,
+            requested_scopes: vec![],
+            last_error_code: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(binding(&c).unwrap().auth, "none");
+        c.candidate = json!(profile_card(&TAVILY_PERSONAL, AccessMode::Personal).unwrap());
+        assert_eq!(binding(&c).unwrap().auth, "api_key");
+        let expected = c.clone();
+        for field in ["endpoint_url", "card_url", "version"] {
+            c = expected.clone();
+            c.candidate[field] = json!("https://untrusted.example/personal");
+            assert!(binding(&c).is_err(), "reject changed {field}");
+        }
+        c = expected.clone();
+        c.financial_provider_id = None;
+        assert!(
+            binding(&c).is_err(),
+            "a Card alone cannot select personal mode"
+        );
+        c = expected.clone();
+        c.financial_provider_id = Some("coingecko".into());
+        assert!(
+            binding(&c).is_err(),
+            "personal mode is only enabled for Tavily"
+        );
+        c = expected.clone();
+        c.builtin_service_id = Some("q.bank-demo.hsbc".into());
+        assert!(binding(&c).is_err());
+        c = expected;
+        c.connection_kind = "bank_demo".into();
+        assert!(binding(&c).is_err());
+    }
+
+    #[test]
+    fn explicit_access_mode_rejects_null_unknown_and_non_string_values() {
+        assert!(serde_json::from_value::<ConnectRequest>(json!({"provider_id":"tavily"})).is_ok());
+        for mode in [
+            json!(null),
+            json!("other"),
+            json!(1),
+            json!({"personal":true}),
+        ] {
+            assert!(
+                serde_json::from_value::<ConnectRequest>(
+                    json!({"provider_id":"tavily","access_mode":mode})
+                )
+                .is_err()
+            );
+        }
+    }
+
     #[test]
     fn tavily_usage_envelopes_are_not_success_or_payment_instructions() {
         for code in [
