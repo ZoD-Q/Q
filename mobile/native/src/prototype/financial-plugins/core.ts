@@ -28,7 +28,8 @@ export const FINANCIAL_PROVIDERS = {
     example: ['查找宏观数据系列及其观测值', 'Find macroeconomic series and their observations'] },
 } as const;
 export type FinancialProviderId = keyof typeof FINANCIAL_PROVIDERS;
-export type FinancialProvider = { id: FinancialProviderId; name: string; description: string; homepage_url: string; auth_mode: 'none' | 'api_key' | 'oauth'; connection: PluginConnection | null };
+export type FinancialAccessMode = 'shared' | 'personal';
+export type FinancialProvider = { id: FinancialProviderId; name: string; description: string; homepage_url: string; auth_mode: 'none' | 'api_key' | 'oauth'; connection: PluginConnection | null; access_modes?: { id: FinancialAccessMode; auth_mode: 'none' | 'api_key' }[]; connection_access_mode?: FinancialAccessMode | null };
 export type FinancialCatalog = { available: boolean; credentials_configured: boolean; oauth_configured: boolean; providers: FinancialProvider[] };
 const fail = (): never => { throw new WorkbenchError('INVALID_RESPONSE'); };
 const text = (value: unknown, limit: number): value is string => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value);
@@ -50,7 +51,22 @@ export function decodeFinancialCatalog(value: unknown): FinancialCatalog {
     let url: URL; try { url = new URL(item.homepage_url); } catch { return fail(); }
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.origin !== new URL(expected.home).origin) return fail();
     ids.add(item.id);
-    return { id: item.id, name: item.name, description: item.description, homepage_url: item.homepage_url, auth_mode: expected.auth, connection: item.connection === null ? null : decodeFinancialConnection(item.connection, item.id) };
+    const connection = item.connection === null ? null : decodeFinancialConnection(item.connection, item.id);
+    const provider: FinancialProvider = { id: item.id, name: item.name, description: item.description, homepage_url: item.homepage_url, auth_mode: expected.auth, connection };
+    if ('access_modes' in item || 'connection_access_mode' in item) {
+      if (item.id !== 'tavily' || !Array.isArray(item.access_modes) || item.access_modes.length !== 2) return fail();
+      const modes = new Set<FinancialAccessMode>();
+      provider.access_modes = item.access_modes.map(mode => {
+        if (!record(mode) || (mode.id !== 'shared' && mode.id !== 'personal') || modes.has(mode.id) || mode.auth_mode !== (mode.id === 'shared' ? 'none' : 'api_key')) return fail();
+        modes.add(mode.id);
+        return { id: mode.id, auth_mode: mode.id === 'shared' ? 'none' : 'api_key' };
+      });
+      const access = item.connection_access_mode;
+      if (connection ? access !== 'shared' && access !== 'personal' : access !== null) return fail();
+      if (access === 'personal' && connection && (connection.auth_status === 'anonymous' || (connection.status === 'ready' && connection.auth_status !== 'authorized'))) return fail();
+      provider.connection_access_mode = access as FinancialAccessMode | null;
+    }
+    return provider;
   });
   return { available: value.available, credentials_configured: value.credentials_configured, oauth_configured: value.oauth_configured, providers };
 }
@@ -67,12 +83,18 @@ export function decodeAuthorizationAttempt(value: unknown, authorization: Financ
   if (value.status === 'succeeded') return true;
   throw new WorkbenchError(['pending', 'exchanging'].includes(value.status) ? 'PLUGIN_AUTH_PENDING' : 'PLUGIN_AUTH_REQUIRED');
 }
-export function financialError(error: unknown, translate: (zh: string, en: string) => string): string {
+export function financialError(error: unknown, translate: (zh: string, en: string) => string, scope: 'catalog' | 'connection' = 'connection'): string {
   const code = error instanceof WorkbenchError ? error.code : '';
-  if (error instanceof WorkbenchError && error.status === 404) return translate('当前服务器尚未提供金融插件，请更新服务后重试。', 'This server does not provide financial plugins yet. Update the service and try again.');
+  if (code === 'PLUGIN_NOT_FOUND') return translate('此连接不存在或已断开。请刷新连接状态，需要时重新添加。', 'This connection no longer exists or was disconnected. Refresh its state and add it again if needed.');
+  if (error instanceof WorkbenchError && error.status === 404) return scope === 'catalog' && ['NOT_FOUND', 'REQUEST_FAILED'].includes(code)
+    ? translate('当前服务器尚未提供金融插件，请更新服务后重试。', 'This server does not provide financial plugins yet. Update the service and try again.')
+    : translate('此连接或授权记录已失效。请返回并刷新连接状态后重试。', 'This connection or authorization record is no longer available. Go back and refresh the connection state.');
   const errors: Record<string, [string, string]> = {
     PLUGIN_AUTH_REQUIRED: ['需要完成此服务的授权，或重新配置有效密钥。', 'Authorize this provider or configure a valid key.'],
     PLUGIN_AUTH_PENDING: ['授权还未完成，请在浏览器完成后再检查。', 'Authorization is not complete. Finish in the browser, then check again.'],
+    PLUGIN_CONNECTION_CHANGED: ['连接状态在操作期间发生变化。请核对当前连接状态后再次操作。', 'The connection changed during this action. Review its current state before continuing.'],
+    PLUGIN_ACCESS_MODE_CHANGED: ['此连接的额度方式已在其他设备改变。已更新当前状态，请核对额度方式后再次操作。', 'This connection’s access mode changed on another device. Review the updated access mode before continuing.'],
+    PLUGIN_ACCESS_MODE_CONFLICT: ['此连接使用另一种额度方式。请先核对并断开现有连接，再选择新的方式添加。', 'This connection uses a different access mode. Review and disconnect it before adding another mode.'],
     PLUGIN_EPHEMERAL_REQUIRED: ['请进入 FRED 临时研究页。查询和结果不会保存到聊天历史。', 'Open FRED temporary research. Queries and results are not saved to chat history.'],
     MCP_FORBIDDEN: ['服务拒绝了此项访问，请核对账号权限；现有授权仍保留。', 'The provider denied access. Check account permissions; your authorization is retained.'],
     MCP_PAYMENT_REQUIRED: ['服务要求额外的套餐或额度，请到服务方核对权益。', 'The provider requires additional plan or credit access. Check your subscription.'],

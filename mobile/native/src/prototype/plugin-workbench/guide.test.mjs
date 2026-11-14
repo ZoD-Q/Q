@@ -11,7 +11,7 @@ test('the complete offline reference matches its authority and frozen provenance
   const authority = await readFile(new URL('../../../../../backend/docs/plugin-integration.md', import.meta.url), 'utf8');
   assert.equal(integrationGuideMarkdown, authority);
   assert.equal(createHash('sha256').update(authority).digest('hex'), integrationGuideMetadata.sha256);
-  assert.equal(integrationGuideMetadata.frozenDate, '2026-11-08');
+  assert.equal(integrationGuideMetadata.frozenDate, '2026-11-15');
   assert.equal(integrationGuideMetadata.baselineDate, '2026-10-18');
   assert.equal(guide.title, 'Q 插件接入规范');
   assert.equal(guide.sections.length, 12);

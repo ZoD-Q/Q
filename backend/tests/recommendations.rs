@@ -303,6 +303,143 @@ async fn fred_cannot_be_selected_into_persistent_chat_even_from_a_stale_recommen
 }
 
 #[tokio::test]
+#[ignore = "requires dedicated TEST_DATABASE_URL; loopback fixtures only"]
+async fn tavily_personal_recommendations_show_owned_mode_and_reject_stale_mode_handoffs() {
+    use axum::{Json, http::HeaderMap, response::IntoResponse, routing::post};
+
+    let mut h = Harness::new().await;
+    let fixture = Router::new().route("/mcp", post(|headers: HeaderMap, Json(request): Json<Value>| async move {
+        if headers.contains_key("authorization") {
+            assert_eq!(headers["authorization"], "Bearer fixture-tavily-key");
+            assert!(!headers.contains_key("x-tavily-access-mode"));
+        } else {
+            assert_eq!(headers["x-tavily-access-mode"], "keyless");
+        }
+        let id = request["id"].clone();
+        match request["method"].as_str().unwrap() {
+            "initialize" => ([("mcp-session-id", "recommendation-fixture")], Json(json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}))).into_response(),
+            "notifications/initialized" => StatusCode::ACCEPTED.into_response(),
+            "tools/list" => Json(json!({"jsonrpc":"2.0","id":id,"result":{"tools":[{"name":"tavily_search","description":"Public search","inputSchema":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]}})).into_response(),
+            _ => panic!("recommendation setup must not execute business tools"),
+        }
+    }).delete(|| async {StatusCode::NO_CONTENT}));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, fixture).await.unwrap() });
+    let http = SafeHttp::test_fixture(origin.parse().unwrap())
+        .unwrap()
+        .with_test_route("https://mcp.tavily.com/mcp/", &format!("{origin}/mcp"))
+        .unwrap();
+    h.state.plugins = Some(Arc::new(PluginRuntime::test_fixture(
+        http,
+        Some([12; 32]),
+        None,
+    )));
+    let (token, owner) = h.register("reco_tavily_mode").await;
+    let (_, other) = h.register("reco_tavily_other").await;
+    let base = catalog::load(&h.state, owner, "en").await.unwrap();
+    let base_candidate = base
+        .candidates
+        .iter()
+        .find(|c| c.id == "financial:tavily")
+        .unwrap();
+    assert_eq!(base_candidate.title, "Tavily");
+    assert!(base_candidate.description.contains("shared keyless"));
+    let connection = h
+        .json(
+            "POST",
+            "/v1/plugins/financial/connections",
+            &token,
+            Some(json!({"provider_id":"tavily","access_mode":"personal"})),
+            StatusCode::OK,
+        )
+        .await;
+    let id = connection["id"].as_str().unwrap();
+    let path = format!("/v1/plugins/connections/{id}");
+    h.json(
+        "POST",
+        &format!("{path}/credential"),
+        &token,
+        Some(json!({"secret":"fixture-tavily-key"})),
+        StatusCode::OK,
+    )
+    .await;
+    for (locale, label, description) in [
+        ("zh", "个人额度", "个人 Tavily API Key"),
+        ("en", "Personal quota", "personal Tavily API key"),
+    ] {
+        let current = catalog::load(&h.state, owner, locale).await.unwrap();
+        let candidate = current
+            .candidates
+            .iter()
+            .find(|c| c.id == "financial:tavily")
+            .unwrap();
+        assert!(candidate.title.contains(label));
+        assert!(candidate.description.contains(description));
+        assert!(!candidate.description.contains("fixture-tavily-key"));
+        assert_eq!(candidate.access, "ready");
+        assert_eq!(candidate.connection_id, Some(Uuid::parse_str(id).unwrap()));
+        assert!(
+            !current
+                .candidates
+                .iter()
+                .any(|c| c.provider_id.as_deref() == Some("fred"))
+        );
+    }
+    let other_catalog = catalog::load(&h.state, other, "en").await.unwrap();
+    let other_candidate = other_catalog
+        .candidates
+        .iter()
+        .find(|c| c.id == "financial:tavily")
+        .unwrap();
+    assert_eq!(other_candidate.title, "Tavily");
+    assert!(other_candidate.connection_id.is_none());
+    assert_eq!(other_candidate.description, base_candidate.description);
+    let (conversation, message, _) = h
+        .save(&token, "Use Tavily to search public web sources")
+        .await;
+    let record = h.recommend(&token, conversation, &message).await;
+    assert!(contains_candidate(&record, "financial:tavily"));
+    let item = record["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "financial:tavily")
+        .unwrap();
+    assert_eq!(item["title"], "Tavily · Personal quota");
+    h.request("DELETE", &path, &token, None).await;
+    let shared = h
+        .json(
+            "POST",
+            "/v1/plugins/financial/connections",
+            &token,
+            Some(json!({"provider_id":"tavily","access_mode":"shared"})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(shared["id"], id);
+    let denied = h
+        .select(&token, &record, "financial:tavily", StatusCode::CONFLICT)
+        .await;
+    assert_eq!(denied["error"]["code"], "RECOMMENDATION_STALE");
+    let shared_catalog = catalog::load(&h.state, owner, "en").await.unwrap();
+    let shared_candidate = shared_catalog
+        .candidates
+        .iter()
+        .find(|c| c.id == "financial:tavily")
+        .unwrap();
+    assert_eq!(shared_candidate.title, "Tavily");
+    assert_eq!(shared_candidate.description, base_candidate.description);
+    let invocations: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_invocations")
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(invocations, 0);
+    server.abort();
+    h.finish().await;
+}
+
+#[tokio::test]
 #[ignore = "requires dedicated TEST_DATABASE_URL"]
 async fn selection_is_atomic_owner_scoped_recoverable_and_does_not_execute() {
     let h = Harness::new().await;

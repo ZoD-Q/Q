@@ -1031,7 +1031,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Version 1 (default) returns only the original six providers. Version 2 also returns Tavily and FRED. Older servers may ignore this parameter and return six. */
+        /** @description Version 1 (default) returns only the original six providers. Version 2 also returns Tavily and FRED. Older servers may ignore this parameter and return six. Newer servers optionally advertise Tavily access_modes and connection_access_mode while preserving the original auth_mode. Clients must gate personal-mode UI on those explicit capabilities. */
         get: operations["listFinancialProviders"];
         put?: never;
         post?: never;
@@ -1050,7 +1050,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Idempotently add a personal fixed provider connection. No business calls. Reconnect clears old credentials; authorization remains separate. */
+        /** @description Idempotently add or reconnect a fixed provider connection. Tavily optionally selects shared or personal access; omitted mode preserves any existing mode, including revoked connections, otherwise defaults to shared. Changing an active mode requires explicit disconnect first (409 PLUGIN_ACCESS_MODE_CONFLICT). No business calls. Reconnect invalidates earlier credentials and capabilities; authorization remains separate. */
         post: operations["connectFinancialProvider"];
         delete?: never;
         options?: never;
@@ -1067,7 +1067,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description iFinD and Jin10 only. Encrypts credentials bound to owner, connection, revision and endpoint; invalidates old proposals and verifies catalog. Returns saved connection even on verification failure, never secret. iFinD accepts exact Authorization value; Jin10 accepts raw MCP Token. No auto retry. Third-party 401 never becomes Q-session 401. Requires encryption configuration. */
+        /** @description iFinD, Jin10 and Tavily personal-mode connections only. Encrypts credentials bound to owner, connection, revision and endpoint; invalidates old proposals and verifies the tool catalog. Returns saved connection even on verification failure, never the secret. iFinD accepts the exact Authorization value; Jin10 accepts its raw MCP Token; Tavily personal accepts its raw API key and sends Bearer only to the fixed official MCP endpoint, without keyless mode. No automatic retry or anonymous fallback. Third-party 401 never becomes Q-session 401. Requires encryption configuration. */
         post: operations["setFinancialProviderCredential"];
         delete?: never;
         options?: never;
@@ -2818,9 +2818,21 @@ export interface components {
                 description: string;
                 /** Format: uri */
                 homepage_url: string;
-                /** @enum {string} */
+                /**
+                 * @description Original/default provider authentication; preserved for older clients. When access_modes is present, newer clients derive the effective mode from connection_access_mode or their explicit pre-connect selection.
+                 * @enum {string}
+                 */
                 auth_mode: "none" | "api_key" | "oauth";
                 connection: components["schemas"]["PluginConnection"] | null;
+                /** @description Optional capability declaration, Tavily only: shared/none and personal/api_key. Absence means the server does not support selecting a personal mode; clients must not submit that option. */
+                access_modes?: {
+                    /** @enum {string} */
+                    id: "shared" | "personal";
+                    /** @enum {string} */
+                    auth_mode: "none" | "api_key";
+                }[];
+                /** @description Present with access_modes for Tavily. The stored connection mode, or null if no current connection. It does not prove authorization or a successful query. */
+                connection_access_mode?: ("shared" | "personal") | null;
             }[];
         };
         PaymentQuoteRequest: {
@@ -5973,6 +5985,11 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     provider_id: "ifind" | "jin10" | "massive" | "alphavantage" | "twelvedata" | "coingecko" | "tavily" | "fred";
+                    /**
+                     * @description Optional, Tavily only. Explicit modes for other providers are rejected. Personal mode requires an encrypted personal Tavily API key and never falls back to shared access.
+                     * @enum {string}
+                     */
+                    access_mode?: "shared" | "personal";
                 };
             };
         };

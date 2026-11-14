@@ -48,7 +48,7 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
         .includes(query.toLowerCase()),
   );
   const name = (item: Plugin) =>
-    item.name || text("未命名插件", "Untitled plugin");
+    item.name || text("未命名创意", "Untitled idea");
   const toggle = (item: Plugin) => {
     const has = saved.includes(item.id);
     setSaved((values) =>
@@ -60,16 +60,16 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
   };
   return (
     <Page
-      title={text("插件", "Plugins")}
+      title={text("创意目录参考", "Idea catalog reference")}
       description={text(
-        "原始目录参考。真实连接请到“我的连接”添加服务方链接。",
-        "Reference catalog. Add a publisher URL under My connections to use a live service.",
+        "以下是原表中的创意，并非已接通的服务。真实连接请到“我的连接”添加服务方链接。",
+        "These source ideas are not connected services. Add a publisher URL under My connections to use a live service.",
       )}
       action={<Action kind="secondary" icon={Code2} label={text("接入我的插件", "Connect my plugin")} onPress={onOpenWorkbench} />}
     >
       <View style={{ gap: 14 }}>
         <Input
-          label={text("搜索插件", "Search plugins")}
+          label={text("搜索创意", "Search ideas")}
           placeholder={text("名称或简介", "Name or description")}
           value={query}
           onChangeText={(value) => {
@@ -106,8 +106,9 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
           />
         </View>
         <Type size={13} muted>
-          {text(`${visible.length} 个插件`, `${visible.length} plugins`)}
+          {text(`${visible.length} 条创意参考`, `${visible.length} reference ideas`)}
         </Type>
+        <Type size={12} muted>{text(`原表另有${pluginCatalog.length - catalog.length}条空占位，未作为服务展示；讨论组保留原始含义。`, `The source also has ${pluginCatalog.length - catalog.length} empty placeholders, not services. Discussion groups keep their original meaning.`)}</Type>
       </View>
       <View>
         {visible.slice(0, limit).map((item) => (
@@ -144,6 +145,7 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
                   <Check size={15} color={colors.muted} />
                 ) : null}
               </View>
+              <Type size={12} muted>{text("创意参考 · 尚未接通", "Reference idea · Not connected")}</Type>
               <Type size={14} muted numberOfLines={1}>
                 {item.description ||
                   text("简介待补充", "Description coming soon")}
@@ -157,7 +159,7 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
         <View style={{ paddingVertical: 35, gap: 12, alignItems: "center" }}>
           <Search size={27} color={colors.faint} />
           <Type muted>
-            {text("暂时没有匹配的插件。", "No matching plugins yet.")}
+            {text("暂时没有匹配的创意。", "No matching ideas yet.")}
           </Type>
           <Action
             kind="ghost"
@@ -172,14 +174,14 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
       ) : visible.length > limit ? (
         <Action
           kind="secondary"
-          label={text("查看更多插件", "Show more plugins")}
+          label={text("查看更多创意", "Show more ideas")}
           onPress={() => setLimit((value) => value + 18)}
           style={{ alignSelf: "center" }}
         />
       ) : null}
       <Sheet
         visible={filterOpen}
-        title={text("筛选插件", "Filter plugins")}
+        title={text("筛选创意", "Filter ideas")}
         onClose={() => setFilterOpen(false)}
       >
         <Type size={14} muted>
@@ -213,12 +215,13 @@ export function PluginsPage({ onOpenWorkbench }: { onOpenWorkbench: () => void }
       </Sheet>
       <Sheet
         visible={!!selected}
-        title={text("插件详情", "Plugin details")}
+        title={text("创意详情", "Idea details")}
         onClose={() => setSelected(null)}
       >
         {selected ? (
           <>
             <Tag>{selected.category || text("未分组", "Ungrouped")}</Tag>
+            <Type size={13} muted>{text("尚未接通：此条仅为原表创意，不代表可调用的插件。", "Not connected: this is a source idea, not an available plugin.")}</Type>
             <Type serif size={29}>
               {name(selected)}
             </Type>
