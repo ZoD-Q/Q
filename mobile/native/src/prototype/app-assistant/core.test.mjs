@@ -33,14 +33,26 @@ test('module information states real service boundaries and does not infer accou
   const insurance = execute('app_info', { module: 'insurance' });
   assert.match(insurance.text, /搜索险种/); assert.match(insurance.text, /最多三/); assert.match(insurance.text, /不报价、投保、核保/);
   assert.equal(insurance.data.assistantRead, true);
-  const installments = execute('app_info', { module: 'installments' });
-  assert.match(installments.text, /浏览机构公开资料/); assert.match(installments.text, /旧分期成本计算已移除/);
-  for (const id of ['wallet', 'social', 'keys', 'plugins', 'video']) assert.equal(execute('app_info', { module: id }).data.assistantRead, false);
+  for (const id of ['wallet', 'social', 'keys', 'plugins']) assert.equal(execute('app_info', { module: id }).data.assistantRead, false);
   assert.match(execute('app_info', { module: 'wallet' }).text, /模拟资金/);
   assert.match(execute('app_info', { module: 'social' }).text, /不读取私聊、不自动发信/);
   assert.match(execute('app_info', { module: 'keys' }).text, /不能读取密钥/);
   assert.match(execute('app_info', { module: 'plugins' }, 'en').text, /not proof of authorization/);
   assert.match(execute('app_info', { module: 'market-data' }, 'en').text, /without full reports or stock quotes/);
+});
+
+test('retired module proposals report retirement without exposing an action', () => {
+  for (const module of ['installments', 'video', 'creators']) {
+    assert.ok(!MODULE_IDS.includes(module));
+    assert.throws(() => createAppNavigationAction(module, 'zh'), AppCommandError);
+    for (const name of ['app_info', 'app_open']) {
+      const result = execute(name, { module });
+      assert.match(result.text, /已下线/);
+      assert.deepEqual(result.actions, []);
+      assert.match(execute(name, { module }, 'en').text, /has been retired/);
+    }
+    assert.throws(() => validateAppCommand(command('app_open', { module, query: 'unrelated' })), AppCommandError);
+  }
 });
 
 test('commands accept only explicit supported names, finite destinations and permitted fields', () => {
