@@ -4,10 +4,10 @@ import type { LucideIcon } from "lucide-react-native";
 import { Type, useDesign } from "../design";
 
 export function Button({ label, onPress, disabled, kind = "primary", icon: Icon }: {
-  label: string; onPress: () => void; disabled?: boolean; kind?: "primary" | "secondary" | "ghost" | "danger"; icon?: LucideIcon;
+  label: string; onPress: () => void; disabled?: boolean; kind?: "primary" | "secondary" | "ghost"; icon?: LucideIcon;
 }) {
   const { colors } = useDesign();
-  const foreground = kind === "primary" ? colors.onAccent : kind === "danger" ? colors.danger : colors.ink;
+  const foreground = kind === "primary" ? colors.onAccent : colors.ink;
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress}
     style={({ pressed }) => ({ minHeight: 48, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8,
       backgroundColor: kind === "primary" ? colors.accent : kind === "secondary" ? colors.soft : "transparent", opacity: disabled ? 0.45 : pressed ? 0.7 : 1 })}>

@@ -55,7 +55,7 @@ export function BankProposalView({ invocation, busy, needsRefresh, onConfirm, on
       <SlideConfirm key={invocation.id} busy={busy} onConfirm={onConfirm} />
       <Action style={{ minHeight: 48 }} kind="ghost" label={text('取消转账', 'Cancel transfer')} disabled={busy} onPress={onCancel} />
     </> : <View style={{ gap: 10 }}>
-      <Type color={invocation.status === 'succeeded' ? colors.danger : colors.muted}>{needsRefresh
+      <Type color={!needsRefresh && invocation.status === 'succeeded' ? colors.danger : colors.muted}>{needsRefresh
         ? text('确认结果尚未返回，请先查询，不要重新发起转账。', 'Confirmation has not returned. Check its status before another action.')
         : failure ? text(...failureMessages[failure]) : invocation.status === 'succeeded' ? text('暂时无法读取转账记录，请重新查看。', 'The transfer record could not be loaded. Check again.')
           : text(...(terminalLabel[invocation.status] ?? ['等待服务端结果', 'Waiting for the server']))}</Type>

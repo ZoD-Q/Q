@@ -55,6 +55,7 @@ export interface Colors {
   onAccent: string;
   green: string;
   greenBg: string;
+  // Red is reserved for error messages and invalid input, never ordinary actions.
   danger: string;
 }
 export const themes: Record<ThemeId, Colors> = {
@@ -67,8 +68,8 @@ export const themes: Record<ThemeId, Colors> = {
     ink: "#282720",
     muted: "#6D6B63",
     faint: "#6D6B63",
-    accent: "#A25139",
-    accentBg: "#F3E6DD",
+    accent: "#08738F",
+    accentBg: "#EAF6FA",
     onAccent: "#FFFFFF",
     green: "#566D4B",
     greenBg: "#EAF0E5",

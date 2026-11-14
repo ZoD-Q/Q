@@ -71,7 +71,7 @@ export function DeletionSettings() {
     <Row title={text('删除账号', 'Delete account')} subtitle={text('永久删除需验证当前密码', 'Permanent deletion requires your current password')}
       icon={Trash2} onPress={show} last />
     {snapshot.pendingItems.length || deleted || snapshot.error === 'STORAGE_ERROR' ? <View accessibilityLiveRegion="polite" style={{ gap: 10, paddingVertical: 12 }}>
-      <Type color={snapshot.error ? colors.danger : colors.muted}>
+      <Type muted>
         {snapshot.pendingItems.length
           ? text(`有 ${snapshot.pendingItems.length} 笔账号删除仍待确认或清理，各自的恢复信息会保留。`, `${snapshot.pendingItems.length} account deletion request(s) still need confirmation or cleanup. Each keeps its own recovery information.`)
           : text('原账号已确认删除。', 'The original account deletion is confirmed.')}
@@ -92,7 +92,7 @@ export function DeletionSettings() {
         {snapshot.pending ? <Action label={text('完成本机清理', 'Finish local cleanup')} disabled={snapshot.busy} onPress={() => void check()} /> : null}
         <Action kind="ghost" label={text('关闭', 'Close')} onPress={close} />
       </> : <>
-        <Type weight="500" color={colors.danger}>
+        <Type weight="600">
           {ownsPending && account.session
             ? text(`将永久删除 @${account.session.user.handle}，此操作不能撤销。`, `Permanently delete @${account.session.user.handle}. This cannot be undone.`)
             : text('这是原账号的删除请求，当前其他账号不会被删除。', 'This request belongs to the original account. Another signed-in account will not be deleted.')}
@@ -118,7 +118,7 @@ export function DeletionSettings() {
             autoCapitalize="characters" autoCorrect={false} maxLength={6} editable={!disabled} />
           <Action kind="ghost" icon={Trash2}
             label={snapshot.busy ? text('正在处理…', 'Working…') : snapshot.pending ? text('确认并重试原删除', 'Confirm and retry original deletion') : text('永久删除账号', 'Permanently delete account')}
-            style={{ borderWidth: 1, borderColor: colors.danger, borderRadius: 13 }}
+            style={{ borderWidth: 1, borderColor: colors.line, borderRadius: 13 }}
             disabled={disabled || !password || confirmation !== 'DELETE'} onPress={() => void submit()} />
         </> : <Type muted>{text('如需手动重试，请先登录原账号。查询结果不需要重新登录。', 'Sign into the original account to retry manually. Checking the result does not require signing in.')}</Type>}
         <Action kind="ghost" label={text('暂不操作', 'Close for now')} onPress={close} />

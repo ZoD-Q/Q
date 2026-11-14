@@ -59,7 +59,7 @@ function BillsResult({ result }: { result: BillSummary }) {
       </View>
       {result.warnings.map((warning, index) => (
         <View key={`${warning.code}-${index}`} style={{ backgroundColor: colors.soft, borderRadius: 10, padding: 12 }}>
-          <Type size={13} color={colors.danger} selectable>{text(`第 ${warning.lines.join('、')} 行内容相同，已分别计入。请核对是否重复。`, `Lines ${warning.lines.join(', ')} are identical and counted separately. Check for duplicates.`)}</Type>
+          <Type size={13} muted selectable>{text(`第 ${warning.lines.join('、')} 行内容相同，已分别计入。请核对是否重复。`, `Lines ${warning.lines.join(', ')} are identical and counted separately. Check for duplicates.`)}</Type>
         </View>
       ))}
       <View style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: 8 }}>

@@ -36,9 +36,10 @@ function contrast(foreground, background) {
 
 for (const name of ['light', 'dark', 'warm']) test(`${name} native small text and placeholders meet 4.5:1 in their rendered surfaces`, () => {
   const colors = module.exports.themes[name];
-  // These pairs are used by Type, Input, Tag/Choice, Action and status text.
+  // These pairs are used by Type, Input, source links, Tag/Choice, Action and status text.
   for (const [foreground, background] of [
     ['ink', 'bg'], ['muted', 'bg'], ['muted', 'soft'], ['faint', 'soft'],
+    ['accent', 'bg'], ['accent', 'surface'], ['accent', 'soft'], ['accent', 'sidebar'],
     ['accent', 'accentBg'], ['onAccent', 'accent'], ['green', 'greenBg'], ['danger', 'bg'],
   ]) {
     const ratio = contrast(colors[foreground], colors[background]);

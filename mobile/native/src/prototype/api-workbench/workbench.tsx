@@ -97,7 +97,7 @@ function WorkbenchContent({ work }: { work: ReturnType<typeof useWorkbench> }) {
       <Type>{text(`撤销「${revoking?.name ?? ""}」后，Q 将删除保存的密钥并停止后续调用。`, `Revoking “${revoking?.name ?? ""}” deletes its saved key and stops future calls.`)}</Type>
       <Type size={14} muted>{text("已开始的供应商请求可能继续完成，不会取消生成或退款。任务记录会保留。", "Already-started supplier requests may finish. This does not cancel generation or refund charges. History is retained.")}</Type>
       {work.error ? <Notice error>{errorMessage(work.error, text)}</Notice> : null}
-      <Button label={text("确认撤销", "Revoke connection")} kind="danger" disabled={!!work.busy} onPress={() => { if (revoking) void work.revokeConnection(revoking.id).then((ok) => { if (ok) setRevoking(null); }); }} />
+      <Button label={text("确认撤销", "Revoke connection")} kind="secondary" disabled={!!work.busy} onPress={() => { if (revoking) void work.revokeConnection(revoking.id).then((ok) => { if (ok) setRevoking(null); }); }} />
       <Button label={text("保留连接", "Keep connection")} kind="secondary" onPress={() => setRevoking(null)} />
     </Sheet>
     <Sheet visible={confirmation} title={text("提交到可灵", "Submit to Kling")} onClose={() => setConfirmation(false)}>
