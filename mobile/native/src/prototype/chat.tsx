@@ -22,7 +22,6 @@ import {
   Square,
   RotateCcw,
   ChevronRight,
-  Calculator,
   BookOpen,
   ChartNoAxesCombined,
   ShieldCheck,
@@ -62,7 +61,7 @@ import { FinanceResultCard } from './finance-agent/result-card';
 import { FinanceAdSettings } from './finance-ads';
 import { APP_MODULES, createAppNavigationAction, type AppNavigationAction } from './app-assistant/core';
 import { RecommendationCards } from './recommendations/cards';
-import { recommendationError, recommendationTurnKey, recommendationUnderAnswer } from './recommendations/core';
+import { isRetiredRecommendationId, recommendationError, recommendationTurnKey, recommendationUnderAnswer } from './recommendations/core';
 export type { Conversation, ChatMessage } from "./ai-chat/state-model";
 
 export function QGlyph({ size = 48 }: { size?: number }) {
@@ -71,7 +70,7 @@ export function QGlyph({ size = 48 }: { size?: number }) {
 export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, onOpenMarketData, onOpenAppAction, onSelectRecommendation }: {
   controller: ChatController;
   onOpenPlugins: () => void;
-  onOpenFinancialService: (category: 'installments' | 'insurance' | 'finance') => void;
+  onOpenFinancialService: (category: 'insurance' | 'finance') => void;
   onOpenMarketData: () => void;
   onOpenAppAction?: (action: AppNavigationAction) => void;
   onSelectRecommendation?: (recordId: string, candidateId: string, continueExisting?: boolean) => void;
@@ -397,10 +396,10 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
             }}
           >
             {controller.pendingRecommendation && (controller.pendingRecommendation.sourceConversationId === conversation?.id || controller.pendingRecommendation.targetConversationId === conversation?.id) ? <View testID="recommendation-continuation" style={{ backgroundColor: colors.soft, borderRadius: 18, padding: 16, gap: 8 }}>
-              <Type size={13} muted>{controller.pendingRecommendation.targetConversationId === conversation?.id ? text('从原对话继续', 'Continued from your chat') : controller.pendingRecommendation.targetConversationId ? text('这次需求已转入专属对话。', 'This request has its own conversation.') : text('原问题已保留，完成连接或授权后可继续。', 'Your request is saved. Continue after connecting or authorizing.')}</Type>
+              <Type size={13} muted>{isRetiredRecommendationId(controller.pendingRecommendation.candidateId) ? text('此推荐指向已下线的功能。原对话仍可查看。', 'This recommendation points to a retired feature. Your conversation is still available.') : controller.pendingRecommendation.targetConversationId === conversation?.id ? text('从原对话继续', 'Continued from your chat') : controller.pendingRecommendation.targetConversationId ? text('这次需求已转入专属对话。', 'This request has its own conversation.') : text('原问题已保留，完成连接或授权后可继续。', 'Your request is saved. Continue after connecting or authorizing.')}</Type>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {controller.pendingRecommendation.targetConversationId === conversation?.id ? <Action kind="ghost" label={text('返回原对话', 'Back to original chat')} disabled={controller.busy || Boolean(controller.recommendationBusy)} onPress={controller.openRecommendationSource} style={{ minHeight: 48 }} /> : null}
-                {onSelectRecommendation && (controller.pendingRecommendation.sourceConversationId === conversation?.id || controller.canContinueRecommendation) ? <Action label={controller.pendingRecommendation.sourceConversationId === conversation?.id && controller.pendingRecommendation.targetConversationId ? text('打开专属对话', 'Open dedicated chat') : text('继续原问题', 'Continue original request')} disabled={controller.busy || controller.historyBusy || Boolean(controller.recommendationBusy)} onPress={() => { const pending = controller.pendingRecommendation!; onSelectRecommendation(pending.recordId, pending.candidateId, pending.sourceConversationId !== conversation?.id || !pending.targetConversationId); }} style={{ minHeight: 48 }} /> : null}
+                {onSelectRecommendation && !isRetiredRecommendationId(controller.pendingRecommendation.candidateId) && (controller.pendingRecommendation.sourceConversationId === conversation?.id || controller.canContinueRecommendation) ? <Action label={controller.pendingRecommendation.sourceConversationId === conversation?.id && controller.pendingRecommendation.targetConversationId ? text('打开专属对话', 'Open dedicated chat') : text('继续原问题', 'Continue original request')} disabled={controller.busy || controller.historyBusy || Boolean(controller.recommendationBusy)} onPress={() => { const pending = controller.pendingRecommendation!; onSelectRecommendation(pending.recordId, pending.candidateId, pending.sourceConversationId !== conversation?.id || !pending.targetConversationId); }} style={{ minHeight: 48 }} /> : null}
               </View>
               {controller.recommendationError?.recordId === controller.pendingRecommendation.recordId ? <Type size={13} color={colors.danger}>{recommendationError(controller.recommendationError.code, text)}</Type> : null}
             </View> : null}
@@ -501,7 +500,6 @@ export function ChatPage({ controller, onOpenPlugins, onOpenFinancialService, on
       <Sheet visible={financialServices} title={text('金融服务', 'Financial services')} onClose={() => setFinancialServices(false)}>
         <Type muted>{text('浏览公开资料与独立的广告位演示。小Q不受理金融申请或付款。', 'Browse public information and separate demo ad placements. Q does not process financial applications or payments.')}</Type>
         {([
-          { id: 'installments', zh: '分期', en: 'Installments', icon: Calculator },
           { id: 'insurance', zh: '保险', en: 'Insurance', icon: ShieldCheck },
           { id: 'finance', zh: '理财', en: 'Investments', icon: Landmark },
         ] as const).map(item => <Row key={item.id} title={text(item.zh, item.en)} icon={item.icon} onPress={() => { setFinancialServices(false); onOpenFinancialService(item.id); }} />)}

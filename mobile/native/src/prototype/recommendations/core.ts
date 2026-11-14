@@ -2,6 +2,7 @@ import { WorkbenchError } from '../api-workbench/core';
 import { decodeHistory, type HistoryDetail } from '../ai-chat/history';
 import type { Conversation } from '../ai-chat/state-model';
 import { createAppNavigationAction, isModuleId, type AppCommand, type AppReadResult, type AppNavigationAction, type ModuleId } from '../app-assistant/core';
+import { isRetiredModuleId } from '../app-assistant/catalog';
 import type { AiRecommendation, AiRecommendationCandidate, AiRecommendationSelection } from '@xiaoq/shared';
 
 export type RecommendationCandidate = AiRecommendationCandidate;
@@ -83,8 +84,13 @@ export function recommendationUnderAnswer(conversation: Conversation, messageId:
   const source = conversation.messages.slice(0, index).findLast(message => message.role === 'user');
   return Object.values(records).find(item => item.conversation_id === conversation.id && item.source_message_id === source?.id && item.status === 'complete' && item.candidates.length > 0) ?? null;
 }
+export function isRetiredRecommendationId(id: string): boolean {
+  return id.startsWith('module:') && isRetiredModuleId(id.slice('module:'.length));
+}
 export function visibleCandidates(record: Recommendation, actions: AppNavigationAction[] = [], coveredModules: readonly string[] = []): RecommendationCandidate[] {
-  return record.candidates.filter(candidate => candidate.kind !== 'module' || (!actions.some(action => action.module === candidate.module) && !coveredModules.includes(candidate.module ?? ''))).slice(0, 3);
+  return record.candidates.filter(candidate => candidate.kind !== 'module' || (!isRetiredModuleId(candidate.module)
+    && !isRetiredRecommendationId(candidate.id) && !actions.some(action => action.module === candidate.module)
+    && !coveredModules.includes(candidate.module ?? ''))).slice(0, 3);
 }
 export const recommendationTurnKey = (conversationId: string, sourceMessageId: string) => `${conversationId}:${sourceMessageId}`;
 /** Only the trusted local executor can supply this ephemeral evidence; restored text cannot. */

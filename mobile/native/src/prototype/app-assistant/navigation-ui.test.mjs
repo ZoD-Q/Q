@@ -10,6 +10,7 @@ const resolver = registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const app = await import('./core.ts');
+const appCatalog = await import('./catalog.ts');
 const appPresentation = await import('./presentation.ts');
 const insurance = await import('../insurance/catalog.ts');
 const market = await import('../market-data/core.ts');
@@ -180,15 +181,26 @@ function shellHarness() {
     './motion': { Reveal: 'Reveal', selectionFeedback: noop }, 'expo-router': { router: { push: path => pushes.push(path) } },
     'expo-router/react-navigation': { useIsFocused: () => true }, './chat': { ChatPage: 'ChatPage', HistoryPage: 'HistoryPage' },
     './account-pages': { ProfilePage: 'ProfilePage' }, './services': { ServicePage: 'ServicePage' },
-    './video/video-create': { VideoCreate: 'VideoCreate' }, './video/creator-feed': { CreatorFeed: 'CreatorFeed' },
     './ai-chat/use-chat': { useChat(visible) { if (visible !== previousVisible) { controller.privacyEpoch++; previousVisible = visible; } return controller; } },
     './plugin-workbench/workbench': { PluginWorkbenchPage: 'PluginWorkbenchPage' }, './plugin-host/page': { PluginHostPage: 'PluginHostPage' },
     './plugin-host/core': plugins, './account/account-state': { useQAccount: () => ({ session: controller.session }) },
     './social': { useSocial: () => ({ unreadCount: 0 }) }, './market-data/page': { MarketDataPage: 'MarketDataPage' },
-    './app-assistant/core': app, '../services/session-store': { getSessionRevision: () => revision },
+    './app-assistant/core': app, './app-assistant/catalog': appCatalog, '../services/session-store': { getSessionRevision: () => revision },
   });
   return { ...h, controller, called, pushes, bumpRevision() { revision++; } };
 }
+
+test('old module links open chat with a retirement notice and stale actions stay on chat', () => {
+  for (const module of ['installments', 'video', 'creators']) {
+    const h = shellHarness();
+    const chat = h.render({ retiredEntry: module }).find(node => node.type === 'ChatPage');
+    assert.ok(chat);
+    assert.match(h.notices.at(-1), /已下线/);
+    chat.props.onOpenAppAction({ module, label: '打开旧功能' });
+    assert.ok(h.render().some(node => node.type === 'ChatPage'));
+    assert.deepEqual(h.pushes, []);
+  }
+});
 
 test('shell preserves validated task conditions across visibility changes and drops them across identity revisions', () => {
   const h = shellHarness();

@@ -7,9 +7,7 @@ import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
 import {
   MessageCircle,
-  Clapperboard,
   ChevronRight,
-  CreditCard,
   Code2,
   History,
   KeyRound,
@@ -27,8 +25,6 @@ import { Divider, IconAction, Type, useDesign, type PageId } from "./design";
 import { ChatPage, HistoryPage, type Conversation } from "./chat";
 import { ProfilePage } from "./account-pages";
 import { ServicePage } from "./services";
-import { VideoCreate } from "./video/video-create";
-import { CreatorFeed } from "./video/creator-feed";
 import { useChat } from "./ai-chat/use-chat";
 import { PluginWorkbenchPage } from "./plugin-workbench/workbench";
 import { PluginHostPage } from "./plugin-host/page";
@@ -37,6 +33,7 @@ import { useQAccount } from "./account/account-state";
 import { useSocial } from "./social";
 import { MarketDataPage } from './market-data/page';
 import { validateAppNavigationAction, type AppNavigationAction } from './app-assistant/core';
+import { isRetiredModuleId, retiredModuleMessage, type RetiredModuleId } from './app-assistant/catalog';
 import { getSessionRevision } from '../services/session-store';
 import { recommendationNavigation, type RecommendationCandidate } from './recommendations/core';
 
@@ -46,11 +43,9 @@ const serviceNavigation: {
   en: string;
   icon: LucideIcon;
 }[] = [
-  { id: "video", zh: "视频创作", en: "Video studio", icon: Clapperboard },
   { id: "plugins", zh: "插件", en: "Plugins", icon: Layers3 },
   { id: "market-data", zh: "金融数据", en: "Financial data", icon: TrendingUp },
   { id: "plugin-workbench", zh: "插件工作台", en: "Plugin workbench", icon: Code2 },
-  { id: "installments", zh: "分期", en: "Installments", icon: CreditCard },
   { id: "insurance", zh: "保险", en: "Insurance", icon: ShieldCheck },
   { id: "finance", zh: "理财", en: "Financial services", icon: TrendingUp },
   { id: "wallet", zh: "钱包", en: "Wallet", icon: Wallet },
@@ -428,7 +423,7 @@ function Rail({
     </View>
   );
 }
-export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId }) {
+export function PrototypeApp({ initialPage = "chat", retiredEntry }: { initialPage?: PageId; retiredEntry?: RetiredModuleId }) {
   const { colors, text, phone, notice, notify, locale } = useDesign();
   const insets = useSafeAreaInsets();
   const [page, setPage] = useState<PageId>(initialPage);
@@ -452,6 +447,10 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
   };
   const openAppAction = (value: AppNavigationAction) => {
     if (!active || chat.busy || chat.historyBusy || chat.recommendationBusy) return;
+    if (isRetiredModuleId(value?.module)) {
+      notify(retiredModuleMessage(value.module, locale));
+      return;
+    }
     try {
       const action = validateAppNavigationAction(value);
       if (action.module === 'social') { setDrawer(false); router.push('/social'); }
@@ -482,6 +481,9 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
     return () => subscription.remove();
   }, []);
   useEffect(() => {
+    if (retiredEntry) notify(retiredModuleMessage(retiredEntry, locale));
+  }, [retiredEntry, locale, notify]);
+  useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => notify(""), 4000);
     return () => clearTimeout(timer);
@@ -494,7 +496,7 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
         return true;
       }
       if (page !== "chat") {
-        setPage(page === "creators" ? "video" : page === "plugin-workbench" ? "plugins" : "chat");
+        setPage(page === "plugin-workbench" ? "plugins" : "chat");
         return true;
       }
       return false;
@@ -603,10 +605,6 @@ export function PrototypeApp({ initialPage = "chat" }: { initialPage?: PageId })
                 if (prepared && !signal?.aborted) navigate('chat');
                 return prepared;
               }} />
-          ) : page === "video" ? (
-            <VideoCreate onOpenFeed={() => navigate("creators")} onOpenApi={() => navigate("keys")} />
-          ) : page === "creators" ? (
-            <CreatorFeed onBack={() => navigate("video")} />
           ) : page === "history" ? (
             <HistoryPage controller={chat} items={items} onOpen={open} onNew={newChat} />
           ) : page === "profile" ? (
