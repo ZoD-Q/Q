@@ -124,7 +124,7 @@ function FinanceTaskForm({ initialTask = 'bills', knowledgeOnly = false, onClose
     <Sheet visible title={knowledgeOnly ? text('金融知识', 'Financial knowledge') : text('财务工具', 'Financial tools')} onClose={close} footer={
       <View style={{ gap: 8 }}>
         {errors.length ? <Type size={12} color={colors.danger} selectable>{text(`有 ${errors.length} 处输入需要检查；已保留你的内容。`, `${errors.length} ${errors.length === 1 ? 'entry needs' : 'entries need'} attention. Your input is preserved.`)}</Type> : null}
-        {submitBlocked ? <View accessibilityLiveRegion="polite"><Type size={12} color={colors.danger} selectable>{text('当前正在处理其他操作，请稍后再试。输入已保留。', 'Another operation is in progress. Try again shortly; your input is preserved.')}</Type></View> : null}
+        {submitBlocked ? <View accessibilityLiveRegion="polite"><Type size={12} muted selectable>{text('当前正在处理其他操作，请稍后再试。输入已保留。', 'Another operation is in progress. Try again shortly; your input is preserved.')}</Type></View> : null}
         <Pressable testID="finance-submit" accessibilityRole="button" accessibilityLabel={submitLabel} accessibilityState={{ disabled: task === 'knowledge' && !selectedKnowledge }} disabled={task === 'knowledge' && !selectedKnowledge} onPress={submit}
           style={({ pressed }) => ({ minHeight: 48, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent, opacity: task === 'knowledge' && !selectedKnowledge ? 0.4 : pressed ? 0.8 : 1 })}>
           <Type size={14} weight="500" color={colors.onAccent}>{submitLabel}</Type>
