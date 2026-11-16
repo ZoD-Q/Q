@@ -16,15 +16,16 @@ const connection = { id, revision: 1, title: 'Ticket service', name: 'tickets', 
 const invocation = { id: invocationId, connection_id: id, connection_revision: 1, connection_title: connection.title, card_url: connection.card_url, endpoint_url: connection.endpoint_url, tool_name: 'reserve_ticket', arguments: { quantity: 2 }, status: 'unknown', result: null, error_code: null, created_at: '2026-10-26', updated_at: '2026-10-26', expires_at: '2026-10-27' };
 const noop = () => {};
 /** Exercise the real connected page selected from the exported host, without a test-only export. */
-function harness(selectedConnection = connection) {
+function harness(selectedConnection = connection, {initialConnectionId} = {}) {
   let slots = [], cursor = 0, dirty = true, effects = [], tree;
-  const calls = [], opened = [];
+  const calls = [], opened = [], selectedChats = [], financialOpened = [];
   const react = {
     useState(initial) { const index = cursor++; slots[index] ??= { value: typeof initial === 'function' ? initial() : initial }; return [slots[index].value, value => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value; dirty = true; }]; },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     useReducer(reducer, initial) { const [value, set] = react.useState(initial); return [value, action => set(value => reducer(value, action))]; },
     useEffect(callback, dependencies) { const index = cursor++; if (!slots[index] || dependencies.some((value, i) => value !== slots[index].dependencies[i])) { slots[index] = { dependencies }; effects.push(callback); } },
   };
+  react.useLayoutEffect = react.useEffect;
   const jsx = (type, props) => ({ type, props });
   const design = { ...Object.fromEntries(['Action', 'Choice', 'Input', 'Page', 'Row', 'Sheet', 'Tabs', 'Type'].map(name => [name, name])), useDesign: () => ({ text: zh => zh, colors: {} }) };
   const imports = {
@@ -39,6 +40,7 @@ function harness(selectedConnection = connection) {
       else if (path === '/v1/plugins/connections') value = { items: [selectedConnection] };
       else if (path.startsWith('/v1/plugins/invocations?')) value = { items: [invocation] };
       else if (path.endsWith('/tools')) value = { items: [{ name: 'reserve_ticket', title: 'Reserve tickets', description: 'Book a ticket', inputSchema: { type: 'object' } }] };
+      else if (path.endsWith('/accept-update')) value = {...selectedConnection, pending_update:false, pending_update_details:null, revision:2, status:'ready'};
       else if (path.endsWith('/oauth/start')) value = { attempt_id: invocationId, authorization_url: 'https://accounts.tickets.test/authorize' };
       else throw Error(`Unexpected request ${path}`);
       return decode(value);
@@ -55,13 +57,14 @@ function harness(selectedConnection = connection) {
     }
     return result;
   };
-  const host = module.exports.PluginHostPage({ chat: { authOpen: false, session: { token: 'token' } }, onSelect: noop, onOpenWorkbench: noop });
+  const host = module.exports.PluginHostPage({ chat: { authOpen: false, session: { token: 'token' } }, onSelect: value => selectedChats.push(value), onOpenWorkbench: noop, recommendationTarget: initialConnectionId ? {connection_id:initialConnectionId} : null });
   const connected = walk(host).find(node => typeof node.type === 'function' && node.type.name === 'ConnectedPlugins'); assert.ok(connected);
+  connected.props.onOpenFinancial = id => financialOpened.push(id);
   slots = []; cursor = 0; effects = [];
   const render = () => { if (dirty) { dirty = false; cursor = 0; tree = connected.type(connected.props); effects.splice(0).forEach(callback => callback()); } return tree; };
   render();
   return {
-    calls, opened, hostTabs: walk(host).find(node => node.type === 'Tabs').props.items, nodes: () => walk(render()), text: () => walk(render()).filter(node => node.type === 'Type').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join(' '),
+    calls, opened, selectedChats, financialOpened, hostTabs: walk(host).find(node => node.type === 'Tabs').props.items, nodes: () => walk(render()), text: () => walk(render()).filter(node => node.type === 'Type').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join(' '),
     async flush() { for (let n = 0; n < 40; n++) { await Promise.resolve(); render(); } },
     select() { const row = walk(render()).find(node => node.type === 'Row' && node.props.title === selectedConnection.title); assert.ok(row); row.props.onPress(); },
     press(label) { const action = walk(render()).find(node => node.type === 'Action' && node.props.label === label); assert.ok(action, label); assert.equal(!!action.props.disabled, false, label); action.props.onPress(); },
@@ -136,4 +139,32 @@ test('managed financial profiles label host-maintained documentation without pub
  const view=harness({...connection,financial_provider_id:'ifind',owner_name:null,card_url:'https://mcp.51ifind.com/',endpoint_url:'https://api-mcp.51ifind.com:8643/mcp'});await view.flush();view.select();await view.flush();
  assert.match(view.text(),/官方说明来源/);assert.doesNotMatch(view.text(),/说明文件来源|发布者自声明/);
  view.press('高级设置');await view.flush();assert.match(view.text(),/服务资料|小Q预配置/);assert.doesNotMatch(view.text(),/所有者未声明|发布者自声明|所有者是发布者/);
+});
+
+
+test('a direct financial update target loads the current owned connection and requires explicit acceptance',async()=>{
+ const view=harness({...connection,financial_provider_id:'ifind',pending_update:true,status:'ready'}, {initialConnectionId:id});await view.flush();assert.ok(view.nodes().some(n=>n.props?.label==='确认此更新'));assert.equal(view.nodes().find(n=>n.props?.label==='在聊天中使用').props.disabled,true);assert.equal(view.calls.some(c=>c.method==='POST'),false);view.press('确认此更新');await view.flush();assert.equal(view.calls.filter(c=>c.path.endsWith('/accept-update')).length,1);assert.equal(view.calls.find(c=>c.path.endsWith('/accept-update')).body.revision,1);assert.equal(view.selectedChats.length,0);
+});
+test('a direct FRED update target exposes no ordinary chat, tool or history path',async()=>{
+ const view=harness({...connection,research_provider_id:'fred',pending_update:true}, {initialConnectionId:id});await view.flush();assert.ok(view.nodes().some(n=>n.props?.label==='确认此更新'));assert.equal(view.nodes().some(n=>['在聊天中使用','高级设置','授权插件'].includes(n.props?.label)),false);assert.equal(view.calls.some(c=>/tools|invocations/.test(c.path)),false);view.press('确认此更新');await view.flush();assert.deepEqual(view.financialOpened,['fred']);assert.equal(view.selectedChats.length,0);assert.equal(view.calls.some(c=>/tools|invocations/.test(c.path)),false);
+});
+test('missing direct connection targets show the owned list rather than another account detail',async()=>{
+ const view=harness(connection,{initialConnectionId:invocationId});await view.flush();assert.equal(view.nodes().find(n=>n.type==='Page').props.title,'我的插件');assert.equal(view.nodes().some(n=>n.props?.label==='确认此更新'),false);assert.equal(view.calls.some(c=>/tools|invocations/.test(c.path)),false);
+});
+
+
+test('host update navigation targets the selected owned connection and ignores late callbacks from another account',()=>{
+ const slots=[];let cursor=0,token='owner-a',active=true;
+ const react={useState(initial){const i=cursor++;slots[i]??={value:typeof initial==='function'?initial():initial};return[slots[i].value,value=>{slots[i].value=typeof value==='function'?value(slots[i].value):value;}];},useRef(initial){return slots[cursor++]??={current:initial};},useReducer(reducer,initial){const [value,set]=react.useState(initial);return[value,action=>set(value=>reducer(value,action))];}};
+ react.useLayoutEffect=callback=>callback();
+ const jsx=(type,props,key)=>({type,props,key});const imports={react,'react/jsx-runtime':{jsx,jsxs:jsx},'react-native':{View:'View',ActivityIndicator:'Spinner'},'expo-crypto':{randomUUID:()=>id},'lucide-react-native':{},'../design':{...Object.fromEntries(['View','Action','Row','Tabs','Page','Type'].map(x=>[x,x])),useDesign:()=>({text:zh=>zh,colors:{}})},'../api-workbench/core':workbench,'./core':core,'../plugin-workbench/materials':materials,'../financial-plugins/page':{FinancialPluginCatalog:'FinancialPluginCatalog'},'../ai-chat/auth-sheet':{ChatAuthSheet:'ChatAuthSheet'},'../services/plugins':{},'./client':{},'./result-view':{},'../banking/proposal':{},'../banking/plugin-catalog':{}};
+ const module={exports:{}};runInNewContext(source,{module,exports:module.exports,process:{env:{EXPO_OS:'ios'}},URL,require:name=>{assert.ok(name in imports,name);return imports[name];}});
+ const nodes=(node,out=[])=>{if(Array.isArray(node))node.forEach(n=>nodes(n,out));else if(node&&typeof node==='object'){out.push(node);nodes(node.props?.children,out);}return out;};
+ const render=()=>{cursor=0;return nodes(module.exports.PluginHostPage({chat:{authOpen:false,session:{token}},active,onSelect:noop,onOpenWorkbench:noop,recommendationTarget:{provider_id:'ifind'}}));};
+ const initial=render().find(n=>n.type==='FinancialPluginCatalog'),oldCallback=initial.props.onReviewConnection;oldCallback(id);
+ let list=render(),connected=list.find(n=>typeof n.type==='function'&&n.type.name==='ConnectedPlugins');assert.equal(connected.props.initialConnectionId,id);assert.equal(connected.key,`owner-a:${id}`);
+ connected.props.onOpenFinancial('fred');assert.equal(render().find(n=>n.type==='FinancialPluginCatalog').props.initialProviderId,'fred');
+ token='owner-b';list=render();assert.equal(list.find(n=>n.type==='FinancialPluginCatalog').props.initialProviderId,'ifind');oldCallback(id);assert.ok(render().some(n=>n.type==='FinancialPluginCatalog'));
+ render().find(n=>n.type==='FinancialPluginCatalog').props.onReviewConnection(invocationId);connected=render().find(n=>typeof n.type==='function'&&n.type.name==='ConnectedPlugins');assert.equal(connected.props.initialConnectionId,invocationId);assert.equal(connected.key,`owner-b:${invocationId}`);
+ active=false;render();connected.props.onOpenFinancial('fred');assert.ok(render().some(n=>typeof n.type==='function'&&n.type.name==='ConnectedPlugins'));
 });

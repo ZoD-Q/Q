@@ -45,7 +45,7 @@ export function FredResearchPanel({ token, connection, active, onBack }: { token
     if (request.current || !active || !enabled.current || identity.current !== owner || AppState.currentState !== 'active') return;
     const controller = new AbortController(); request.current = controller; setBusy(true); setError(null); setResult(null);
     try { await action(controller.signal); }
-    catch (failure) { if (current(controller.signal)) { setError(failure); setResult(null); if (failure instanceof WorkbenchError && ['PLUGIN_AUTH_CHANGED', 'PLUGIN_RECONFIRM_REQUIRED', 'PLUGIN_AUTH_REQUIRED', 'PLUGIN_UNAVAILABLE'].includes(failure.code)) { setCatalog(null); setInput({}); setSelected(''); } } }
+    catch (failure) { if (current(controller.signal)) { setError(failure); setResult(null); if (failure instanceof WorkbenchError && (failure.status === 404 || ['PLUGIN_NOT_FOUND', 'PLUGIN_AUTH_CHANGED', 'PLUGIN_RECONFIRM_REQUIRED', 'PLUGIN_AUTH_REQUIRED', 'PLUGIN_UNAVAILABLE'].includes(failure.code))) { setCatalog(null); setInput({}); setSelected(''); } } }
     finally { if (request.current === controller) { request.current = null; if (current(controller.signal)) setBusy(false); } }
   };
   const load = () => { void run(async signal => {

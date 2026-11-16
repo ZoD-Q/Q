@@ -28,18 +28,20 @@ function publicCompanyFinancialQuestion(value: string): boolean {
   return [...value.matchAll(/\b[A-Z][A-Z0-9]{1,7}(?:\.[A-Z]{1,3})?\b/g)].some(match => !concepts.has(match[0]));
 }
 
-/** Product questions are not retired personal calculation requests. This only
- * chooses the normal assistant path; it never grants access to any module. */
-function appCapabilityQuestion(value: string): boolean {
-  if (value.length > 200 || /[\d\n\r]|账单|收入|支出|本金|目标|\bbills?\b|\bincome\b|\bexpenses?\b/i.test(value)) return false;
+/** Match complete screen questions without exempting appended financial input. */
+function requestedFinanceModule(value: string): 'installments' | 'savings' | null {
+  if (value.length > 200 || /[\d\n\r]|账单|收入|支出|本金|目标|\bbills?\b|\bincome\b|\bexpenses?\b/i.test(value)) return null;
   const zh = value.replace(/\s+/g, '').replace(/[？?。.!！]+$/, '');
-  // Only a complete product question/navigation phrase is exempt. Appending a
-  // private calculation, even with spelled-out amounts, stays on the local path.
-  const chinese = /^(?:(?:请|帮我|给我|我想|想|可以|能否)?(?:(?:介绍|了解|解释|说明|查看|打开|进入)(?:一下)?)?)?(?:(?:小[qQ]|[Qq]|这个app|应用)的?)?(?:分期|储蓄)(?:模块|功能|入口)(?:的)?(?:(?:能|可以)(?:帮我|帮助我)?(?:做|干)什么|是干什么的|有什么功能|有什么用|怎么用|如何使用|在哪里|在哪|功能|用途|介绍|说明|用法|是什么)?$/i;
-  if (chinese.test(zh)) return true;
+  const chinese = /^(?:(?:请|帮我|给我|我想|想|可以|能否)?(?:(?:介绍|了解|解释|说明|查看|打开|进入)(?:一下)?)?)?(?:(?:小q|q|这个app|应用)的?)?(分期(?:模块|功能|入口|服务|页面)|储蓄(?:模块|功能|入口))(?:的)?(?:(?:能|可以)(?:帮我|帮助我)?(?:做|干)什么|是干什么的|有什么功能|有什么用|怎么用|如何使用|在哪里|在哪|功能|用途|介绍|说明|用法|是什么)?$/i;
+  const zhModule = chinese.exec(zh)?.[1];
+  if (zhModule) return zhModule.startsWith('分期') ? 'installments' : 'savings';
+  if (/^(?:(?:请|帮我)?(?:查看|打开|进入))?(?:小q的?)?分期$/i.test(zh)) return 'installments';
   const en = value.trim().replace(/[?.!]+$/, '').replace(/\s+/g, ' ');
-  const feature = '(?:the )?(?:q |app )?(?:installments?|savings?) (?:module|feature|page)';
-  return new RegExp(`^(?:what can ${feature} (?:do|help with)|what does ${feature} do|how (?:do|can) I use ${feature}|(?:please )?(?:open|show|explain|describe|tell me about) ${feature}|${feature}(?: overview)?)$`, 'i').test(en);
+  if (/^(?:(?:please )?(?:open|show) (?:the )?(?:q |app )?)?installments?$/i.test(en)) return 'installments';
+  const feature = '(?:the )?(?:q |app )?(?:installments? (?:module|feature|page|service)|savings? (?:module|feature|page))';
+  const english = new RegExp(`^(?:what can ${feature} (?:do|help with)|what does ${feature} do|how (?:do|can) I use ${feature}|(?:please )?(?:open|show|explain|describe|tell me about) ${feature}|${feature}(?: overview)?)$`, 'i');
+  if (!english.test(en)) return null;
+  return /\binstallments?\b/i.test(en) ? 'installments' : 'savings';
 }
 
 function unavailableTask(prompt: string, locale: Locale): LocalFinanceTurn {
@@ -67,7 +69,16 @@ export function respondToFinanceText(prompt: string, locale: Locale): LocalFinan
     || /分(?:成)?\s*\d+\s*期/u.test(value)
     || (/(?:本金|手续费|总费用)/u.test(value) && /\d/u.test(value))
     || (legacyTask.test(value) && /\d/u.test(value))) return unavailableTask(prompt, locale);
-  if (appCapabilityQuestion(value)) return null;
+  const module = requestedFinanceModule(value);
+  if (module === 'installments') {
+    return {
+      prompt,
+      answer: locale === 'zh'
+        ? '小Q已移除分期服务入口。你仍可以在「金融知识」中查看年化成本、提前还款等基础概念。'
+        : 'Q has removed its Installments page. You can still find basics on annual borrowing costs and early repayment in Financial knowledge.',
+    };
+  }
+  if (module === 'savings') return null;
   if (publicCompanyFinancialQuestion(value)) return null;
   // Public-company and market research must not be mistaken for a personal budget task.
   if (/美股|A股|港股|财报|公告|宏观|新闻|热点|行情|股价|币价|加密货币|比特币|英伟达|苹果公司|微软|\bstocks?\b|\bcrypto\b|\bfilings?\b|\bearnings\b|\bnews\b|\bNVDA\b|\bAAPL\b|\bMSFT\b/i.test(value)) return null;

@@ -124,7 +124,11 @@ impl Harness {
  assert!(v.pointer("/params/_meta").is_none());assert_ne!(headers.get("mcp-protocol-version").unwrap(),"2026-07-28");
  let auth=headers.get("authorization").and_then(|v|v.to_str().ok()).unwrap_or("").to_owned();capture.lock().unwrap().push((p.clone(),auth.clone()));
  if !matches!(p.as_str(), "coingecko" | "tavily")&&auth.is_empty(){return(StatusCode::UNAUTHORIZED,Json(json!({"error":"auth required"}))).into_response();}
- if p=="tavily" {assert_eq!(headers.get("x-tavily-access-mode").unwrap(),"keyless");assert!(auth.is_empty());}
+ if p=="tavily" {
+   if auth.is_empty() {assert_eq!(headers.get("x-tavily-access-mode").unwrap(),"keyless");}
+   else {assert!(auth.starts_with("Bearer fixture-"));assert!(!headers.contains_key("x-tavily-access-mode"));}
+   if invalid.load(Ordering::SeqCst)==6 {return(StatusCode::UNAUTHORIZED,Json(json!({"error":"credential rejected"}))).into_response();}
+ }
  let method=v["method"].as_str().unwrap();let id=v["id"].clone();let tool=PROFILES.iter().find(|x|x.0==p).unwrap().2;
  if method!="initialize" {assert_eq!(headers.get("mcp-session-id").unwrap(),"fixture-session");}
  match method{
@@ -257,6 +261,33 @@ impl Harness {
             "/v1/plugins/financial/connections",
             token,
             Some(json!({"provider_id":p})),
+        )
+        .await
+    }
+    async fn connect_mode(&self, token: &str, mode: &str) -> Value {
+        self.json(
+            "POST",
+            "/v1/plugins/financial/connections",
+            token,
+            Some(json!({"provider_id":"tavily","access_mode":mode})),
+        )
+        .await
+    }
+    async fn key(&self, token: &str, id: &str, secret: &str) -> Value {
+        self.json(
+            "POST",
+            &format!("/v1/plugins/connections/{id}/credential"),
+            token,
+            Some(json!({"secret":secret})),
+        )
+        .await
+    }
+    async fn tavily_proposal(&self, token: &str, id: &str) -> Value {
+        self.json(
+            "POST",
+            "/v1/plugins/invocations",
+            token,
+            Some(json!({"connection_id":id,"tool_name":"tavily_search","arguments":{"query":"official company sources"},"idempotency_key":Uuid::new_v4()})),
         )
         .await
     }
@@ -670,6 +701,436 @@ async fn error_code(response: Response, status: StatusCode) -> String {
     let value: Value = serde_json::from_slice(&bytes).unwrap();
     value["error"]["code"].as_str().unwrap().to_owned()
 }
+
+#[tokio::test]
+#[ignore = "dedicated TEST_DATABASE_URL; loopback fixtures only"]
+async fn tavily_access_modes_preserve_legacy_connections_and_require_explicit_disconnect() {
+    let h = Harness::new().await;
+    let user = h.user("tavily_modes").await;
+    let empty = h
+        .json(
+            "GET",
+            "/v1/plugins/financial/providers?catalog_version=2",
+            &user,
+            None,
+        )
+        .await;
+    let entries = empty["providers"].as_array().unwrap();
+    let entry = entries.iter().find(|p| p["id"] == "tavily").unwrap();
+    assert_eq!(entry["auth_mode"], "none");
+    assert_eq!(
+        entry["access_modes"],
+        json!([{"id":"shared","auth_mode":"none"},{"id":"personal","auth_mode":"api_key"}])
+    );
+    assert!(entry["connection_access_mode"].is_null());
+    assert!(
+        entries
+            .iter()
+            .filter(|p| p["id"] != "tavily")
+            .all(|p| p.get("access_modes").is_none() && p.get("connection_access_mode").is_none())
+    );
+
+    let shared = h.connect(&user, "tavily").await;
+    let id = shared["id"].as_str().unwrap();
+    let path = format!("/v1/plugins/connections/{id}");
+    assert_eq!(shared["version"], "financial-profile-1");
+    assert_eq!(shared["status"], "ready");
+    assert_eq!(shared["auth_status"], "none");
+    assert_eq!(
+        h.connect_mode(&user, "shared").await["revision"],
+        shared["revision"]
+    );
+    let conflict = h
+        .request(
+            "POST",
+            "/v1/plugins/financial/connections",
+            Some(&user),
+            Some(json!({"provider_id":"tavily","access_mode":"personal"})),
+        )
+        .await;
+    assert_eq!(
+        error_code(conflict, StatusCode::CONFLICT).await,
+        "PLUGIN_ACCESS_MODE_CONFLICT"
+    );
+    assert_eq!(
+        h.json("GET", &path, &user, None).await["revision"],
+        shared["revision"]
+    );
+    let credential = h
+        .request(
+            "POST",
+            &format!("{path}/credential"),
+            Some(&user),
+            Some(json!({"secret":"fixture-must-not-save"})),
+        )
+        .await;
+    assert_eq!(
+        credential.status(),
+        StatusCode::BAD_REQUEST,
+        "shared mode never silently adopts a credential"
+    );
+
+    h.json("DELETE", &path, &user, None).await;
+    let legacy = h.connect(&user, "tavily").await;
+    assert_eq!(legacy["id"], id);
+    assert_eq!(legacy["version"], "financial-profile-1");
+    h.json("DELETE", &path, &user, None).await;
+    let personal = h.connect_mode(&user, "personal").await;
+    assert_eq!(personal["id"], id);
+    assert_eq!(personal["version"], "financial-profile-2-personal");
+    assert_eq!(personal["auth_status"], "required");
+    assert!(personal["title"].as_str().unwrap().contains("个人额度"));
+    assert!(!personal["description"].as_str().unwrap().contains("匿名"));
+    assert_eq!(
+        h.connect(&user, "tavily").await["revision"],
+        personal["revision"]
+    );
+    h.json("DELETE", &path, &user, None).await;
+    let recovered = h.connect(&user, "tavily").await;
+    assert_eq!(
+        recovered["version"], "financial-profile-2-personal",
+        "old requests preserve a revoked personal profile"
+    );
+    assert_eq!(recovered["auth_status"], "required");
+    let catalog = h
+        .json(
+            "GET",
+            "/v1/plugins/financial/providers?catalog_version=2",
+            &user,
+            None,
+        )
+        .await;
+    let entry = catalog["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "tavily")
+        .unwrap();
+    assert_eq!(
+        entry["auth_mode"], "none",
+        "old catalog auth enum remains compatible"
+    );
+    assert_eq!(entry["connection_access_mode"], "personal");
+    assert_eq!(entry["connection"]["id"], id);
+
+    for body in [
+        json!({"provider_id":"tavily","access_mode":null}),
+        json!({"provider_id":"tavily","access_mode":"other"}),
+        json!({"provider_id":"coingecko","access_mode":"shared"}),
+        json!({"provider_id":"ifind","access_mode":"personal"}),
+    ] {
+        assert_eq!(
+            h.request(
+                "POST",
+                "/v1/plugins/financial/connections",
+                Some(&user),
+                Some(body)
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        h.calls.load(Ordering::SeqCst),
+        0,
+        "connecting never executes a business query"
+    );
+    h.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "dedicated TEST_DATABASE_URL; loopback fixtures only"]
+async fn tavily_personal_credentials_are_owner_bound_and_never_fall_back_to_shared() {
+    let h = Harness::with_public_base(None).await;
+    let user = h.user("tavily_personal").await;
+    let other = h.user("tavily_other").await;
+    let personal = h.connect_mode(&user, "personal").await;
+    let id = personal["id"].as_str().unwrap();
+    let path = format!("/v1/plugins/connections/{id}");
+    let missing = h
+        .request("GET", &format!("{path}/tools"), Some(&user), None)
+        .await;
+    assert_eq!(
+        error_code(missing, StatusCode::CONFLICT).await,
+        "PLUGIN_AUTH_REQUIRED"
+    );
+    assert!(
+        h.headers.lock().unwrap().is_empty(),
+        "a missing personal key must not try anonymous access"
+    );
+    let foreign = h
+        .request(
+            "POST",
+            &format!("{path}/credential"),
+            Some(&other),
+            Some(json!({"secret":"fixture-other-key"})),
+        )
+        .await;
+    assert_eq!(
+        error_code(foreign, StatusCode::NOT_FOUND).await,
+        "PLUGIN_NOT_FOUND"
+    );
+    let ready = h.key(&user, id, "fixture-personal-key").await;
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["auth_status"], "authorized");
+    assert!(!ready.to_string().contains("fixture-personal-key"));
+    // A caller who missed the credential response can read/reconnect without
+    // resubmitting the secret or incrementing the saved authorization revision.
+    let recovered = h.connect(&user, "tavily").await;
+    assert_eq!(recovered["revision"], ready["revision"]);
+    assert_eq!(recovered["auth_status"], "authorized");
+    let encrypted: Vec<u8> = sqlx::query_scalar(
+        "SELECT encrypted_secret FROM plugin_financial_credentials WHERE connection_id=$1",
+    )
+    .bind(Uuid::parse_str(id).unwrap())
+    .fetch_one(&h.state.pool)
+    .await
+    .unwrap();
+    assert!(!String::from_utf8_lossy(&encrypted).contains("fixture-personal-key"));
+
+    let invocation = h.tavily_proposal(&user, id).await;
+    assert!(
+        invocation["connection_title"]
+            .as_str()
+            .unwrap()
+            .contains("个人额度")
+    );
+    let confirm = format!(
+        "/v1/plugins/invocations/{}/confirm",
+        invocation["id"].as_str().unwrap()
+    );
+    let first = h
+        .json("POST", &confirm, &user, Some(json!({"confirmed":true})))
+        .await;
+    assert_eq!(first["status"], "succeeded");
+    assert!(!first.to_string().contains("fixture-personal-key"));
+    h.json("POST", &confirm, &user, Some(json!({"confirmed":true})))
+        .await;
+    assert_eq!(h.calls.load(Ordering::SeqCst), 1);
+
+    h.bad.store(6, Ordering::SeqCst);
+    let rejected = h
+        .request("GET", &format!("{path}/tools"), Some(&user), None)
+        .await;
+    assert_eq!(
+        error_code(rejected, StatusCode::CONFLICT).await,
+        "PLUGIN_AUTH_REQUIRED"
+    );
+    let state = h.json("GET", &path, &user, None).await;
+    assert_eq!(state["auth_status"], "required");
+    assert_eq!(state["version"], "financial-profile-2-personal");
+    let before = h.headers.lock().unwrap().len();
+    let missing = h
+        .request("GET", &format!("{path}/tools"), Some(&user), None)
+        .await;
+    assert_eq!(
+        error_code(missing, StatusCode::CONFLICT).await,
+        "PLUGIN_AUTH_REQUIRED"
+    );
+    assert_eq!(
+        h.headers.lock().unwrap().len(),
+        before,
+        "failed personal credentials do not trigger anonymous retry"
+    );
+    assert!(
+        h.headers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p == "tavily")
+            .all(|(_, auth)| auth == "Bearer fixture-personal-key")
+    );
+    h.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "dedicated TEST_DATABASE_URL; loopback fixtures only"]
+async fn tavily_mode_switch_clears_credentials_and_preserves_unknown_invocation_recovery() {
+    let h = Harness::new().await;
+    let user = h.user("tavily_rotation").await;
+    let personal = h.connect_mode(&user, "personal").await;
+    let id = personal["id"].as_str().unwrap();
+    let path = format!("/v1/plugins/connections/{id}");
+    h.key(&user, id, "fixture-first-key").await;
+    let stale = h.tavily_proposal(&user, id).await;
+    let rotated = h.key(&user, id, "fixture-rotated-key").await;
+    let owner: Uuid = sqlx::query_scalar("SELECT user_id FROM plugin_connections WHERE id=$1")
+        .bind(Uuid::parse_str(id).unwrap())
+        .fetch_one(&h.state.pool)
+        .await
+        .unwrap();
+    let personal_catalog = xiaoq_backend::recommendations::catalog::load(&h.state, owner, "zh")
+        .await
+        .unwrap();
+    let personal_candidate = personal_catalog
+        .candidates
+        .iter()
+        .find(|candidate| candidate.provider_id.as_deref() == Some("tavily"))
+        .unwrap();
+    assert!(rotated["revision"].as_i64().unwrap() > stale["connection_revision"].as_i64().unwrap());
+    let old = h
+        .json(
+            "POST",
+            &format!(
+                "/v1/plugins/invocations/{}/confirm",
+                stale["id"].as_str().unwrap()
+            ),
+            &user,
+            Some(json!({"confirmed":true})),
+        )
+        .await;
+    assert_eq!(old["status"], "cancelled");
+    assert_eq!(h.calls.load(Ordering::SeqCst), 0);
+    let pending = h.tavily_proposal(&user, id).await;
+    let query = h.tavily_proposal(&user, id).await;
+    h.bad.store(1, Ordering::SeqCst);
+    let confirm = format!(
+        "/v1/plugins/invocations/{}/confirm",
+        query["id"].as_str().unwrap()
+    );
+    let unknown = h
+        .json("POST", &confirm, &user, Some(json!({"confirmed":true})))
+        .await;
+    assert_eq!(unknown["status"], "unknown");
+    assert_eq!(h.calls.load(Ordering::SeqCst), 1);
+    h.json("DELETE", &path, &user, None).await;
+    h.bad.store(0, Ordering::SeqCst);
+    let shared = h.connect_mode(&user, "shared").await;
+    assert_eq!(shared["id"], id);
+    assert_eq!(shared["version"], "financial-profile-1");
+    assert_eq!(shared["auth_status"], "none");
+    assert!(shared["revision"].as_i64().unwrap() > rotated["revision"].as_i64().unwrap());
+    let shared_catalog = xiaoq_backend::recommendations::catalog::load(&h.state, owner, "zh")
+        .await
+        .unwrap();
+    let shared_candidate = shared_catalog
+        .candidates
+        .iter()
+        .find(|candidate| candidate.provider_id.as_deref() == Some("tavily"))
+        .unwrap();
+    assert_ne!(personal_catalog.version, shared_catalog.version);
+    assert_ne!(
+        personal_candidate.capability_version,
+        shared_candidate.capability_version
+    );
+    assert_eq!(
+        shared_candidate.connection_revision,
+        shared["revision"].as_i64()
+    );
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM plugin_financial_credentials WHERE connection_id=$1",
+    )
+    .bind(Uuid::parse_str(id).unwrap())
+    .fetch_one(&h.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 0);
+    let cleaned: (Option<Value>,Option<Value>,Option<Value>,Vec<String>) = sqlx::query_as("SELECT pending_tools,pending_candidate,auth_challenge,requested_scopes FROM plugin_connections WHERE id=$1")
+        .bind(Uuid::parse_str(id).unwrap()).fetch_one(&h.state.pool).await.unwrap();
+    assert_eq!(cleaned, (None, None, None, vec![]));
+    let cancelled = h
+        .json(
+            "GET",
+            &format!(
+                "/v1/plugins/invocations/{}",
+                pending["id"].as_str().unwrap()
+            ),
+            &user,
+            None,
+        )
+        .await;
+    assert_eq!(cancelled["status"], "cancelled");
+    let recovered = h
+        .json("POST", &confirm, &user, Some(json!({"confirmed":true})))
+        .await;
+    assert_eq!(recovered["id"], unknown["id"]);
+    assert_eq!(recovered["status"], "unknown");
+    assert!(
+        recovered["connection_title"]
+            .as_str()
+            .unwrap()
+            .contains("个人额度")
+    );
+    assert_eq!(
+        h.calls.load(Ordering::SeqCst),
+        1,
+        "mode changes never replay an uncertain query"
+    );
+    h.json("DELETE", &path, &user, None).await;
+    let personal_again = h.connect_mode(&user, "personal").await;
+    assert_eq!(personal_again["auth_status"], "required");
+    let snapshots: (Option<Value>, Option<String>) = sqlx::query_as(
+        "SELECT tools_snapshot,schema_fingerprint FROM plugin_connections WHERE id=$1",
+    )
+    .bind(Uuid::parse_str(id).unwrap())
+    .fetch_one(&h.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(snapshots, (None, None));
+    h.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "dedicated TEST_DATABASE_URL; loopback fixtures only"]
+async fn concurrent_tavily_access_modes_cannot_silently_replace_each_other() {
+    let h = Harness::new().await;
+    let user = h.user("tavily_concurrent").await;
+    let initial = h.connect(&user, "tavily").await;
+    let id = initial["id"].as_str().unwrap();
+    h.json(
+        "DELETE",
+        &format!("/v1/plugins/connections/{id}"),
+        &user,
+        None,
+    )
+    .await;
+    let shared = h.request(
+        "POST",
+        "/v1/plugins/financial/connections",
+        Some(&user),
+        Some(json!({"provider_id":"tavily","access_mode":"shared"})),
+    );
+    let personal = h.request(
+        "POST",
+        "/v1/plugins/financial/connections",
+        Some(&user),
+        Some(json!({"provider_id":"tavily","access_mode":"personal"})),
+    );
+    let (shared, personal) = tokio::join!(shared, personal);
+    assert_eq!(
+        [shared.status(), personal.status()]
+            .iter()
+            .filter(|status| status.is_success())
+            .count(),
+        1
+    );
+    let (winner, rejected) = if shared.status().is_success() {
+        (shared, personal)
+    } else {
+        (personal, shared)
+    };
+    assert_eq!(
+        error_code(rejected, StatusCode::CONFLICT).await,
+        "PLUGIN_ACCESS_MODE_CONFLICT"
+    );
+    let winner: Value =
+        serde_json::from_slice(&to_bytes(winner.into_body(), 1_000_000).await.unwrap()).unwrap();
+    assert_eq!(winner["id"], id);
+    let preserved = h.connect(&user, "tavily").await;
+    assert_eq!(preserved["version"], winner["version"]);
+    assert_eq!(preserved["revision"], winner["revision"]);
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM plugin_connections WHERE financial_provider_id='tavily'",
+    )
+    .fetch_one(&h.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(h.calls.load(Ordering::SeqCst), 0);
+    h.finish().await;
+}
+
 #[tokio::test]
 #[ignore = "dedicated TEST_DATABASE_URL; loopback fixtures only"]
 async fn research_catalog_is_opt_in_and_old_connection_identity_remains_decodable() {

@@ -26,14 +26,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export type PageId =
-  | "video"
-  | "creators"
   | "chat"
   | "history"
   | "plugins"
   | "market-data"
   | "plugin-workbench"
-  | "installments"
   | "insurance"
   | "finance"
   | "wallet"

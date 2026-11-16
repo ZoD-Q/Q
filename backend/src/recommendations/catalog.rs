@@ -44,15 +44,18 @@ fn build(
         .map(|candidate| (candidate.id.clone(), candidate))
         .collect();
     for connection in connections.iter().filter(|item| item.user_id == user) {
+        let financial_profile = connection
+            .financial_provider_id
+            .as_ref()
+            .map(|_| financial::binding(connection))
+            .transpose()?;
         let fixed_id = if let Some(service) = connection.bank_service_id()? {
             Some(format!(
                 "bank:{}",
                 service.trim_start_matches("q.bank-demo.")
             ))
-        } else if connection.financial_provider_id.is_some() {
-            Some(format!("financial:{}", financial::binding(connection)?.id))
         } else {
-            None
+            financial_profile.map(|profile| format!("financial:{}", profile.id))
         };
         let access = access(connection, plugins_enabled);
         if let Some(id) = fixed_id {
@@ -61,6 +64,16 @@ fn build(
                 candidate.connection_id = Some(connection.id);
                 candidate.connection_revision = Some(connection.revision);
                 candidate.capability_version = connection_version(connection)?;
+                if let Some(profile) = financial_profile
+                    && profile.id == "tavily"
+                    && profile.auth == "api_key"
+                {
+                    // Only this validated, server-owned profile supplies the
+                    // access-mode copy, never arbitrary connection metadata.
+                    candidate.title = copy(locale, profile.name, "Tavily · Personal quota").into();
+                    candidate.description = copy(locale, profile.description,
+                        "Search public web pages and extract source text using your personal Tavily API key and account quota. Configure the key in Q with personal-access settings; no crawling or automatic purchases.").into();
+                }
             }
             continue;
         }

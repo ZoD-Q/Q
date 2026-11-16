@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Linking, View } from 'react-native';
 import { randomUUID } from 'expo-crypto';
 import { ArrowLeft, Plus, RefreshCw } from 'lucide-react-native';
@@ -130,7 +130,7 @@ function ToolForm({ tool, busy, onPrepare }: { tool: PluginTool; busy: boolean; 
   </View>;
 }
 
-function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, initialIntent, onIntentHandled, initialConnectionId }: { token: string; onSelect: (connection: PluginConnection) => void; onOpenWorkbench: () => void; onOpenFinancial?: () => void; initialConnectionId?: string | null } & LinkIntent) {
+function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, initialIntent, onIntentHandled, initialConnectionId }: { token: string; onSelect: (connection: PluginConnection) => void; onOpenWorkbench: () => void; onOpenFinancial?: (providerId?: string) => void; initialConnectionId?: string | null } & LinkIntent) {
   const { text, colors } = useDesign();
   const [connections, setConnections] = useState<PluginConnection[]>([]);
   const [selected, setSelected] = useState<PluginConnection | null>(null);
@@ -185,12 +185,12 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
   const open = async (connection: PluginConnection) => {
     if (connection.research_provider_id === 'fred') {
       if (!onOpenFinancial) throw new WorkbenchError('PLUGIN_EPHEMERAL_REQUIRED');
-      onOpenFinancial(); return;
+      onOpenFinancial('fred'); return;
     }
     setAdvanced(false); setSelected(connection); setTools([]); setTool(null); setActiveInvocation(null); setInvocations([]); setResources([]); setPrompts([]); setPromptResult(null); setOauth(null);
   };
   const openAdvanced = async () => {
-    if (!selected) return;
+    if (!selected || selected.research_provider_id === 'fred') return;
     setAdvanced(true);
     const history = await call(`/v1/plugins/invocations?connection_id=${selected.id}`, decodeList(decodeInvocation)); setInvocations(history);
     if (selected.status === 'ready') setTools(await call(`/v1/plugins/connections/${selected.id}/tools`, decodeList(decodeTool)));
@@ -210,7 +210,9 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
       return { id: value.attempt_id, url: publicHttps(value.authorization_url)! };
     }, 'POST'); setOauth(value);
   };
-  const keyManagedFinancial = selected?.financial_provider_id === 'ifind' || selected?.financial_provider_id === 'jin10';
+  const managedProvider = selected?.financial_provider_id ?? selected?.research_provider_id;
+  const isFred = managedProvider === 'fred';
+  const keyManagedFinancial = selected?.research_provider_id === 'tavily' || selected?.financial_provider_id === 'ifind' || selected?.financial_provider_id === 'jin10';
   const pendingCandidate = record(selected?.pending_update_details) && record(selected.pending_update_details.candidate) ? selected.pending_update_details.candidate : null;
   return <Page title={selected ? selected.title || selected.name : text('我的插件', 'My plugins')}
     action={selected ? <Action kind="ghost" icon={ArrowLeft} label={text('返回', 'Back')} disabled={busy} onPress={() => { setSelected(null); closeToolSheet(); }} /> : <Action icon={Plus} label={text('添加插件', 'Add plugin')} disabled={busy} onPress={() => { setKind('auto'); setAdvancedEntry(false); setAdding(true); setDiscovery(null); setError(null); }} />}>
@@ -226,34 +228,35 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
       {status && !status.available && <Type muted>{text('服务端尚未启用远程 MCP 连接；已添加的内置银行插件仍可使用。', 'Remote MCP connections are not enabled; added built-in bank plugins remain available.')}</Type>}
     </> : <>
       {!bankIdForPlugin(selected) && selected.owner_name && <Type size={13} muted>{providerLabel(selected.owner_name, text)}</Type>}
-      <SourceSummary cardUrl={selected.card_url} endpointUrl={selected.endpoint_url} bank={!!bankIdForPlugin(selected)} financial={!!selected.financial_provider_id} />
+      <SourceSummary cardUrl={selected.card_url} endpointUrl={selected.endpoint_url} bank={!!bankIdForPlugin(selected)} financial={!!managedProvider} />
       {selected.status !== 'ready' && <Type size={13} muted>{connectionStatusLabel(selected.status, text)}</Type>}
       {selected.last_error_code && <Type color={colors.danger}>{pluginError(selected.last_error_code, text)}</Type>}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        <Action label={text('在聊天中使用', 'Use in chat')} disabled={busy || selected.status !== 'ready'} onPress={() => onSelect(selected)} />
-        {!keyManagedFinancial && !bankIdForPlugin(selected) && (selected.status === 'auth_required' || selected.auth_status === 'required') && <Action kind="secondary" label={text('授权插件', 'Authorize plugin')} disabled={busy || !status?.oauth_configured} onPress={() => { void run(authorize); }} />}
+        {!isFred && <Action label={text('在聊天中使用', 'Use in chat')} disabled={busy || selected.status !== 'ready' || selected.pending_update} onPress={() => { if (!selected.pending_update) onSelect(selected); }} />}
+        {!isFred && !keyManagedFinancial && !bankIdForPlugin(selected) && (selected.status === 'auth_required' || selected.auth_status === 'required') && <Action kind="secondary" label={text('授权插件', 'Authorize plugin')} disabled={busy || !status?.oauth_configured} onPress={() => { void run(authorize); }} />}
       </View>
-      {selected.financial_provider_id && onOpenFinancial && <Action kind="secondary" label={text('管理金融插件', 'Manage financial plugin')} disabled={busy} onPress={onOpenFinancial} />}
+      {managedProvider && onOpenFinancial && <Action kind="secondary" label={isFred ? text('返回 FRED 临时研究', 'Back to FRED temporary research') : text('管理金融插件', 'Manage financial plugin')} disabled={busy} onPress={() => onOpenFinancial(managedProvider)} />}
+      {isFred && <Type size={13} muted>{text('这里只核对连接更新。FRED 查询与结果仍仅在临时研究页使用。', 'Only connection updates are reviewed here. FRED queries and results stay in temporary research.')}</Type>}
       {oauth && <View style={{ gap: 10 }}><Type selectable size={12}>{new URL(oauth.url).origin}</Type><Action label={text('在浏览器中授权', 'Authorize in browser')} onPress={() => { void Linking.openURL(oauth.url).catch(failure => setError(failure)); }} /><Action kind="ghost" label={text('我已授权，检查结果', 'Check authorization result')} disabled={busy} onPress={() => { void run(async () => { const result = await call(`/v1/plugins/oauth/attempts/${oauth.id}`, value => { if (!record(value) || typeof value.status !== 'string') throw new WorkbenchError('INVALID_RESPONSE'); return value; }); if (result.status !== 'succeeded') throw new WorkbenchError(typeof result.error_code === 'string' ? result.error_code : 'PLUGIN_AUTH_PENDING'); const connection = await call(path(), decodePluginConnection); updateConnection(connection); await open(connection); }); }} /></View>}
       {selected.pending_update && <View style={{ gap: 10 }}>
         <Type weight="500">{text('服务有更新', 'Service update available')}</Type>
-        <Type size={13} muted>{text('请核对服务来源；完整变更可在高级设置中查看。', 'Review the service source. Full changes are available in Advanced settings.')}</Type>
+        <Type size={13} muted>{isFred ? text('请核对下方服务来源，再确认更新。查询仍需回到临时研究页。', 'Review the service source below before accepting. Queries remain in temporary research.') : text('请核对服务来源；完整变更可在高级设置中查看。', 'Review the service source. Full changes are available in Advanced settings.')}</Type>
         {pendingCandidate && <>
           <Type>{typeof pendingCandidate.title === 'string' ? pendingCandidate.title : selected.title}</Type>
-          {!selected.financial_provider_id && <Type size={12} muted>{ownerLabel(normalizeOwnerName(pendingCandidate.owner_name), text)}</Type>}
-          {typeof pendingCandidate.card_url === 'string' && typeof pendingCandidate.endpoint_url === 'string' && <SourceSummary cardUrl={pendingCandidate.card_url} endpointUrl={pendingCandidate.endpoint_url} financial={!!selected.financial_provider_id} />}
+          {!managedProvider && <Type size={12} muted>{ownerLabel(normalizeOwnerName(pendingCandidate.owner_name), text)}</Type>}
+          {typeof pendingCandidate.card_url === 'string' && typeof pendingCandidate.endpoint_url === 'string' && <SourceSummary cardUrl={pendingCandidate.card_url} endpointUrl={pendingCandidate.endpoint_url} financial={!!managedProvider} />}
         </>}
         <Action label={text('确认此更新', 'Accept this update')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/accept-update'), decodePluginConnection, 'POST', { revision: selected.revision }); updateConnection(value); await open(value); }); }} />
       </View>}
-      <Action kind="ghost" label={advanced ? text('收起高级设置', 'Hide advanced settings') : text('高级设置', 'Advanced settings')} disabled={busy} style={{ alignSelf: 'flex-start', minHeight: 48 }} onPress={() => { if (advanced) { setAdvanced(false); closeToolSheet(); } else { void run(openAdvanced); } }} />
-      {advanced && <View style={{ gap: 14 }}>
+      {!isFred && <Action kind="ghost" label={advanced ? text('收起高级设置', 'Hide advanced settings') : text('高级设置', 'Advanced settings')} disabled={busy} style={{ alignSelf: 'flex-start', minHeight: 48 }} onPress={() => { if (advanced) { setAdvanced(false); closeToolSheet(); } else { void run(openAdvanced); } }} />}
+      {advanced && !isFred && <View style={{ gap: 14 }}>
         {!!selected.description && <Type size={13}>{selected.description}</Type>}
-        <Type size={12} muted>{selected.financial_provider_id ? text('小Q预配置的金融服务连接', 'Financial service connection configured by Q') : ownerLabel(selected.owner_name, text)}</Type>
+        <Type size={12} muted>{managedProvider ? text('小Q预配置的金融服务连接', 'Financial service connection configured by Q') : ownerLabel(selected.owner_name, text)}</Type>
         <Type size={12} muted>{connectionStatusLabel(selected.status, text)} · {authorizationLabel(selected.auth_status, text)}</Type>
         <Type selectable size={12} muted>{selected.name} · {selected.version}</Type>
-        <Type selectable size={12} muted>{selected.financial_provider_id ? text('服务资料：', 'Service details: ') : text('说明文件：', 'Server Card: ')}{selected.card_url}</Type>
+        <Type selectable size={12} muted>{managedProvider ? text('服务资料：', 'Service details: ') : text('说明文件：', 'Server Card: ')}{selected.card_url}</Type>
         <Type selectable size={12} muted>{text('MCP 接收地址：', 'MCP endpoint: ')}{selected.endpoint_url}</Type>
-        <Type size={12} muted>{selected.financial_provider_id ? text('接入资料由小Q目录维护，实际能力和授权状态由服务返回。', 'Q maintains this connection profile; capabilities and authorization status come from the service.') : text('所有者是发布者自行填写的说明，不代表小Q认证，也不改变当前账号权限。', 'The owner is a publisher declaration, not Q verification, and does not change account permissions.')}</Type>
+        <Type size={12} muted>{managedProvider ? text('接入资料由小Q目录维护，实际能力和授权状态由服务返回。', 'Q maintains this connection profile; capabilities and authorization status come from the service.') : text('所有者是发布者自行填写的说明，不代表小Q认证，也不改变当前账号权限。', 'The owner is a publisher declaration, not Q verification, and does not change account permissions.')}</Type>
         {!bankIdForPlugin(selected) && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           <Action kind="secondary" label={text('检查更新', 'Check updates')} disabled={busy} onPress={() => { void run(async () => { const value = await call(path('/refresh'), decodePluginConnection, 'POST'); updateConnection(value); await open(value); }); }} />
           {!keyManagedFinancial && selected.status !== 'auth_required' && selected.auth_status !== 'required' && <Action kind="ghost" label={text('授权插件', 'Authorize plugin')} disabled={busy || !status?.oauth_configured} onPress={() => { void run(authorize); }} />}
@@ -312,6 +315,15 @@ function ConnectedPlugins({ token, onSelect, onOpenWorkbench, onOpenFinancial, i
 export function PluginHostPage({ chat, onOpenWorkbench, onOpenMarketData, onSelect, initialIntent, onIntentHandled, active = true, recommendationTarget, onReturnToRecommendation }: { active?: boolean; chat: ChatController; onOpenWorkbench: () => void; onOpenMarketData?: () => void; onSelect: (connection: PluginConnection) => void; recommendationTarget?: RecommendationCandidate | null; onReturnToRecommendation?: () => void } & LinkIntent) {
   const { text, colors } = useDesign();
   const [tab, setTab] = useState(recommendationTarget?.provider_id ? 'finance' : recommendationTarget?.bank_id ? 'banks' : 'connected');
+  const [connectionTarget, setConnectionTarget] = useState<{ owner: string; id: string } | null>(null);
+  const [providerTarget, setProviderTarget] = useState<{ owner: string; id: string } | null>(null);
+  const token = chat.session?.token;
+  const navigationOwner = useRef({ token, active });
+  useLayoutEffect(() => { navigationOwner.current = { token, active }; }, [token, active]);
+  const connectionId = connectionTarget && connectionTarget.owner === token ? connectionTarget.id : recommendationTarget?.connection_id;
+  const providerId = providerTarget && providerTarget.owner === token ? providerTarget.id : recommendationTarget?.provider_id;
+  const reviewConnection = (id: string) => { if (!token || !navigationOwner.current.active || navigationOwner.current.token !== token) return; setConnectionTarget({ owner: token, id }); setTab('connected'); };
+  const openFinancial = (id?: string) => { if (!token || !navigationOwner.current.active || navigationOwner.current.token !== token) return; setProviderTarget(id ? { owner: token, id } : null); setTab('finance'); };
   const [authModalPending, authModalEvent] = useReducer(pluginAuthModalReducer, chat.authOpen);
   const connectionPageReady = canPresentPluginConnectionPage({ platform: process.env.EXPO_OS, authenticated: !!chat.session, authOpen: chat.authOpen, authModalPending });
   const openAuth = () => { authModalEvent('requested'); chat.openAuth(); };
@@ -319,7 +331,7 @@ export function PluginHostPage({ chat, onOpenWorkbench, onOpenMarketData, onSele
     {onReturnToRecommendation ? <Action kind="ghost" icon={ArrowLeft} label={text('返回并继续原问题', 'Back to original request')} onPress={onReturnToRecommendation} style={{ alignSelf: 'flex-start', minHeight: 48 }} /> : null}
     {onOpenMarketData ? <Row title={text('金融数据工具', 'Financial data tools')} subtitle={text('查询公开币种数据、公司研究资料与财经新闻，核对来源与时间。', 'Explore public crypto data, company research and financial news with sources and timestamps.')} onPress={onOpenMarketData} /> : null}
     <Tabs items={[{ id: 'connected', label: text('我的连接', 'My connections') }, { id: 'banks', label: text('银行插件', 'Bank plugins') }, { id: 'finance', label: text('金融插件', 'Financial plugins') }, { id: 'catalog', label: text('目录参考', 'Catalog reference') }]} value={tab} onChange={setTab} /></View>
-    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? tab === 'banks' ? <BankPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} initialBankId={recommendationTarget?.bank_id} /> : tab === 'finance' ? <FinancialPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} active={active} initialProviderId={recommendationTarget?.provider_id} /> : <ConnectedPlugins key={chat.session.token} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} onOpenFinancial={() => setTab('finance')} initialIntent={initialIntent} onIntentHandled={onIntentHandled} initialConnectionId={recommendationTarget?.connection_id} />
+    {tab === 'catalog' ? <PluginsPage onOpenWorkbench={onOpenWorkbench} /> : chat.session && connectionPageReady ? tab === 'banks' ? <BankPluginCatalog key={chat.session.token} token={chat.session.token} onSelect={onSelect} initialBankId={recommendationTarget?.bank_id} /> : tab === 'finance' ? <FinancialPluginCatalog key={`${chat.session.token}:${providerId ?? 'all'}`} token={chat.session.token} onSelect={onSelect} active={active} initialProviderId={providerId} onReviewConnection={reviewConnection} /> : <ConnectedPlugins key={`${chat.session.token}:${connectionId ?? 'all'}`} token={chat.session.token} onSelect={onSelect} onOpenWorkbench={onOpenWorkbench} onOpenFinancial={openFinancial} initialIntent={initialIntent} onIntentHandled={onIntentHandled} initialConnectionId={connectionId} />
       : chat.session ? <Page title={text('我的插件', 'My plugins')}><ActivityIndicator color={colors.accent} accessibilityLabel={text('正在完成登录', 'Finishing sign-in')} /></Page>
         : <Page title={text('我的插件', 'My plugins')}><Type muted>{initialIntent ? text('链接已保留。登录 Q 后继续查看插件信息，再确认添加。', 'Your link is kept. Sign in to Q to review the plugin and confirm addition.') : text('登录 Q 后添加插件，连接与授权保存在你的账户下。', 'Sign in to Q to save plugin connections and authorizations to your account.')}</Type><Action label={text('登录 / 注册', 'Sign in / register')} onPress={openAuth} disabled={chat.authBusy} /></Page>}
     <ChatAuthSheet controller={chat} onShow={() => authModalEvent('shown')} onDismiss={() => authModalEvent('dismissed')}

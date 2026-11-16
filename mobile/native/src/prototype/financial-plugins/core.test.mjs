@@ -43,6 +43,27 @@ test('OAuth browser targets require the selected provider origin and required fl
   assert.throws(()=>decodeAuthorizationAttempt({id,connection_id:id,status:'pending'},a),e=>e.code==='PLUGIN_AUTH_PENDING');
 });
 test('safe errors never render an arbitrary upstream message or key',()=>{
-  assert.match(financialError(new WorkbenchError('REQUEST_FAILED',404),(_,en)=>en),/does not provide/);
+  assert.match(financialError(new WorkbenchError('REQUEST_FAILED',404),(_,en)=>en,'catalog'),/does not provide/);
   assert.doesNotMatch(financialError(new Error('sensitive key abc'),(_,en)=>en),/sensitive|abc/);
+});
+
+
+test('connection and authorization 404s do not imply an unsupported server', () => {
+ for(const locale of ['zh','en']){
+  const translate=(zh,en)=>locale==='zh'?zh:en;
+  for(const scope of ['connection','catalog']) assert.match(financialError(new WorkbenchError('PLUGIN_NOT_FOUND',404),translate,scope),locale==='zh'?/连接不存在或已断开/:/connection no longer exists/);
+  assert.match(financialError(new WorkbenchError('NOT_FOUND',404),translate),locale==='zh'?/连接或授权记录/:/connection or authorization record/);
+  assert.match(financialError(new WorkbenchError('NOT_FOUND',404),translate,'catalog'),locale==='zh'?/服务器尚未提供/:/server does not provide/);
+ }
+});
+test('Tavily access extensions are explicit, provider bound and never accept anonymous personal readiness', () => {
+ const input=catalog(), tavily=input.providers.find(p=>p.id==='tavily');
+ tavily.access_modes=[{id:'shared',auth_mode:'none'},{id:'personal',auth_mode:'api_key'}];tavily.connection_access_mode='personal';
+ assert.equal(decodeFinancialCatalog(input).providers.find(p=>p.id==='tavily').connection_access_mode,'personal');
+ for(const mutate of [p=>delete p.access_modes,p=>delete p.connection_access_mode,p=>p.access_modes[1].auth_mode='none',p=>p.access_modes.push(p.access_modes[0]),p=>p.connection_access_mode='other',p=>p.connection.auth_status='anonymous',p=>p.connection.status='ready',p=>p.connection=null]){
+  const bad=structuredClone(input);mutate(bad.providers.find(p=>p.id==='tavily'));assert.throws(()=>decodeFinancialCatalog(bad));
+ }
+ const foreign=structuredClone(input);Object.assign(foreign.providers[0],{access_modes:tavily.access_modes,connection_access_mode:'personal'});assert.throws(()=>decodeFinancialCatalog(foreign));
+ tavily.connection=null;tavily.connection_access_mode=null;assert.equal(decodeFinancialCatalog(input).providers.find(p=>p.id==='tavily').connection,null);
+ const old=decodeFinancialCatalog(catalog()).providers.find(p=>p.id==='tavily');assert.equal(old.access_modes,undefined);assert.equal(old.auth_mode,'none');
 });

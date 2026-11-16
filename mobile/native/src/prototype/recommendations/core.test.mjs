@@ -70,6 +70,17 @@ test('completed public query types suppress recommendations even without navigat
   for (const data of [{ success: false }, { pending: true }]) assert.equal(core.completedRecommendationModule({ name: 'market_query' }, { ...success, data }), null);
 });
 
+test('cards from an older backend cannot reopen retired modules', () => {
+  const retired = ['installments', 'video', 'creators'].map(module => ({ ...candidate, id: `module:${module}`, module }));
+  assert.deepEqual(core.visibleCandidates({ ...record, candidates: [...retired, candidate] }), [candidate]);
+  for (const item of retired) {
+    assert.equal(core.recommendationNavigation(item, 'public question'), null);
+    assert.equal(core.isRetiredRecommendationId(item.id), true);
+  }
+  assert.equal(core.isRetiredRecommendationId('plugin:video'), false);
+  assert.equal(core.recommendationNavigation({ ...candidate, id: 'module:keys', module: 'keys' }, '').module, 'keys');
+});
+
 test('bounded recovery supersedes a source turn without treating saved cards as permission', () => {
   const skipped = { ...record, id: other, status: 'skipped', candidates: [] };
   assert.deepEqual(Object.values(core.mergeRecommendations({ [id]: record }, [skipped])), [skipped]);

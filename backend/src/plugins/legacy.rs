@@ -52,7 +52,7 @@ impl<'a> Session<'a> {
     }
     fn headers(&self) -> McpResult<HeaderMap> {
         let mut h = HeaderMap::new();
-        if self.endpoint == "https://mcp.tavily.com/mcp/" {
+        if self.endpoint == "https://mcp.tavily.com/mcp/" && self.token.is_none() {
             h.insert("x-tavily-access-mode", HeaderValue::from_static("keyless"));
         }
         h.insert(
@@ -263,6 +263,37 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    #[test]
+    fn tavily_keyless_header_is_exclusive_to_anonymous_official_endpoint() {
+        let http = SafeHttp::default();
+        let endpoint = "https://mcp.tavily.com/mcp/";
+        let anonymous = Session::new(&http, endpoint, None, "2025-11-25");
+        assert_eq!(
+            anonymous.headers().unwrap()["x-tavily-access-mode"],
+            "keyless"
+        );
+        let token = RemoteBearer::new("fixture-private-key".into(), endpoint).unwrap();
+        let personal = Session::new(&http, endpoint, Some(&token), "2025-11-25");
+        assert!(
+            !personal
+                .headers()
+                .unwrap()
+                .contains_key("x-tavily-access-mode")
+        );
+        let external = Session::new(&http, "https://other.example/mcp/", None, "2025-11-25");
+        assert!(
+            !external
+                .headers()
+                .unwrap()
+                .contains_key("x-tavily-access-mode")
+        );
+        assert!(
+            token
+                .header_for(&reqwest::Url::parse("https://other.example/mcp/").unwrap())
+                .is_err()
+        );
+    }
+
     #[tokio::test]
     async fn observed_coingecko_schemas_and_sse_complete_without_waiting_for_eof() {
         // Minimal schema/envelope observed from the official public server; no vendor descriptions or live session IDs.

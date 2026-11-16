@@ -37,3 +37,8 @@ test('unsupported form or invalid required input cannot send a query',async()=>{
  const h=harness({override:async c=>c.path.endsWith('/tools')?{...catalog,items:[{...tool,inputSchema:{type:'object',properties:{nested:{type:'object'}},required:['nested']}}]}:undefined});h.render();h.press('Load query options');await h.flush();assert.equal(h.render().find(n=>n.props.label==='Query FRED').props.disabled,true);assert.equal(h.calls.length,1);
  const simple=harness();simple.render();simple.press('Load query options');await simple.flush();simple.press('Query FRED');assert.equal(simple.calls.length,1);assert.match(simple.text(),/Check required fields/);
 });
+
+
+test('deleted FRED connection clears temporary inputs and offers connection recovery',async()=>{
+ const h=harness({override:async c=>{if(c.path.endsWith('/query'))throw new workbench.WorkbenchError('PLUGIN_NOT_FOUND',404);}});await query(h);assert.match(h.text(),/connection no longer exists/);assert.doesNotMatch(h.text(),/server does not provide|PRIVATE TEMPORARY RESULT/);assert.equal(h.render().some(n=>n.type==='Input'),false);h.press('Back to FRED');assert.equal(h.backs,1);
+});

@@ -158,7 +158,7 @@ export function FinanceAdSettings({ visible, onClose }: { visible: boolean; onCl
             <Type size={15} weight="600">{text("本机会话计数", "This device session")}</Type>
           </View>
           <Type size={13} muted>{text("展示按每次打开服务页计数，重复渲染不重复计数；点击仅指打开演示详情，不代表申请、成交或收益。计数只在内存中，不上传，重启后清零。", "A service page visit counts once; re-renders do not add views. Clicks only mean opening demo details, never applications, transactions or earnings. Counts stay in memory, are not uploaded, and reset on restart.")}</Type>
-          {FINANCE_AD_CAMPAIGNS.map(campaign => (
+          {FINANCE_AD_CAMPAIGNS.filter(campaign => campaign.category !== "installments").map(campaign => (
             <View key={campaign.id} style={{ paddingVertical: 14, borderTopWidth: 1, borderColor: colors.line, gap: 6 }}>
               <Type size={14} weight="500">{campaign.title[locale]}</Type>
               <Type size={13} muted selectable style={{ fontVariant: ["tabular-nums"] }}>

@@ -45,7 +45,7 @@ test('bill records and mixed knowledge requests cannot fall through to cloud rou
   }
 });
 test('knowledge still has actual sources while market research is available to its own handler', () => {
-  for (const prompt of ['什么是实际年利率 APR？', '什么是复利？', '储蓄知识是什么？', 'What is a savings goal?', '提前还款是什么？']) {
+  for (const prompt of ['什么是实际年利率 APR？', '什么是复利？', '储蓄知识是什么？', 'What is a savings goal?', '提前还款是什么？', '分期的 APR 是什么？', 'What is APR for installment borrowing?']) {
     const knowledge = respondToFinanceText(prompt, 'zh');
     assert.equal(knowledge.result.kind, 'knowledge');
     assert.ok(knowledge.result.entry.sources[0].url.startsWith('https://'));
@@ -99,8 +99,23 @@ test('company financial performance and arbitrary tickers are not reduced to a c
   }
 });
 
-test('application capability questions reach the assistant without weakening private record isolation', () => {
-  for (const question of ['小Q分期模块能做什么', '介绍小Q的储蓄功能', 'Q的保险模块', 'What can the Q installments module do?', 'Open the Q insurance module']) {
+test('requests for the removed installment screen get a local retirement explanation', () => {
+  for (const question of ['小Q分期模块能做什么', '打开小Q的分期页面', '打开分期', '分期入口在哪？']) {
+    const turn = respondToFinanceText(question, 'zh');
+    assert.equal(turn.prompt, question);
+    assert.equal(turn.result, undefined);
+    assert.match(turn.answer, /小Q已移除分期服务入口/);
+  }
+  for (const question of ['What can the Q installments module do?', 'Open the Q installments page', 'Open Installments']) {
+    const turn = respondToFinanceText(question, 'en');
+    assert.equal(turn.prompt, question);
+    assert.equal(turn.result, undefined);
+    assert.match(turn.answer, /Q has removed its Installments page/);
+  }
+});
+
+test('other application capability questions retain their routing and private details stay local', () => {
+  for (const question of ['介绍小Q的储蓄功能', 'Q的保险模块', 'Open the Q insurance module']) {
     assert.equal(respondToFinanceText(question, 'zh'), null, question);
   }
   for (const privateInput of ['小Q分期模块能做什么\n账单 CNY\n收入 工资 12000', '介绍小Q功能，我的账单在这里', 'What can Q do with my bills?', '小Q帮我分12期，本金8000', '小Q模块可以帮我看账单，收入工资一万', '小Q分期模块，我本金八千想算一下', '小Q储蓄模块，我现在有十万，目标二十万，帮我算多久', '小Q分期模块，八千分十二期', 'What can Q savings do for my goal of eight thousand?', 'What can Q installments do for me, repay seven hundred', '小Q分期模块能做什么，我欠银行一笔钱']) {
